@@ -105,6 +105,30 @@ jobs:
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}" "ndk;${ANDROID_NDK_API19_VERSION}"
           echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
+      - name: 准备 Linux AAB 工具并写入 GUI 资源
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          curl -fsSL --retry 5 \
+            "https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar" \
+            -o tools/bundletool.jar
+          aapt2="$(find "${ANDROID_HOME}/build-tools" -type f -name aapt2 -perm -111 | sort -V | tail -n 1)"
+          test -n "$aapt2" && test -x "$aapt2"
+          cp "$aapt2" tools/aapt2
+          chmod +x tools/aapt2
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("apps/shield-gui/src-tauri/tauri.conf.json")
+          config = json.loads(path.read_text(encoding="utf-8"))
+          resources = config["bundle"]["resources"]
+          resources["../../../tools/bundletool.jar"] = "tools/bundletool.jar"
+          resources["../../../tools/aapt2"] = "tools/aapt2"
+          path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+
       - name: 配置 Rust target 与构建工具
         run: |
           rustup target add \
@@ -248,6 +272,16 @@ jobs:
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}" "ndk;${ANDROID_NDK_API19_VERSION}"
           echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
+      - name: 下载 macOS AAB bundletool
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          curl -fsSL --retry 5 \
+            "https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar" \
+            -o tools/bundletool.jar
+          echo "BUNDLETOOL_JAR=$GITHUB_WORKSPACE/tools/bundletool.jar" >> "$GITHUB_ENV"
+
       - name: 配置 Rust target 与构建工具
         run: |
           rustup target add \
@@ -340,6 +374,23 @@ jobs:
           1..20 | ForEach-Object { "y" } | sdkmanager --licenses | Out-Null
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;$env:ANDROID_NDK_VERSION" "ndk;$env:ANDROID_NDK_API19_VERSION"
           "ANDROID_NDK_ROOT=$env:ANDROID_HOME\ndk\$env:ANDROID_NDK_VERSION" >> $env:GITHUB_ENV
+
+      - name: 准备 Windows AAB 工具并写入 GUI 资源
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "tools" | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar" `
+            -OutFile "tools\bundletool.jar"
+          $aapt2 = Get-ChildItem "$env:ANDROID_HOME\build-tools\*\aapt2.exe" |
+            Sort-Object FullName | Select-Object -Last 1
+          if (-not $aapt2) { throw "未找到 aapt2.exe" }
+          Copy-Item $aapt2.FullName "tools\aapt2.exe" -Force
+          $configPath = "apps\shield-gui\src-tauri\tauri.conf.json"
+          $config = Get-Content $configPath -Raw | ConvertFrom-Json
+          $config.bundle.resources | Add-Member -NotePropertyName "../../../tools/bundletool.jar" -NotePropertyValue "tools/bundletool.jar"
+          $config.bundle.resources | Add-Member -NotePropertyName "../../../tools/aapt2.exe" -NotePropertyValue "tools/aapt2.exe"
+          $config | ConvertTo-Json -Depth 20 | Set-Content $configPath -Encoding UTF8
 
       - name: 配置 Android 4.4 兼容 Rust 工具链
         shell: pwsh
