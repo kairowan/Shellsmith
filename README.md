@@ -143,15 +143,6 @@ CLI 仅供源码构建和自动化使用，Release 不单独提供 CLI 包。构
 - 使用问题请先阅读[反馈指南](docs/process/support.md)，再提交 [GitHub Issue](https://github.com/kairowan/Shellsmith/issues)；“关于”页可复制诊断信息。
 - 功能建议请使用[需求表单](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml)，已有相同需求可在原 issue 点赞。
 - 安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不公开可利用细节、业务 APK、证书或密码。
-- QQ 用户交流群：`1090352773`。群内便于沟通，正式问题仍建议保留 issue 记录。
-
-<details>
-<summary>QQ群二维码</summary>
-
-<img src="docs/assets/community/qq-group.png" alt="Shellsmith QQ 用户交流群：1090352773" width="300">
-
-</details>
-
 ## 许可证
 
 采用 **MIT OR Apache-2.0** 双协议，可选择其中任意一种：[MIT](LICENSE-MIT) · [Apache-2.0](LICENSE-APACHE)。

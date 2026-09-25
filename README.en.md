@@ -143,15 +143,6 @@ Detailed guides are currently primarily in Chinese. The CLI is source-built; Rel
 - Read the [support guide](docs/process/support.md), then open a [GitHub issue](https://github.com/kairowan/Shellsmith/issues). Copy diagnostics from **About**.
 - Use the [feature request form](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml), or upvote an existing matching request.
 - Report vulnerabilities privately following [SECURITY.md](SECURITY.md). Do not publish exploits, business APKs, certificates, or passwords.
-- Chinese-language QQ community: `1090352773`. Keep actionable bug reports in GitHub issues for tracking.
-
-<details>
-<summary>QQ group QR code</summary>
-
-<img src="docs/assets/community/qq-group.png" alt="Shellsmith QQ community: 1090352773" width="300">
-
-</details>
-
 ## License
 
 Dual-licensed under **MIT OR Apache-2.0**, at your choice: [MIT](LICENSE-MIT) · [Apache-2.0](LICENSE-APACHE).

@@ -65,7 +65,7 @@ export function ErrorReportDialog({ telemetryEnabled }: { telemetryEnabled: bool
             <pre className="mt-3 max-h-60 overflow-auto whitespace-pre-wrap break-all text-xs">{state.preview ? JSON.stringify(JSON.parse(state.preview.payload_json), null, 2) : ""}</pre>
           </details>
           {state.error && <p role="alert" className="mb-3 text-sm text-destructive">{state.error}</p>}
-          {state.receipt && <p role="status" className="mb-3 break-all text-sm">已发送。报告编号：<span className="select-all font-mono">{state.receipt}</span>。可在 QQ 群或 Issue 中引用此编号。</p>}
+          {state.receipt && <p role="status" className="mb-3 break-all text-sm">已发送。报告编号：<span className="select-all font-mono">{state.receipt}</span>。可在 Issue 中引用此编号。</p>}
           {state.sending && <p className="mb-3 text-xs text-muted-foreground">正在发送，最长等待 10 秒；此时关闭窗口不会撤回已经发出的请求。</p>}
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={() => dispatch({ type: "close" })}>{state.receipt ? "关闭" : "暂不发送"}</Button>
