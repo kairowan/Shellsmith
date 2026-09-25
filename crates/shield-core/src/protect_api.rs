@@ -633,14 +633,15 @@ fn stage_external_pvm2_dexes(
     if external.is_empty() {
         return Ok(Vec::new());
     }
-    let mut next = std::fs::read_dir(apk_dir)?
+    let first = std::fs::read_dir(apk_dir)?
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| dex_number(&entry.file_name().to_string_lossy()))
         .max()
         .unwrap_or(0)
         + 1;
     let mut staged = Vec::with_capacity(external.len());
-    for original in external {
+    for (offset, original) in external.into_iter().enumerate() {
+        let next = first + offset;
         let destination = apk_dir.join(format!("classes{next}.dex"));
         if destination.exists() {
             anyhow::bail!("AAB 外部 DEX 全局编号冲突：{}", destination.display());
@@ -650,7 +651,6 @@ fn stage_external_pvm2_dexes(
             staged: destination,
             original,
         });
-        next += 1;
     }
     Ok(staged)
 }

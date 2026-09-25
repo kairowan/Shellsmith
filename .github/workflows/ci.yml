@@ -18,6 +18,7 @@ concurrency:
 env:
   ANDROID_NDK_VERSION: 29.0.14206865
   ANDROID_NDK_API19_VERSION: 25.2.9519653
+  XOP_PROTECTOR_REF: e408b87871ea18e197b189e787c73cc5ae3e2ee6
 
 jobs:
   changes:
@@ -171,6 +172,17 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
+      - name: 检出 Xop PVM2 构建依赖
+        uses: actions/checkout@v7
+        with:
+          repository: xopJack/XopProtector
+          ref: ${{ env.XOP_PROTECTOR_REF }}
+          path: XopProtector
+          fetch-depth: 1
+
+      - name: 配置 Xop PVM2 源码路径
+        run: echo "MOCIKA_XOP_ROOT=$GITHUB_WORKSPACE/XopProtector" >> "$GITHUB_ENV"
+
       - name: 配置 Java
         uses: actions/setup-java@v5
         with:
@@ -252,6 +264,17 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
+      - name: 检出 Xop PVM2 构建依赖
+        uses: actions/checkout@v7
+        with:
+          repository: xopJack/XopProtector
+          ref: ${{ env.XOP_PROTECTOR_REF }}
+          path: XopProtector
+          fetch-depth: 1
+
+      - name: 配置 Xop PVM2 源码路径
+        run: echo "MOCIKA_XOP_ROOT=$GITHUB_WORKSPACE/XopProtector" >> "$GITHUB_ENV"
+
       - name: 配置 Java
         uses: actions/setup-java@v5
         with:
@@ -302,6 +325,19 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v7
 
+      - name: 检出 Xop PVM2 构建依赖
+        uses: actions/checkout@v7
+        with:
+          repository: xopJack/XopProtector
+          ref: ${{ env.XOP_PROTECTOR_REF }}
+          path: XopProtector
+          fetch-depth: 1
+
+      - name: 配置 Xop PVM2 源码路径
+        shell: pwsh
+        run: |
+          "MOCIKA_XOP_ROOT=$env:GITHUB_WORKSPACE\XopProtector" >> $env:GITHUB_ENV
+
       - name: 配置 Java
         uses: actions/setup-java@v5
         with:
@@ -348,6 +384,17 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+
+      - name: 检出 Xop PVM2 构建依赖
+        uses: actions/checkout@v7
+        with:
+          repository: xopJack/XopProtector
+          ref: ${{ env.XOP_PROTECTOR_REF }}
+          path: XopProtector
+          fetch-depth: 1
+
+      - name: 配置 Xop PVM2 源码路径
+        run: echo "MOCIKA_XOP_ROOT=$GITHUB_WORKSPACE/XopProtector" >> "$GITHUB_ENV"
 
       - name: 配置 Java
         uses: actions/setup-java@v5
