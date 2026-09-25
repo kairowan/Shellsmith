@@ -9,13 +9,14 @@ This is a **pre-release** for validating build artifacts and core workflows. It 
 - Windows：`Shellsmith_{{version}}_windows_x64_setup.exe`
 - macOS：`Shellsmith_{{version}}_macos_universal.dmg`
 - Linux：选择 `.AppImage` 或 `.deb` 安装包 / Choose the `.AppImage` or `.deb` package
+- Android：`Shellsmith_{{version}}_android-runtime.zip`，包含桌面加固 APK/AAB 所需的 Stub、API 19 兼容资源与 PVM2 Packer；它不是可直接安装在手机上的 GUI / Android runtime resources for desktop APK/AAB protection; not an installable Android GUI
 
 ## 使用须知 / Notes
 
 - 需要完整 JDK 8 或更高版本（含 `java` 与 `keytool`） / A full JDK 8 or later with `java` and `keytool` is required
 - 加固、签名和证书资料均在本地处理，不会上传用户文件 / APKs, signing keys, and certificates are processed locally and never uploaded
 - 安装包尚未进行商业代码签名或公证 / Installers are not currently code-signed or notarized
-- 当前正式支持 APK；Release 仅提供桌面 GUI / APK is currently supported; Releases provide desktop GUI packages only
+- 当前桌面 GUI/CLI 支持 APK 与 AAB；Android runtime zip 是桌面加固所需资源，不是可直接安装在手机上的 GUI / The desktop GUI/CLI support APK and AAB; the Android runtime zip contains protection resources and is not an installable Android GUI
 
 ## 本次变更 / What's Changed
 

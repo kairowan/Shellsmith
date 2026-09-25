@@ -1,9 +1,13 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       version:
@@ -21,11 +25,15 @@ env:
 jobs:
   linux-tauri:
     name: Linux Tauri 发布包
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-22.04
 
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
 
       - name: 解析版本号
         shell: bash
@@ -34,7 +42,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
           else
-            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            base_version="$(python3 -c 'import json; print(json.load(open("apps/shield-gui/package.json", encoding="utf-8"))["version"])')"
+            echo "VERSION=${base_version}-build.${{ github.event.workflow_run.run_number }}" >> "$GITHUB_ENV"
           fi
 
       - name: 配置 Java
@@ -103,6 +112,57 @@ jobs:
       - name: 构建 Linux Tauri 发布包
         run: SKIP_CLI_RELEASE=1 VERSION="$VERSION" ./scripts/release-linux.sh "$VERSION"
 
+      - name: 打包 Android 加固运行时资源
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$VERSION" <<'PY'
+          import hashlib
+          import shutil
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          version = sys.argv[1]
+          root = Path.cwd()
+          source = root / "shield-stub" / "build" / "outputs" / "resources"
+          output = root / "dist" / "android-runtime"
+          staging = output / f"Shellsmith-{version}-android-runtime"
+          output.mkdir(parents=True, exist_ok=True)
+          staging.mkdir(parents=True, exist_ok=True)
+
+          required = [
+              source / "resources.zip",
+              source / "resources-api19.zip",
+              source / "mocika-play-delivery-api.jar",
+              root / "tools" / "xop-pvm2-packer.jar",
+              root / "tools" / "licenses" / "XopProtector-LICENSE.txt",
+              root / "tools" / "licenses" / "XopProtector-NOTICE.txt",
+          ]
+          missing = [str(path) for path in required if not path.is_file()]
+          if missing:
+              raise SystemExit("缺少 Android 运行时资源: " + ", ".join(missing))
+
+          for path in required:
+              shutil.copy2(path, staging / path.name)
+          (staging / "README.txt").write_text(
+              "Shellsmith Android runtime resources\\n"
+              "用于桌面 CLI/GUI 生成 Android APK/AAB；这不是可直接安装在 Android 手机上的 GUI。\\n",
+              encoding="utf-8",
+          )
+          archive = output / f"Shellsmith_{version}_android-runtime.zip"
+          with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as handle:
+              for path in sorted(staging.rglob("*")):
+                  if path.is_file():
+                      handle.write(path, path.relative_to(output))
+          digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+          (output / "checksums-sha256.txt").write_text(
+              f"{digest}  {archive.name}\\n", encoding="utf-8"
+          )
+          shutil.rmtree(staging)
+          print(archive)
+          PY
+
       - name: 上传 Linux Tauri 产物
         uses: actions/upload-artifact@v7
         with:
@@ -111,15 +171,19 @@ jobs:
             dist/linux/**/*.AppImage
             dist/linux/**/*.deb
             dist/linux/checksums-sha256.txt
+            dist/android-runtime/**
           if-no-files-found: error
 
   macos-tauri:
     name: macOS Tauri 发布包
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: macos-15
 
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: 解析版本号
         shell: bash
@@ -128,7 +192,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
           else
-            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            base_version="$(python3 -c 'import json; print(json.load(open("apps/shield-gui/package.json", encoding="utf-8"))["version"])')"
+            echo "VERSION=${base_version}-build.${{ github.event.workflow_run.run_number }}" >> "$GITHUB_ENV"
           fi
 
       - name: 配置 Java
@@ -191,11 +256,14 @@ jobs:
 
   windows:
     name: Windows 发布包
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: windows-2025
 
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: 解析版本号
         shell: pwsh
@@ -203,8 +271,8 @@ jobs:
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             "VERSION=${{ inputs.version }}" >> $env:GITHUB_ENV
           } else {
-            $version = $env:GITHUB_REF_NAME -replace '^v', ''
-            "VERSION=$version" >> $env:GITHUB_ENV
+            $package = Get-Content "apps/shield-gui/package.json" -Raw | ConvertFrom-Json
+            "VERSION=$($package.version)-build.${{ github.event.workflow_run.run_number }}" >> $env:GITHUB_ENV
           }
 
       - name: 配置 Java
@@ -262,6 +330,7 @@ jobs:
 
   publish:
     name: 发布到 GitHub Releases
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     needs:
       - linux-tauri
@@ -271,6 +340,9 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
 
       - name: 解析版本号
         shell: bash
@@ -280,8 +352,8 @@ jobs:
             TAG="v${{ inputs.version }}"
             VERSION="${{ inputs.version }}"
           else
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${GITHUB_REF_NAME#v}"
+            VERSION="$(python3 -c 'import json; print(json.load(open("apps/shield-gui/package.json", encoding="utf-8"))["version"])')-build.${{ github.event.workflow_run.run_number }}"
+            TAG="v${VERSION}"
           fi
 
           if [[ "$VERSION" == *-* ]]; then
@@ -307,6 +379,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          {
+            echo "## 本次自动构建 / This automated build"
+            echo
+            git show -s --format='- 提交 / Commit: `%h` — %s' HEAD
+            echo
+            echo "### 文件变更统计 / File change summary"
+            git diff --stat HEAD^ HEAD || true
+          } > automatic-changes.md
+
           if [[ "$IS_PRERELEASE" == "true" ]]; then
             template=".github/release-notes/prerelease.md"
             release_kind="预发布版本"
@@ -359,6 +440,8 @@ jobs:
           ' generated-release-notes-body.md > generated-release-notes-normalized.md
 
           cat release-notes-prefix.md > release-notes.md
+          printf '\n\n' >> release-notes.md
+          cat automatic-changes.md >> release-notes.md
           printf '\n\n---\n\n' >> release-notes.md
           cat generated-release-notes-normalized.md >> release-notes.md
 

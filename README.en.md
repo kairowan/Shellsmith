@@ -64,8 +64,8 @@ This removes quarantine; it does not mean the application is notarized by Apple.
 GitHub Actions live under `.github/workflows/`:
 
 - Every push to `main` and every pull request runs Rust, Python, iOS-core, and frontend checks.
-- Pushing a `vX.Y.Z` tag, or manually running `Release` with a version, builds native Linux, macOS, and Windows installers.
-- The release job uploads Linux `.AppImage`/`.deb`, macOS `.dmg`, Windows `.exe`, and SHA-256 checksum files, then creates or updates the GitHub Release.
+- After every successful CI run on `main`, the Release workflow automatically computes a `1.4.0-build.<CI run number>` version, builds native Linux, macOS, and Windows installers, and creates a GitHub Release. You can still run `Release` manually for a specified version.
+- The release job uploads Linux `.AppImage`/`.deb`, macOS `.dmg`, Windows `.exe`, Android runtime resources, and SHA-256 checksum files, and includes an automatic summary of the triggering commit.
 - macOS builds use ad-hoc signing by default. Set `MACOS_RELEASE_MODE=developer-id`, a Developer ID identity, and a notarytool profile to produce a distributable notarized package.
 
 The same scripts can be used locally:
