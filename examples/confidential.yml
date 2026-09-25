@@ -1,0 +1,11 @@
+# 示例值只能用于验证接入。生产值和自定义算法应由你的密钥管理/CI 系统提供。
+algorithm: random
+defaultNamespace: create ObfuscatedLiterals
+defaultAccessModifier: public
+secrets:
+  - name: apiBaseURL
+    value: https://example.invalid/api
+  - name: trustedSPKIDigests
+    value:
+      - replace-with-your-first-spki-sha256
+      - replace-with-your-second-spki-sha256

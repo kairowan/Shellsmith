@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:appComponentFactory="dev.mocika.shield.smoke.SmokeComponentFactory"
+        android:name=".SmokeApplication"
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
+        android:extractNativeLibs="false"
+        android:label="@string/app_name">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <provider
+            android:name="dev.mocika.shield.smoke.SmokeProvider"
+            android:authorities="dev.mocika.shield.smoke.provider"
+            android:exported="false" />
+        <receiver
+            android:name="dev.mocika.shield.smoke.SmokeReceiver"
+            android:exported="false" />
+        <service
+            android:name="dev.mocika.shield.smoke.SmokeRemoteService"
+            android:exported="false"
+            android:process=":remote" />
+    </application>
+</manifest>

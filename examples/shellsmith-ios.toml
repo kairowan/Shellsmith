@@ -1,0 +1,25 @@
+# 复制后填写真实工程、签名和业务信息；不要在这里保存私钥或 Apple 账号令牌。
+[project]
+path = "../YourApp/YourApp.xcworkspace"
+scheme = "YourApp"
+configuration = "Release"
+team_id = "ABCDE12345"
+bundle_ids = ["com.example.yourapp"]
+# 工程有多个 @main 时填写相对源码根目录的入口。
+# entrypoint = "YourApp/YourApp.swift"
+
+[protection]
+profile = "balanced"
+is_prod = true
+# strict 必须配置真实服务端；服务端负责挑战、证明校验和重放防护。
+# app_attest_endpoint = "https://api.example.com/app-attest"
+
+[confidential]
+enabled = true
+config = "confidential.yml"
+
+[rasp]
+provider = "freerasp"
+enabled = true
+watcher_mail = "security@example.com"
+critical = ["signature", "jailbreak", "debugger", "runtimeManipulation"]

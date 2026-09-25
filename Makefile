@@ -1,0 +1,140 @@
+VERSION    := $(shell grep '^version' apps/shield-cli/Cargo.toml | head -1 | sed 's/version = "\([^"]*\)"/\1/')
+CLI_BIN    := target/release/shield
+DIST_DIR   := dist
+PYTHON     ?= python3
+
+RESOURCES_ZIP  := shield-stub/build/outputs/resources/resources.zip
+
+ifeq ($(OS),Windows_NT)
+  BUILD_STUB_CMD := powershell -ExecutionPolicy Bypass -File scripts/build-stub.ps1
+  CLEAN_CMD      := powershell -Command "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"
+else
+  BUILD_STUB_CMD := ./scripts/build-stub.sh
+  CLEAN_CMD      := rm -rf
+endif
+
+.PHONY: build-cli build-stub audit-stub-dex build-gui build-all \
+        release release-linux release-windows \
+        release-macos release-macos-universal \
+        bump-version test test-fusion test-native-vmp check-aab clean help
+
+help:
+	@echo "用法: make <目标>"
+	@echo ""
+	@echo "  build-cli              编译 shield-cli（当前平台 release）"
+	@echo "  build-stub             构建 shield-stub（Android AAR + 资源包）"
+	@echo "  audit-stub-dex         输出 Stub DEX 指标并检查膨胀上限（需先 build-stub）"
+	@echo "  build-gui              构建 shield-gui Tauri 桌面应用（需先 build-stub）"
+	@echo "  build-all              build-stub + build-cli + build-gui（Tauri）"
+	@echo "  release-linux          Linux 本地发布包（默认 GUI + CLI，可用 SKIP_CLI_RELEASE=1 跳过 CLI），在 Linux 上运行"
+	@echo "  release-windows        Windows 本地发布包（默认 GUI + CLI，可用 SKIP_CLI_RELEASE=1 跳过 CLI），在 Windows 上运行"
+	@echo "  release-macos          macOS 本地发布包（默认 GUI + CLI，可用 SKIP_CLI_RELEASE=1 跳过 CLI），在 macOS 上运行"
+	@echo "  release-macos-universal  macOS Tauri universal binary 发布包（ARM64 + x86_64）"
+	@echo "  release VERSION=x.y.z  CLI-only 发布包（维护者本地使用）"
+	@echo "  bump-version V=x.y.z   同步版本号到所有配置文件"
+	@echo "  test                   运行 Android 核心、iOS 核心与 CLI 单元测试"
+	@echo "  test-fusion            运行融合协议、保护策略和 AAB 结构测试"
+	@echo "  test-native-vmp        构建 LLVM 21 Native VMP Pass 并运行语义/失败关闭自测"
+	@echo "  check-aab FILE=xxx.aab 检查 AAB 模块结构（只读预检）"
+	@echo "  clean                  清理所有构建产物"
+
+build-cli:
+	@echo "🦀 编译 shield-cli..."
+	cargo build --release -p shield-cli
+	@echo "✅ 产物: $(CLI_BIN)"
+
+build-stub:
+	@echo "🤖 构建 shield-stub..."
+	$(BUILD_STUB_CMD)
+
+ifeq ($(OS),Windows_NT)
+	set SKIP_STANDARD_STUB_BUILD=1&& bash scripts/build-android-api19-resources.sh
+else
+	SKIP_STANDARD_STUB_BUILD=1 ./scripts/build-android-api19-resources.sh
+endif
+	@echo "✅ 产物: shield-stub/build/outputs/resources/resources.zip"
+	@echo "✅ 兼容产物: shield-stub/build/outputs/resources/resources-api19.zip"
+	@echo "✅ 内存候选: shield-stub/build/outputs/resources/resources-memory.zip"
+	@echo "✅ Play Delivery API: shield-stub/build/outputs/resources/mocika-play-delivery-api.jar"
+
+audit-stub-dex:
+	$(PYTHON) scripts/analyze_stub_dex.py $(RESOURCES_ZIP) \
+		--limits scripts/stub-dex-limits.json \
+		--output shield-stub/build/outputs/resources/stub-dex-metrics.json
+	@echo "✅ Stub DEX 指标: shield-stub/build/outputs/resources/stub-dex-metrics.json"
+
+build-gui:
+	@echo "🖥️  构建 shield-gui（Tauri）..."
+	cd apps/shield-gui && cargo tauri build --no-bundle
+ifeq ($(OS),Windows_NT)
+	@echo "✅ 产物: target/release/mocika-shield.exe"
+else
+	@echo "✅ 产物: target/release/mocika-shield"
+endif
+
+build-all: build-stub build-cli build-gui
+
+release-linux:
+	@echo "🐧 Linux 发布构建 v$(VERSION)..."
+	VERSION=$(VERSION) ./scripts/release-linux.sh
+	@echo "✅ 产物: dist/linux/"
+
+release-windows:
+	@echo "🪟 Windows 发布构建 v$(VERSION)（须在 Windows 上运行）..."
+	powershell -ExecutionPolicy Bypass -File scripts/release-windows.ps1 -Version $(VERSION)
+	@echo "✅ 产物: dist/windows/"
+
+release-macos:
+	@echo "🍎 macOS 发布构建 v$(VERSION)（须在 macOS 上运行）..."
+	VERSION=$(VERSION) ./scripts/release-macos.sh
+	@echo "✅ 产物: dist/macos/"
+
+release-macos-universal:
+	@echo "🍎 macOS Universal Binary 发布构建 v$(VERSION)..."
+	VERSION=$(VERSION) ./scripts/release-macos.sh $(VERSION) universal
+	@echo "✅ 产物: dist/macos/"
+
+release: build-all
+	@echo "📦 生成 CLI 发布包 v$(VERSION)..."
+	./scripts/release-cli.sh $(VERSION)
+	@echo "✅ 发布包: $(DIST_DIR)/Shellsmith-$(VERSION).tar.gz"
+
+test:
+	@echo "🧪 运行测试..."
+	cargo test -p shield-core
+	cargo test -p shield-ios
+	cargo test -p shield-cli
+
+test-fusion:
+	@echo "🧪 运行融合协议和兼容策略测试..."
+	cargo test -p shield-core protection_policy
+	cargo test -p shield-core bundle_inspect
+	cargo test --manifest-path shield-stub/src/main/rust/Cargo.toml bin_loader
+	cargo test -p shield-cli
+
+test-native-vmp:
+	LLVM_CONFIG="$${LLVM_CONFIG:-llvm-config}" native-vmp/tests/run-self-test.sh
+
+check-aab: build-cli
+	@if [ -z "$(FILE)" ]; then echo "用法: make check-aab FILE=path/to/app.aab"; exit 1; fi
+	$(CLI_BIN) check-aab "$(FILE)"
+
+bump-version:
+	@if [ -z "$(V)" ]; then echo "用法: make bump-version V=x.y.z"; exit 1; fi
+	bash scripts/bump-version.sh $(V)
+
+clean:
+	@echo "🧹 清理构建产物..."
+	$(CLEAN_CMD) \
+		target \
+		build \
+		dist \
+		release \
+		apps/shield-cli/target \
+		apps/shield-gui/dist \
+		apps/shield-gui/src-tauri/gen/schemas/acl-manifests.json \
+		shield-stub/build \
+		shield-stub/.gradle \
+		shield-stub/src/main/rust/target \
+		apps/shield-gui/node_modules
+	@echo "✅ 清理完成"

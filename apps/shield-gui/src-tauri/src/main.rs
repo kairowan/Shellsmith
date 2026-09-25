@@ -1,0 +1,602 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod aab_runner;
+mod apk_check;
+mod app_config;
+mod app_paths;
+mod application_identity;
+mod application_sharing;
+mod build_info;
+mod cert_service;
+mod cert_store;
+mod error_report;
+mod failure_diagnostic;
+mod file_ops;
+mod ios_runner;
+mod manifest_inspect;
+mod protect_runner;
+mod signing;
+mod task_completion;
+mod task_manager;
+mod telemetry;
+mod updates;
+
+use apk_check::{do_check_apk, do_compare_cert_fingerprints, ApkCheckResult, CertCompareResult};
+use app_config::{
+    load_app_config, normalize_locale, normalize_theme_mode, save_app_config_file,
+    AppConfigPayload, AppConfigState, ProtectDefaults,
+};
+use app_paths::find_apksigner_path;
+use build_info::{
+    get_app_info as get_app_info_impl, get_build_info as get_build_info_impl,
+    get_diagnostic_info as get_diagnostic_info_impl, AppInfo, BuildInfo,
+};
+use cert_service::{
+    create_managed_certificate, save_certificate_profile, validate_certificate_input,
+    verify_saved_certificate,
+};
+use cert_store::{
+    initialize_certificate_store, CertificateRecord, CertificateStoreState, CertificateUpsertInput,
+    CertificateValidationInput, CertificateValidationResult, CreateManagedCertificateInput,
+};
+use failure_diagnostic::ExecutionFailure;
+use file_ops::{
+    check_file_exists as check_file_exists_impl, delete_file as delete_file_impl,
+    open_url as open_url_impl, show_in_folder as show_in_folder_impl,
+};
+use protect_runner::{
+    execute_protect_apk, AiResistanceRequest, CancelHandle, EnvironmentPolicyRequest,
+    ProtectExecution, ProtectionProfileRequest, RuntimeMode,
+};
+use signing::{execute_sign_apk, query_keystore_aliases};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use task_manager::{TaskKind, TaskManager, TaskSnapshot};
+use tauri::Manager;
+use updates::{check_update_impl, UpdateCheckResult};
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtectRequest {
+    sharing: Option<application_sharing::SharingChoice>,
+    #[serde(default)]
+    excluded_abis: Vec<String>,
+    task_id: String,
+    input: String,
+    output: String,
+    signed_output: Option<String>,
+    apktool_path: Option<String>,
+    #[serde(default)]
+    runtime_mode: RuntimeMode,
+    #[serde(default)]
+    environment_policy: EnvironmentPolicyRequest,
+    #[serde(default)]
+    protection_profile: ProtectionProfileRequest,
+    #[serde(default)]
+    ai_resistance: AiResistanceRequest,
+    xop_pvm2_packer_path: Option<String>,
+    #[serde(default)]
+    xop_true_vmp_prefixes: Vec<String>,
+    certificate_id: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SignRequest {
+    sharing: Option<application_sharing::SharingChoice>,
+    task_id: String,
+    apk_path: String,
+    output_path: Option<String>,
+    apksigner_path: Option<String>,
+    certificate_id: String,
+}
+
+#[tauri::command]
+async fn check_aab(app: tauri::AppHandle, path: String) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || aab_runner::check_aab(&app, path))
+        .await
+        .map_err(|err| format!("后台任务执行失败: {err}"))?
+}
+
+#[tauri::command]
+async fn protect_aab(
+    window: tauri::Window,
+    telemetry_state: tauri::State<'_, AppConfigState>,
+    certificate_state: tauri::State<'_, CertificateStoreState>,
+    request: aab_runner::AabProtectRequest,
+    cancel_handle: tauri::State<'_, CancelHandle>,
+    task_manager: tauri::State<'_, TaskManager>,
+) -> Result<(), String> {
+    let certificate = certificate_state
+        .get_certificate(&request.certificate_id)?
+        .ok_or_else(|| "未找到 AAB 签名证书".to_string())?;
+    task_manager.begin(
+        &window,
+        request.task_id.clone(),
+        TaskKind::Protect,
+        request.input.clone(),
+        request.output.clone(),
+        "CheckTools",
+    )?;
+    telemetry::record_event(&telemetry_state, telemetry::TelemetryEvent::ProtectStarted);
+    let task_id = request.task_id.clone();
+    let result = aab_runner::execute_protect_aab(
+        window.clone(),
+        request,
+        certificate,
+        cancel_handle,
+        task_manager.inner().clone(),
+    )
+    .await;
+    task_completion::finish_task(
+        &window,
+        &task_manager,
+        &telemetry_state,
+        &task_id,
+        true,
+        result,
+    )
+}
+
+#[tauri::command]
+async fn compare_cert_fingerprints(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CertificateStoreState>,
+    apk_path: String,
+    certificate_id: String,
+) -> Result<CertCompareResult, String> {
+    let certificate = state
+        .get_certificate(&certificate_id)?
+        .ok_or_else(|| "未找到签名证书".to_string())?;
+    tokio::task::spawn_blocking(move || {
+        Ok(do_compare_cert_fingerprints(
+            apk_path,
+            certificate.keystore_path,
+            certificate.keystore_password,
+            Some(certificate.ks_type),
+            certificate.key_alias,
+            find_apksigner_path(&app),
+        ))
+    })
+    .await
+    .map_err(|err| format!("后台任务执行失败: {err}"))?
+}
+
+#[tauri::command]
+async fn protect_apk(
+    window: tauri::Window,
+    telemetry_state: tauri::State<'_, AppConfigState>,
+    certificate_state: tauri::State<'_, CertificateStoreState>,
+    request: ProtectRequest,
+    cancel_handle: tauri::State<'_, CancelHandle>,
+    task_manager: tauri::State<'_, TaskManager>,
+) -> Result<(), String> {
+    let auto_sign = request.certificate_id.is_some() && request.signed_output.is_some();
+    let signing_certificate = match request.certificate_id {
+        Some(id) => Some(
+            certificate_state
+                .get_certificate(&id)?
+                .ok_or_else(|| "未找到自动签名证书".to_string())?,
+        ),
+        None => None,
+    };
+    task_manager.begin(
+        &window,
+        request.task_id.clone(),
+        TaskKind::Protect,
+        request.input.clone(),
+        request
+            .signed_output
+            .clone()
+            .unwrap_or_else(|| request.output.clone()),
+        "CheckTools",
+    )?;
+    window.state::<application_sharing::SharingState>().begin(
+        &telemetry_state,
+        &request.task_id,
+        &request.input,
+        request.sharing.as_ref(),
+        auto_sign,
+        false,
+    );
+    telemetry::record_event(&telemetry_state, telemetry::TelemetryEvent::ProtectStarted);
+    let result = execute_protect_apk(
+        window.clone(),
+        ProtectExecution {
+            excluded_abis: request.excluded_abis,
+            task_id: request.task_id.clone(),
+            input: request.input,
+            output: request.output,
+            apktool_path: request.apktool_path,
+            runtime_mode: request.runtime_mode,
+            environment_policy: request.environment_policy,
+            protection_profile: request.protection_profile,
+            ai_resistance: request.ai_resistance,
+            xop_pvm2_packer_path: request.xop_pvm2_packer_path,
+            xop_true_vmp_prefixes: request.xop_true_vmp_prefixes,
+            signing_certificate,
+            signed_output: request.signed_output,
+        },
+        cancel_handle,
+        task_manager.inner().clone(),
+    )
+    .await;
+    task_completion::finish_task(
+        &window,
+        &task_manager,
+        &telemetry_state,
+        &request.task_id,
+        auto_sign,
+        result,
+    )
+}
+
+#[tauri::command]
+fn cancel_protect(cancel_handle: tauri::State<'_, CancelHandle>) {
+    cancel_handle.inner().0.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn show_in_folder(path: String) -> Result<(), String> {
+    show_in_folder_impl(path)
+}
+
+#[tauri::command]
+fn check_file_exists(path: String) -> bool {
+    check_file_exists_impl(path)
+}
+
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    delete_file_impl(path)
+}
+
+#[tauri::command]
+async fn check_apk(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CertificateStoreState>,
+    path: String,
+    runtime_mode: RuntimeMode,
+    certificate_id: Option<String>,
+) -> Result<ApkCheckResult, String> {
+    let certificate = certificate_id
+        .map(|id| {
+            state
+                .get_certificate(&id)?
+                .ok_or_else(|| "未找到自动签名证书".to_string())
+        })
+        .transpose()?;
+    tokio::task::spawn_blocking(move || {
+        Ok(do_check_apk(
+            path,
+            find_apksigner_path(&app),
+            runtime_mode.preflight_profile(),
+            certificate,
+        ))
+    })
+    .await
+    .map_err(|err| format!("后台任务执行失败: {err}"))?
+}
+
+#[tauri::command]
+fn get_app_config(state: tauri::State<'_, AppConfigState>) -> Result<AppConfigPayload, String> {
+    let config = state.read()?;
+    Ok(AppConfigPayload::from(&config))
+}
+
+#[tauri::command]
+fn save_app_config(
+    state: tauri::State<'_, AppConfigState>,
+    config: AppConfigPayload,
+) -> Result<(), String> {
+    state.mutate(move |current| {
+        current.locale = normalize_locale(&config.locale);
+        current.theme_mode = normalize_theme_mode(&config.theme_mode);
+        current.telemetry.enabled = config.telemetry_enabled;
+        if let Some(defaults) = config.protect_defaults {
+            current.protect_defaults = defaults;
+        }
+    })
+}
+
+#[tauri::command]
+fn save_protect_defaults(
+    state: tauri::State<'_, AppConfigState>,
+    defaults: ProtectDefaults,
+) -> Result<(), String> {
+    state.mutate(move |current| {
+        current.protect_defaults = defaults;
+    })
+}
+
+#[tauri::command]
+async fn sign_apk(
+    window: tauri::Window,
+    telemetry_state: tauri::State<'_, AppConfigState>,
+    state: tauri::State<'_, CertificateStoreState>,
+    request: SignRequest,
+    task_manager: tauri::State<'_, TaskManager>,
+) -> Result<(), String> {
+    let app = window.app_handle().clone();
+    let certificate = state
+        .get_certificate(&request.certificate_id)?
+        .ok_or_else(|| "未找到签名证书".to_string())?;
+    let final_output = request
+        .output_path
+        .clone()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| request.apk_path.clone());
+    task_manager.begin(
+        &window,
+        request.task_id.clone(),
+        TaskKind::Sign,
+        request.apk_path.clone(),
+        final_output,
+        "PrepareSign",
+    )?;
+    window.state::<application_sharing::SharingState>().begin(
+        &telemetry_state,
+        &request.task_id,
+        &request.apk_path,
+        request.sharing.as_ref(),
+        false,
+        true,
+    );
+    let progress_manager = task_manager.inner().clone();
+    let progress_window = window.clone();
+    let progress_task_id = request.task_id.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        execute_sign_apk(
+            &app,
+            request.apk_path,
+            request.output_path,
+            request.apksigner_path,
+            certificate,
+            |step, message| {
+                if step == "AlignApk" || step == "SignApk" {
+                    app.state::<application_sharing::SharingState>()
+                        .verify_input(&progress_task_id);
+                }
+                progress_manager.progress(&progress_window, &progress_task_id, step, message)
+            },
+        )
+    })
+    .await
+    .unwrap_or_else(|err| Err(ExecutionFailure::from(format!("后台任务执行失败: {err}"))));
+    task_completion::finish_task(
+        &window,
+        &task_manager,
+        &telemetry_state,
+        &request.task_id,
+        false,
+        result,
+    )
+}
+
+#[tauri::command]
+fn get_latest_task(
+    state: tauri::State<'_, TaskManager>,
+    kind: String,
+) -> Result<Option<TaskSnapshot>, String> {
+    state.latest(match kind.as_str() {
+        "sign" => TaskKind::Sign,
+        "ios_protect" => TaskKind::IosProtect,
+        _ => TaskKind::Protect,
+    })
+}
+
+#[tauri::command]
+async fn list_keystore_aliases(
+    app: tauri::AppHandle,
+    keystore_path: String,
+    ks_pass: String,
+    ks_type: Option<String>,
+) -> Result<Vec<String>, String> {
+    let result = tokio::task::spawn_blocking(move || {
+        query_keystore_aliases(keystore_path, ks_pass, ks_type)
+    })
+    .await
+    .map_err(|err| format!("后台任务执行失败: {err}"))?;
+    task_completion::certificate_result(&app, result)
+}
+
+#[tauri::command]
+fn list_certificates(
+    state: tauri::State<'_, CertificateStoreState>,
+) -> Result<Vec<CertificateRecord>, String> {
+    state
+        .list_certificates()
+        .map(|items| items.into_iter().map(redact_certificate).collect())
+}
+
+#[tauri::command]
+fn save_certificate(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CertificateStoreState>,
+    input: CertificateUpsertInput,
+) -> Result<CertificateRecord, String> {
+    task_completion::certificate_result(&app, save_certificate_profile(&state, input))
+        .map(redact_certificate)
+}
+
+#[tauri::command]
+fn validate_certificate(
+    app: tauri::AppHandle,
+    input: CertificateValidationInput,
+) -> Result<CertificateValidationResult, String> {
+    task_completion::certificate_outcome(&app, validate_certificate_input(input))
+}
+
+#[tauri::command]
+fn set_default_certificate(
+    state: tauri::State<'_, CertificateStoreState>,
+    id: String,
+) -> Result<(), String> {
+    state.set_default_certificate(Some(&id))
+}
+
+#[tauri::command]
+fn delete_certificate(
+    state: tauri::State<'_, CertificateStoreState>,
+    id: String,
+    remove_keystore_file: bool,
+) -> Result<Vec<CertificateRecord>, String> {
+    state.delete_certificate(&id, remove_keystore_file)?;
+    state
+        .list_certificates()
+        .map(|items| items.into_iter().map(redact_certificate).collect())
+}
+
+#[tauri::command]
+fn verify_certificate(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CertificateStoreState>,
+    id: String,
+) -> Result<CertificateRecord, String> {
+    task_completion::certificate_outcome(&app, verify_saved_certificate(&state, &id))
+        .map(redact_certificate)
+}
+
+#[tauri::command]
+fn create_managed_certificate_command(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CertificateStoreState>,
+    input: CreateManagedCertificateInput,
+) -> Result<CertificateRecord, String> {
+    task_completion::certificate_result(&app, create_managed_certificate(&state, input))
+        .map(redact_certificate)
+}
+
+fn redact_certificate(mut record: CertificateRecord) -> CertificateRecord {
+    record.keystore_password.clear();
+    record.key_password.clear();
+    record
+}
+
+#[tauri::command]
+async fn check_update(
+    state: tauri::State<'_, AppConfigState>,
+    force: bool,
+) -> Result<UpdateCheckResult, String> {
+    check_update_impl(&state, force).await
+}
+
+#[tauri::command]
+async fn sync_telemetry(state: tauri::State<'_, AppConfigState>) -> Result<(), String> {
+    telemetry::sync_pending(&state).await;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    open_url_impl(url)
+}
+
+#[tauri::command]
+fn dismiss_update(state: tauri::State<'_, AppConfigState>, version: String) -> Result<(), String> {
+    state.mutate(move |config| {
+        config.dismissed_version = if version.trim().is_empty() {
+            None
+        } else {
+            Some(version)
+        };
+    })
+}
+
+#[tauri::command]
+fn get_dismissed_version(
+    state: tauri::State<'_, AppConfigState>,
+) -> Result<Option<String>, String> {
+    Ok(state.read()?.dismissed_version)
+}
+
+#[tauri::command]
+fn get_app_info() -> AppInfo {
+    get_app_info_impl()
+}
+
+#[tauri::command]
+fn get_build_info(app: tauri::AppHandle) -> BuildInfo {
+    get_build_info_impl(app)
+}
+
+#[tauri::command]
+fn get_diagnostic_info(app: tauri::AppHandle) -> String {
+    get_diagnostic_info_impl(app)
+}
+
+fn main() {
+    configure_linux_webview();
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(CancelHandle(Arc::new(AtomicBool::new(false))))
+        .manage(ios_runner::IosCancelHandle::default())
+        .manage(telemetry::TelemetryRuntime::default())
+        .manage(TaskManager::default())
+        .manage(error_report::ErrorReportState::default())
+        .manage(application_sharing::SharingState::default())
+        .setup(|app| {
+            let loaded = load_app_config(app.handle())?;
+            save_app_config_file(&loaded.path, &loaded.config)?;
+            let cert_store = initialize_certificate_store(app.handle())?;
+            let config_state = AppConfigState::new(loaded.path, loaded.config);
+            telemetry::record_app_start(&config_state);
+            app.manage(config_state);
+            app.manage(cert_store);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            error_report::preview_error_report,
+            error_report::latest_error_report,
+            error_report::send_error_report,
+            compare_cert_fingerprints,
+            check_aab,
+            protect_aab,
+            protect_apk,
+            cancel_protect,
+            ios_runner::check_ios_project,
+            ios_runner::protect_ios_project,
+            ios_runner::cancel_ios_protect,
+            show_in_folder,
+            check_file_exists,
+            delete_file,
+            check_apk,
+            get_app_config,
+            save_app_config,
+            save_protect_defaults,
+            sign_apk,
+            application_sharing::commands::inspect_application_sharing,
+            application_sharing::commands::release_application_inspection,
+            application_sharing::commands::save_application_sharing,
+            list_certificates,
+            save_certificate,
+            validate_certificate,
+            set_default_certificate,
+            delete_certificate,
+            verify_certificate,
+            create_managed_certificate_command,
+            list_keystore_aliases,
+            check_update,
+            sync_telemetry,
+            open_url,
+            dismiss_update,
+            get_dismissed_version,
+            get_app_info,
+            get_build_info,
+            get_diagnostic_info,
+            get_latest_task
+        ])
+        .run(tauri::generate_context!())
+        .unwrap_or_else(|err| panic!("启动 shield-gui 失败: {err}"));
+}
+
+fn configure_linux_webview() {
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // ponytail: Fedora/Wayland 的 WebKitGTK DMA-BUF 空白窗口由上游驱动组合触发；
+        // 用户仍可显式覆盖该变量，待 WebKitGTK 修复后删除这一个兼容开关。
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}

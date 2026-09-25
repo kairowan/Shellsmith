@@ -1,0 +1,47 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:name=".ProbeApplication"
+        android:allowBackup="false"
+        android:label="Memory Loader Probe"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <meta-data
+            android:name="REAL_APPLICATION"
+            android:value="dev.mocika.shield.memorypayload.PayloadApplication" />
+        <meta-data
+            android:name="ORIGINAL_COMPONENT_FACTORY"
+            android:value="${originalComponentFactory}" />
+        <meta-data
+            android:name="PROBE_CONCURRENT_CLASSES"
+            android:value="dev.mocika.shield.memorypayload.PayloadActivity,dev.mocika.shield.memorypayload.PayloadService" />
+        <meta-data
+            android:name="PROBE_CRASH_MEMORY_START"
+            android:value="${crashMemoryStart}" />
+        <meta-data
+            android:name="PROBE_FAIL_FILE_START"
+            android:value="${failFileStart}" />
+        <activity
+            android:name="dev.mocika.shield.memorypayload.PayloadActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity-alias
+            android:name=".RemotePayloadActivity"
+            android:exported="true"
+            android:process=":remote"
+            android:targetActivity="dev.mocika.shield.memorypayload.PayloadActivity" />
+        <service
+            android:name="dev.mocika.shield.memorypayload.PayloadService"
+            android:exported="false"
+            android:process=":remote" />
+        <provider
+            android:name="dev.mocika.shield.memorypayload.PayloadProvider"
+            android:authorities="dev.mocika.shield.memoryprobe.payload"
+            android:exported="false" />
+        <receiver
+            android:name="dev.mocika.shield.memorypayload.PayloadReceiver"
+            android:exported="false" />
+    </application>
+</manifest>

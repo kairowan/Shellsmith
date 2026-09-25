@@ -1,0 +1,295 @@
+package dev.mocika.shield.loader;
+
+import android.app.Application;
+import android.content.ComponentCallbacks;
+import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.os.Bundle;
+
+import java.io.File;
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+public class StubApp extends Application {
+
+    private static final String ORIGINAL_COMPONENT_FACTORY =
+            "dev.mocika.shield.ORIGINAL_COMPONENT_FACTORY";
+
+    private Application realApp;
+    private boolean componentFactoryActive;
+    private final List<ActivityLifecycleCallbacks> pendingActivityCallbacks = new ArrayList<>();
+    private final List<ComponentCallbacks> pendingComponentCallbacks = new ArrayList<>();
+    private final List<OnProvideAssistDataListener> pendingAssistCallbacks = new ArrayList<>();
+
+    @Override
+    public void registerActivityLifecycleCallbacks(ActivityLifecycleCallbacks callback) {
+        super.registerActivityLifecycleCallbacks(callback);
+        if (callback != null) synchronized (pendingActivityCallbacks) {
+            pendingActivityCallbacks.add(callback);
+        }
+    }
+
+    @Override
+    public void unregisterActivityLifecycleCallbacks(ActivityLifecycleCallbacks callback) {
+        super.unregisterActivityLifecycleCallbacks(callback);
+        if (callback != null) synchronized (pendingActivityCallbacks) {
+            pendingActivityCallbacks.remove(callback);
+        }
+    }
+
+    @Override
+    public void registerComponentCallbacks(ComponentCallbacks callback) {
+        super.registerComponentCallbacks(callback);
+        if (callback != null) synchronized (pendingComponentCallbacks) {
+            pendingComponentCallbacks.add(callback);
+        }
+    }
+
+    @Override
+    public void unregisterComponentCallbacks(ComponentCallbacks callback) {
+        super.unregisterComponentCallbacks(callback);
+        if (callback != null) synchronized (pendingComponentCallbacks) {
+            pendingComponentCallbacks.remove(callback);
+        }
+    }
+
+    @Override
+    public void registerOnProvideAssistDataListener(OnProvideAssistDataListener callback) {
+        super.registerOnProvideAssistDataListener(callback);
+        if (callback != null) synchronized (pendingAssistCallbacks) {
+            pendingAssistCallbacks.add(callback);
+        }
+    }
+
+    @Override
+    public void unregisterOnProvideAssistDataListener(OnProvideAssistDataListener callback) {
+        super.unregisterOnProvideAssistDataListener(callback);
+        if (callback != null) synchronized (pendingAssistCallbacks) {
+            pendingAssistCallbacks.remove(callback);
+        }
+    }
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        try {
+            MocikaAssets.install(base);
+            MocikaPlayDelivery.install(base);
+            exemptHiddenApi();
+            RuntimeSecurity.checkEnvironment(base);
+            ClassLoader loader;
+            if (android.os.Build.VERSION.SDK_INT >= 28
+                    && base.getClassLoader() instanceof DeferredPayloadClassLoader) {
+                loader = MemoryRuntimeBridge.initialize(base, getOriginalComponentFactory(base));
+                componentFactoryActive = true;
+            } else {
+                List<File> dexFiles = Ld.extractDexFiles(base);
+                MocikaAssets.activateNativeOverlay(base);
+                MocikaNativeLibraries.install(base, base.getClassLoader());
+                DexInjector.inject(base, dexFiles);
+                loader = base.getClassLoader();
+                if (android.os.Build.VERSION.SDK_INT == 28) {
+                    componentFactoryActive = MemoryRuntimeBridge.initializeLegacyIfInstalled(
+                            base, loader, getOriginalComponentFactory(base));
+                }
+            }
+            Thread.currentThread().setContextClassLoader(loader);
+            realApp = makeRealApp(loader, base);
+            TheRouterCompat.prepare(this);
+        } catch (Exception e) {
+            throw new RuntimeException("init", e);
+        }
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        if (realApp == null) return;
+        transferCallbacksTo(realApp);
+        replaceAppReferences(realApp);
+        ARouterCompat.prepareARouterRouteMap(this);
+        realApp.onCreate();
+        if (android.os.Build.VERSION.SDK_INT >= 28
+                && getBaseContext().getClassLoader() instanceof DeferredPayloadClassLoader) {
+            try {
+                MemoryRuntimeBridge.complete();
+            } catch (Exception e) {
+                throw new RuntimeException("complete", e);
+            }
+        }
+    }
+
+    private void transferCallbacksTo(Application target) {
+        transferActivityCallbacks(target);
+        transferComponentCallbacks(target);
+        transferAssistCallbacks(target);
+    }
+
+    private void transferActivityCallbacks(Application target) {
+        List<ActivityLifecycleCallbacks> callbacks;
+        synchronized (pendingActivityCallbacks) {
+            callbacks = new ArrayList<>(pendingActivityCallbacks);
+            pendingActivityCallbacks.clear();
+        }
+        for (ActivityLifecycleCallbacks callback : callbacks) {
+            try { super.unregisterActivityLifecycleCallbacks(callback); } catch (Throwable ignored) {}
+            try { target.registerActivityLifecycleCallbacks(callback); } catch (Throwable ignored) {}
+        }
+    }
+
+    private void transferComponentCallbacks(Application target) {
+        List<ComponentCallbacks> callbacks;
+        synchronized (pendingComponentCallbacks) {
+            callbacks = new ArrayList<>(pendingComponentCallbacks);
+            pendingComponentCallbacks.clear();
+        }
+        for (ComponentCallbacks callback : callbacks) {
+            try { super.unregisterComponentCallbacks(callback); } catch (Throwable ignored) {}
+            try { target.registerComponentCallbacks(callback); } catch (Throwable ignored) {}
+        }
+    }
+
+    private void transferAssistCallbacks(Application target) {
+        List<OnProvideAssistDataListener> callbacks;
+        synchronized (pendingAssistCallbacks) {
+            callbacks = new ArrayList<>(pendingAssistCallbacks);
+            pendingAssistCallbacks.clear();
+        }
+        for (OnProvideAssistDataListener callback : callbacks) {
+            try { super.unregisterOnProvideAssistDataListener(callback); } catch (Throwable ignored) {}
+            try { target.registerOnProvideAssistDataListener(callback); } catch (Throwable ignored) {}
+        }
+    }
+
+    @Override
+    public Context getApplicationContext() {
+        return realApp != null ? realApp : super.getApplicationContext();
+    }
+
+    private static Method findMethod(Class<?> clazz, String name, Class<?>... params)
+            throws NoSuchMethodException {
+        for (Class<?> c = clazz; c != null; c = c.getSuperclass()) {
+            try {
+                Method m = c.getDeclaredMethod(name, params);
+                m.setAccessible(true);
+                return m;
+            } catch (NoSuchMethodException ignored) {}
+        }
+        throw new NoSuchMethodException(name);
+    }
+
+    private static Field findField(Class<?> clazz, String name) throws NoSuchFieldException {
+        for (Class<?> c = clazz; c != null; c = c.getSuperclass()) {
+            try {
+                Field field = c.getDeclaredField(name);
+                field.setAccessible(true);
+                return field;
+            } catch (NoSuchFieldException ignored) {}
+        }
+        throw new NoSuchFieldException(name);
+    }
+
+    private Application makeRealApp(ClassLoader cl, Context base) throws Exception {
+        String name = getRealAppName();
+        Application app;
+        if (componentFactoryActive) {
+            app = MemoryRuntimeBridge.instantiateApplication(cl, name);
+        } else {
+            app = (Application) cl.loadClass(name).newInstance();
+        }
+        Method attach = Application.class.getDeclaredMethod("attach", Context.class);
+        attach.setAccessible(true);
+        attach.invoke(app, base);
+        return app;
+    }
+
+    private String getRealAppName() {
+        try {
+            ApplicationInfo ai = getPackageManager().getApplicationInfo(
+                    getPackageName(), PackageManager.GET_META_DATA);
+            if (ai.metaData != null) {
+                String v = ai.metaData.getString("ORIGINAL_APPLICATION");
+                if (v != null && !v.isEmpty()) return v;
+            }
+        } catch (Exception ignored) {}
+        return "android.app.Application";
+    }
+
+    private static String getOriginalComponentFactory(Context context) throws Exception {
+        ApplicationInfo info = context.getPackageManager().getApplicationInfo(
+                context.getPackageName(), PackageManager.GET_META_DATA);
+        Bundle metadata = info.metaData;
+        return metadata == null ? null : metadata.getString(ORIGINAL_COMPONENT_FACTORY);
+    }
+
+    private void replaceAppReferences(Application newApp) {
+        try {
+            Class<?> atCls = Class.forName("android.app.ActivityThread");
+            Method current = atCls.getDeclaredMethod("currentActivityThread");
+            current.setAccessible(true);
+            Object at = current.invoke(null);
+
+            // mInitialApplication 替换失败为致命错误：影响 Application.getApplicationContext() 返回值
+            try {
+                Field f = atCls.getDeclaredField("mInitialApplication");
+                f.setAccessible(true);
+                f.set(at, newApp);
+            } catch (Exception e) {
+                throw new RuntimeException("e1", e);
+            }
+
+            // mAllApplications 替换失败可容忍（仅影响 ActivityThread.mAllApplications 列表）
+            try {
+                Field f = atCls.getDeclaredField("mAllApplications");
+                f.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                ArrayList<Application> list = (ArrayList<Application>) f.get(at);
+                if (list != null) {
+                    for (int i = 0; i < list.size(); i++) {
+                        if (list.get(i) == this) list.set(i, newApp);
+                    }
+                }
+            } catch (NoSuchFieldException ignored) {}
+
+            // mPackages→mApplication 替换失败为致命错误：影响后续 Context.getApplicationContext()
+            try {
+                Field mPackages = atCls.getDeclaredField("mPackages");
+                mPackages.setAccessible(true);
+                Map<?, ?> pkgs = (Map<?, ?>) mPackages.get(at);
+                WeakReference<?> ref = (WeakReference<?>) pkgs.get(getPackageName());
+                if (ref != null && ref.get() != null) {
+                    setField(ref.get().getClass(), ref.get(), "mApplication", newApp);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("e2", e);
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("e3", e);
+        }
+    }
+
+    static void setField(Class<?> cls, Object obj, String name, Object val)
+            throws ReflectiveOperationException {
+        findField(cls, name).set(obj, val);
+    }
+
+    private static void exemptHiddenApi() {
+        if (android.os.Build.VERSION.SDK_INT < 28) return;
+        try {
+            Class<?> vr = Class.forName("dalvik.system.VMRuntime");
+            Method gr = vr.getDeclaredMethod("getRuntime");
+            gr.setAccessible(true);
+            Object runtime = gr.invoke(null);
+            Method se = vr.getDeclaredMethod("setHiddenApiExemptions", String[].class);
+            se.setAccessible(true);
+            se.invoke(runtime, (Object) new String[]{"L"});
+        } catch (Exception ignored) {}
+    }
+}

@@ -1,0 +1,28 @@
+[package]
+name = "shield-cli"
+version = "1.4.0"
+edition = "2021"
+authors = ["MocikaDev"]
+license = "MIT OR Apache-2.0"
+description = "Shellsmith APK 加固命令行工具"
+repository = "https://github.com/kairowan/Shellsmith"
+
+[[bin]]
+name = "shield"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "cargo", "env"] }
+anyhow = "1.0"
+env_logger = "0.11"
+log = "0.4"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+colored = "3.1"
+shield-core = { path = "../../crates/shield-core" }
+shield-ios = { path = "../../crates/shield-ios" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3.20"

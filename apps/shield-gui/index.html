@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shellsmith</title>
+    <link rel="icon" type="image/png" href="/shellsmith-icon.png" />
+    <script>
+      (function () {
+        var stored = localStorage.getItem("mocika-theme");
+        var theme;
+        if (stored === "light") {
+          theme = "light";
+        } else if (stored === "dark") {
+          theme = "dark";
+        } else {
+          theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

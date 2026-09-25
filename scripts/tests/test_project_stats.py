@@ -1,0 +1,220 @@
+import json
+import io
+import tempfile
+import unittest
+import urllib.error
+from contextlib import redirect_stderr
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from unittest.mock import patch
+
+from scripts.project_stats import (
+    build_snapshot,
+    classify_platform,
+    collect_usage_stats,
+    load_history,
+    merge_snapshot,
+    write_outputs,
+)
+
+
+class ProjectStatsTests(unittest.TestCase):
+    @patch("scripts.project_stats.urllib.request.urlopen")
+    def test_新原因聚合保留版本但丢弃报告正文(self, urlopen):
+        yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+        payload = {"data": [], "failure_reason_breakdown": [{
+            "usage_date": yesterday, "app_version": "1.4.0-beta.5", "flow": "sign",
+            "operation": "sign", "stage": "execute", "code": "SIGNING_FAILED",
+            "classifier_version": 1, "count": 2, "payload_json": "不允许保存的报告正文",
+        }], "failure_classifier_coverage": [{"usage_date": yesterday,
+            "app_version": "1.4.0-beta.5", "failure_classifier_version": 1,
+            "reporting_devices": 2, "failure_count": 2}]}
+        urlopen.return_value.__enter__.return_value = io.BytesIO(json.dumps(payload).encode())
+        usage = collect_usage_stats("https://stats.example.test/trend")
+        self.assertTrue(usage["failure_reason_breakdown_available"])
+        self.assertEqual(usage["failure_reason_breakdown"][0]["count"], 2)
+        self.assertEqual(usage["failure_classifier_coverage"][0]["app_version"], "1.4.0-beta.5")
+        self.assertNotIn("报告正文", json.dumps(usage, ensure_ascii=False))
+        urlopen.return_value.__enter__.return_value = io.BytesIO(b'{"data": []}')
+        old = collect_usage_stats("https://stats.example.test/trend")
+        self.assertFalse(old["failure_reason_breakdown_available"])
+
+    def test_classify_platform(self):
+        self.assertEqual(classify_platform("Shellsmith_windows_x64_setup.exe"), "Windows")
+        self.assertEqual(classify_platform("Shellsmith_macos_universal.dmg"), "macOS")
+        self.assertEqual(classify_platform("Shellsmith_linux_amd64.AppImage"), "Linux")
+
+    def test_snapshot_excludes_checksums_and_replaces_same_day(self):
+        payload = {
+            "repository": {"stargazers_count": 7, "forks_count": 2, "open_issues_count": 1},
+            "views": {"count": 20, "uniques": 8},
+            "clones": {"count": 12, "uniques": 5},
+            "releases": [
+                {
+                    "tag_name": "v1.0.0",
+                    "published_at": "2026-01-01T00:00:00Z",
+                    "assets": [
+                        {"name": "Shellsmith_1.0.0_windows_x64_setup.exe", "download_count": 9},
+                        {"name": "checksums-sha256.txt", "download_count": 3},
+                    ],
+                }
+            ],
+        }
+        snapshot = build_snapshot(payload, datetime(2026, 7, 10, tzinfo=timezone.utc))
+        self.assertEqual(snapshot["totals"]["downloads"], 9)
+        self.assertEqual(snapshot["totals"]["platform_downloads"]["Windows"], 9)
+
+        history = {"schema_version": 1, "repository": "kairowan/Shellsmith", "snapshots": []}
+        merge_snapshot(history, snapshot)
+        changed = json.loads(json.dumps(snapshot))
+        changed["totals"]["downloads"] = 10
+        merge_snapshot(history, changed)
+        self.assertEqual(len(history["snapshots"]), 1)
+        self.assertEqual(history["snapshots"][0]["totals"]["downloads"], 10)
+
+    def test_write_outputs(self):
+        payload = {
+            "repository": {"stargazers_count": 1, "forks_count": 0, "open_issues_count": 0},
+            "views": {"count": 3, "uniques": 2},
+            "clones": {"count": 1, "uniques": 1},
+            "releases": [],
+        }
+        snapshot = build_snapshot(payload, datetime(2026, 7, 10, tzinfo=timezone.utc))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            history = load_history(root / "missing.json", "kairowan/Shellsmith")
+            merge_snapshot(history, snapshot)
+            write_outputs(history, root)
+            self.assertTrue((root / "data/history.json").exists())
+            self.assertFalse((root / "index.html").exists())
+            saved = json.loads((root / "data/history.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["snapshots"][-1]["totals"]["downloads"], 0)
+
+    def test_unavailable_traffic_is_not_recorded_as_zero(self):
+        payload = {
+            "repository": {"stargazers_count": 1, "forks_count": 0, "open_issues_count": 0},
+            "views": {"available": False, "count": None, "uniques": None},
+            "clones": {"available": False, "count": None, "uniques": None},
+            "releases": [],
+        }
+        snapshot = build_snapshot(payload, datetime(2026, 7, 10, tzinfo=timezone.utc))
+        self.assertFalse(snapshot["traffic"]["available"])
+        self.assertIsNone(snapshot["traffic"]["unique_visitors"])
+
+    @patch("scripts.project_stats.urllib.request.urlopen")
+    def test_usage_stats_使用明确请求标识(self, urlopen):
+        response = io.BytesIO(
+            json.dumps(
+                {
+                    "data": [
+                        {
+                            "usage_date": "2026-07-10",
+                            "active_devices": 2,
+                            "app_starts": 3,
+                            "protect_successes": 1,
+                            "protect_failures": 0,
+                        }
+                    ]
+                }
+            ).encode()
+        )
+        urlopen.return_value.__enter__.return_value = response
+
+        usage = collect_usage_stats("https://stats.example.test/trend")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.get_header("User-agent"), "mocika-shield-project-stats")
+        self.assertTrue(usage["available"])
+        self.assertEqual(usage["app_starts"], 3)
+        self.assertEqual(usage["trend"][0]["date"], "2026-07-10")
+
+        payload = {
+            "repository": {"stargazers_count": 1, "forks_count": 0, "open_issues_count": 0},
+            "views": {"count": 3, "uniques": 2},
+            "clones": {"count": 1, "uniques": 1},
+            "releases": [],
+            "usage": usage,
+        }
+        snapshot = build_snapshot(payload, datetime(2026, 7, 10, tzinfo=timezone.utc))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            history = load_history(root / "missing.json", "kairowan/Shellsmith")
+            merge_snapshot(history, snapshot)
+            write_outputs(history, root)
+            saved = json.loads((root / "data/history.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["snapshots"][-1]["usage"]["trend"][0]["date"], "2026-07-10")
+
+    @patch("scripts.project_stats.urllib.request.urlopen")
+    def test_usage_stats_接口失败时明确标记不可用(self, urlopen):
+        urlopen.side_effect = urllib.error.HTTPError(
+            "https://stats.example.test/trend", 403, "Forbidden", {}, None
+        )
+        stderr = io.StringIO()
+
+        with redirect_stderr(stderr):
+            usage = collect_usage_stats("https://stats.example.test/trend")
+
+        self.assertFalse(usage["available"])
+        self.assertIn("接口不可用", stderr.getvalue())
+
+    @patch("scripts.project_stats.urllib.request.urlopen")
+    def test_usage_stats_历史趋势排除当天未完成数据(self, urlopen):
+        today = datetime.now(timezone.utc).date()
+        yesterday = today - timedelta(days=1)
+        response = io.BytesIO(
+            json.dumps(
+                {
+                    "data": [
+                        {"usage_date": yesterday.isoformat(), "active_devices": 3, "app_starts": 4},
+                        {"usage_date": today.isoformat(), "active_devices": 1, "app_starts": 1},
+                    ]
+                }
+            ).encode()
+        )
+        urlopen.return_value.__enter__.return_value = response
+
+        usage = collect_usage_stats("https://stats.example.test/trend")
+
+        self.assertEqual(usage["active_devices"], 3)
+        self.assertEqual(usage["latest_complete_date"], yesterday.isoformat())
+        self.assertEqual([row["date"] for row in usage["trend"]], [yesterday.isoformat()])
+
+    @patch("scripts.project_stats.urllib.request.urlopen")
+    def test_usage_stats_保留新版版本与失败细分(self, urlopen):
+        yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+        response = io.BytesIO(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "data": [{"usage_date": yesterday, "active_devices": 2}],
+                    "versions": [
+                        {
+                            "usage_date": yesterday,
+                            "app_version": "1.4.0-alpha.2",
+                            "protect_successes": 1,
+                        }
+                    ],
+                    "failure_breakdown": [
+                        {
+                            "usage_date": yesterday,
+                            "app_version": "1.4.0-alpha.2",
+                            "operation": "protect",
+                            "stage": "manifest",
+                            "count": 1,
+                        }
+                    ],
+                }
+            ).encode()
+        )
+        urlopen.return_value.__enter__.return_value = response
+
+        usage = collect_usage_stats("https://stats.example.test/trend")
+
+        self.assertTrue(usage["version_breakdown_available"])
+        self.assertTrue(usage["failure_breakdown_available"])
+        self.assertEqual(usage["version_trend"][0]["app_version"], "1.4.0-alpha.2")
+        self.assertEqual(usage["failure_breakdown"][0]["stage"], "manifest")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,73 @@
+package dev.mocika.shield.smoke;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.os.Bundle;
+import android.widget.TextView;
+import android.util.Log;
+
+import java.lang.reflect.Method;
+
+public final class MainActivity extends Activity {
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        if (getIntent().getBooleanExtra(SmokeReceiver.DELETE_RECOVERY_KEYS, false)) {
+            SmokeReceiver.deleteRecoveryKeys();
+            finish();
+            return;
+        }
+        Log.i("MocikaSmoke", "MOCIKA_SMOKE_ACTIVITY_OK");
+        NativeProbe.verify(this);
+        OpenFdProbe.verify(this);
+        Log.i("MocikaDexSeparation", DexSeparationReporter.snapshot());
+        Log.i("MocikaKotlinSeparation", KotlinDexSeparationReporter.snapshot());
+        boolean hasSecondaryDexFixture = hasSecondaryDexFixture();
+        if (hasSecondaryDexFixture) {
+            Log.i("MocikaMultiDexSeparation", MultiDexSeparationReporter.snapshot());
+        }
+        if (BuildConfig.DEX_SEPARATION_ONLY) logResearchVariant();
+        if (!BuildConfig.DEX_SEPARATION_ONLY && hasSecondaryDexFixture) verifySecondaryDex();
+        sendBroadcast(new Intent(this, SmokeReceiver.class));
+        startService(new Intent(this, SmokeRemoteService.class));
+        TextView content = new TextView(this);
+        content.setText("Shellsmith 端到端测试");
+        setContentView(content);
+    }
+
+    private static boolean hasSecondaryDexFixture() {
+        try {
+            Class.forName("dev.mocika.shield.smoke.SecondaryMarker");
+            return true;
+        } catch (ClassNotFoundException absent) {
+            return false;
+        }
+    }
+
+    private static void verifySecondaryDex() {
+        try {
+            Class<?> markerClass = Class.forName("dev.mocika.shield.smoke.SecondaryMarker");
+            Method verify = markerClass.getDeclaredMethod("verify");
+            verify.invoke(null);
+        } catch (Exception error) {
+            throw new IllegalStateException("第二个 DEX 加载失败", error);
+        }
+    }
+
+    private void logResearchVariant() {
+        try {
+            Class<?> reporter = Class.forName(
+                    "dev.mocika.shield.smoke.ARouterDexSeparationReporter");
+            Method snapshot = reporter.getDeclaredMethod("snapshot", android.app.Application.class);
+            Log.i("MocikaARouterSeparation", String.valueOf(
+                    snapshot.invoke(null, getApplication())));
+
+            Class<?> jniReporter = Class.forName(
+                    "dev.mocika.shield.smoke.JniDexSeparationReporter");
+            Method jniSnapshot = jniReporter.getDeclaredMethod("snapshot");
+            Log.i("MocikaJniSeparation", String.valueOf(jniSnapshot.invoke(null)));
+        } catch (Exception error) {
+            throw new IllegalStateException("研究构建验证失败", error);
+        }
+    }
+}

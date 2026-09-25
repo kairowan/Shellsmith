@@ -1,0 +1,487 @@
+use anyhow::{Context, Result};
+use std::collections::HashSet;
+use std::fs;
+use std::io::Read;
+use std::path::Path;
+
+use crate::protect::dex::patch_dex_header;
+use crate::protect::native_alias::{
+    inspect_original_apk, map_resource_path, patch_stub_dex, InjectedNativeRuntime, NativeAlias,
+};
+use crate::protect::runtime_metadata::RuntimeMetadata;
+use crate::utils::{human_size, print_success};
+use crate::EnvironmentPolicy;
+
+pub(crate) fn inject_runtime(
+    apk_dir: &Path,
+    runtime_resources: &Path,
+    original_apk: &Path,
+    excluded_abis: &[String],
+) -> Result<InjectedNativeRuntime> {
+    let mut original_native = inspect_original_apk(original_apk)?;
+    super::abi_filter::validate_exclusions(
+        &original_native.abis.iter().cloned().collect::<Vec<_>>(),
+        excluded_abis,
+    )?;
+    original_native
+        .abis
+        .retain(|abi| !excluded_abis.contains(abi));
+
+    let file = fs::File::open(runtime_resources)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    let metadata = read_archive_text(&mut archive, "metadata.json")?;
+    let runtime_metadata = RuntimeMetadata::parse(&metadata)?;
+    let protocol = runtime_metadata.native_alias;
+    let alias = NativeAlias::generate(&original_native)?;
+    let alias_file_name = alias.file_name();
+    let mut injected_abis = HashSet::new();
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let file_name = file.name().to_string();
+
+        if file_name == "metadata.json" || file_name.contains("libzstd-jni") {
+            continue;
+        }
+
+        if !original_native.abis.is_empty() && file_name.starts_with("lib/") {
+            let abi = file_name.split('/').nth(1).unwrap_or("");
+            if !abi.is_empty() && !original_native.abis.contains(abi) {
+                continue;
+            }
+        }
+
+        let output_name =
+            map_resource_path(&file_name, &protocol.canonical_file_name, &alias_file_name);
+        if output_name != file_name {
+            if let Some(abi) = file_name.split('/').nth(1) {
+                if !injected_abis.insert(abi.to_string()) {
+                    anyhow::bail!("Runtime 资源存在重复的 Native 规范库: {file_name}");
+                }
+            }
+        }
+
+        let outpath = apk_dir.join(&output_name);
+        if file_name.ends_with('/') {
+            fs::create_dir_all(&outpath)?;
+        } else {
+            if let Some(p) = outpath.parent() {
+                fs::create_dir_all(p)?;
+            }
+            let mut outfile = fs::File::create(&outpath)?;
+            std::io::copy(&mut file, &mut outfile)?;
+        }
+    }
+
+    let stub_dex = apk_dir.join("stub-classes.dex");
+    let classes_dex = apk_dir.join("classes.dex");
+
+    if stub_dex.exists() {
+        fs::rename(&stub_dex, &classes_dex).context("重命名stub-classes.dex失败")?;
+        print_success("stub-classes.dex -> classes.dex");
+    } else {
+        anyhow::bail!("未找到stub-classes.dex");
+    }
+    if injected_abis.is_empty() {
+        anyhow::bail!("Runtime 资源中未找到可注入的 Native 规范库");
+    }
+    let expected_abis = if original_native.abis.is_empty() {
+        HashSet::from([
+            "arm64-v8a".to_string(),
+            "armeabi-v7a".to_string(),
+            "x86".to_string(),
+            "x86_64".to_string(),
+        ])
+    } else {
+        original_native.abis
+    };
+    if injected_abis != expected_abis {
+        anyhow::bail!(
+            "Runtime Native ABI 不完整: 期望 {:?}，实际 {:?}",
+            expected_abis,
+            injected_abis
+        );
+    }
+    patch_stub_dex(&classes_dex, &protocol, &alias)?;
+
+    let tmp_bin = apk_dir.parent().unwrap().join("app.bin.tmp");
+    if !tmp_bin.exists() {
+        anyhow::bail!("未找到临时 app.bin.tmp，process_dex 可能未执行");
+    }
+    let payload = fs::read(&tmp_bin).context("读取 app.bin.tmp 失败")?;
+    if let Err(e) = fs::remove_file(&tmp_bin) {
+        log::warn!("删除临时文件 app.bin.tmp 失败（不影响加固结果）: {}", e);
+    }
+
+    let payload_len =
+        u32::try_from(payload.len()).context("payload 超过 4GiB 上限，无法写入 u32 长度字段")?;
+
+    let original_dex_size = {
+        let header = fs::read(&classes_dex).context("读取 classes.dex header 失败")?;
+        if header.len() < 12 {
+            anyhow::bail!("classes.dex 过短，无法读取 DEX file_size 字段");
+        }
+        u32::from_le_bytes(header[8..12].try_into().unwrap()) as u64
+    };
+    let current_size = fs::metadata(&classes_dex)?.len();
+    if current_size > original_dex_size {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(&classes_dex)
+            .context("打开 classes.dex 裁剪失败")?;
+        file.set_len(original_dex_size)
+            .context("裁剪 classes.dex 到原始 file_size 失败")?;
+        log::warn!(
+            "classes.dex 已有尾部追加数据（当前 {} 字节，原始 {} 字节），已裁剪",
+            current_size,
+            original_dex_size
+        );
+    }
+
+    let mut classes_dex_file = fs::OpenOptions::new()
+        .append(true)
+        .open(&classes_dex)
+        .context("打开 classes.dex 追加写入失败")?;
+    use std::io::Write;
+    classes_dex_file
+        .write_all(b"MSHD")
+        .context("写入 MSHD magic 失败")?;
+    classes_dex_file
+        .write_all(&payload_len.to_le_bytes())
+        .context("写入 payload 长度失败")?;
+    classes_dex_file
+        .write_all(&payload)
+        .context("写入 payload 失败")?;
+
+    drop(classes_dex_file);
+    patch_dex_header(&classes_dex).context("修复 classes.dex DEX header 失败")?;
+
+    let classes_dex_size = fs::metadata(&classes_dex)?.len();
+    print_success(&format!(
+        "加密 DEX 已追加到 classes.dex 末尾（总大小 {}）",
+        human_size(classes_dex_size)
+    ));
+    print_success("Runtime Native 别名已生成");
+    print_success("Runtime资源注入完成");
+    Ok(InjectedNativeRuntime {
+        alias_file_name,
+        injected_abis,
+        placeholder: protocol.placeholder,
+        canonical_file_name: protocol.canonical_file_name,
+    })
+}
+
+#[derive(Debug)]
+pub(crate) struct RuntimeSelection {
+    pub(crate) stub_application: String,
+    pub(crate) stub_component_factory: Option<String>,
+    pub(crate) memory_dex: bool,
+    pub(crate) xop_pvm2: bool,
+    pub(crate) xop_vm_bridge: Option<String>,
+    pub(crate) xop_vm_bridge_method: Option<String>,
+    pub(crate) assets_pas2: bool,
+    pub(crate) assets_bridge: Option<String>,
+    pub(crate) assets_bridge_method: Option<String>,
+    pub(crate) native_so_text: bool,
+    pub(crate) native_so_functions: bool,
+}
+
+pub(crate) fn read_runtime_selection(
+    resources_path: &Path,
+    environment_policy: EnvironmentPolicy,
+    allow_memory_candidate: bool,
+) -> Result<RuntimeSelection> {
+    let file = fs::File::open(resources_path).context("打开 resources.zip 失败")?;
+    let mut archive = zip::ZipArchive::new(file).context("解析 resources.zip 失败")?;
+    let content = read_archive_text(&mut archive, "metadata.json")?;
+
+    let metadata = RuntimeMetadata::parse(&content)?;
+    if environment_policy == EnvironmentPolicy::Strict && !metadata.environment_policy {
+        anyhow::bail!("所选 Runtime 资源不支持严格环境策略，请更新资源包或改用兼容模式");
+    }
+    if metadata.memory_dex && !allow_memory_candidate {
+        anyhow::bail!("内存 DEX 候选资源只能通过显式资源路径用于内部回归");
+    }
+    Ok(RuntimeSelection {
+        stub_application: metadata.stub_application,
+        stub_component_factory: metadata.stub_component_factory,
+        memory_dex: metadata.memory_dex,
+        xop_pvm2: metadata.xop_pvm2,
+        xop_vm_bridge: metadata.xop_vm_bridge,
+        xop_vm_bridge_method: metadata.xop_vm_bridge_method,
+        assets_pas2: metadata.assets_pas2,
+        assets_bridge: metadata.assets_bridge,
+        assets_bridge_method: metadata.assets_bridge_method,
+        native_so_text: metadata.native_so_text,
+        native_so_functions: metadata.native_so_functions,
+    })
+}
+
+fn read_archive_text<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    name: &str,
+) -> Result<String> {
+    let mut entry = archive
+        .by_name(name)
+        .with_context(|| format!("resources.zip 中未找到 {name}"))?;
+    let mut content = String::new();
+    entry
+        .read_to_string(&mut content)
+        .with_context(|| format!("读取 {name} 失败"))?;
+    Ok(content)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    #[test]
+    fn inspect_original_apk_detects_abis_and_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let apk_path = dir.path().join("test.apk");
+        {
+            let f = fs::File::create(&apk_path).unwrap();
+            let mut zip = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("lib/arm64-v8a/libtest.so", opts).unwrap();
+            zip.write_all(b"elf").unwrap();
+            zip.start_file("lib/armeabi-v7a/libtest.so", opts).unwrap();
+            zip.write_all(b"elf").unwrap();
+            zip.start_file("classes.dex", opts).unwrap();
+            zip.write_all(b"dex").unwrap();
+            zip.finish().unwrap();
+        }
+        let native = inspect_original_apk(&apk_path).unwrap();
+        assert!(native.abis.contains("arm64-v8a"));
+        assert!(native.abis.contains("armeabi-v7a"));
+        assert!(!native.abis.contains("x86"));
+    }
+
+    #[test]
+    fn inspect_original_apk_no_lib_dir_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let apk_path = dir.path().join("test.apk");
+        {
+            let f = fs::File::create(&apk_path).unwrap();
+            let mut zip = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("classes.dex", opts).unwrap();
+            zip.write_all(b"dex").unwrap();
+            zip.finish().unwrap();
+        }
+        let native = inspect_original_apk(&apk_path).unwrap();
+        assert!(native.abis.is_empty());
+    }
+
+    #[test]
+    fn inspect_original_apk_nonexistent_path_returns_error() {
+        assert!(inspect_original_apk(std::path::Path::new("/nonexistent/path.apk")).is_err());
+    }
+
+    #[test]
+    fn map_resource_path_only_rewrites_canonical_library() {
+        assert_eq!(
+            map_resource_path(
+                "lib/arm64-v8a/libmocikashield.so",
+                "libmocikashield.so",
+                "libnativecorebridge.so"
+            ),
+            "lib/arm64-v8a/libnativecorebridge.so"
+        );
+        assert_eq!(
+            map_resource_path(
+                "lib/arm64-v8a/libbusiness.so",
+                "libmocikashield.so",
+                "libnativecorebridge.so"
+            ),
+            "lib/arm64-v8a/libbusiness.so"
+        );
+    }
+
+    #[test]
+    fn 严格策略拒绝不具备环境策略能力的资源() {
+        let dir = tempfile::tempdir().unwrap();
+        let resources = dir.path().join("resources.zip");
+        let file = fs::File::create(&resources).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let metadata = r#"{
+            "stub_application":"msk.d",
+            "native_library":"libmocikashield.so",
+            "native_name_placeholder":"mocikanativeslot",
+            "native_name_length":16,
+            "native_name_scheme":1,
+            "runtime_protocol":2,
+            "cache_schema":1,
+            "environment_policy":false,
+            "memory_dex":false
+        }"#;
+        zip.start_file("metadata.json", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(metadata.as_bytes()).unwrap();
+        zip.finish().unwrap();
+
+        assert!(read_runtime_selection(&resources, EnvironmentPolicy::Compatible, false).is_ok());
+        let error =
+            read_runtime_selection(&resources, EnvironmentPolicy::Strict, false).unwrap_err();
+        assert!(error.to_string().contains("不支持严格环境策略"));
+    }
+
+    #[test]
+    fn 内存候选资源必须显式授权() {
+        let dir = tempfile::tempdir().unwrap();
+        let resources = dir.path().join("resources-memory.zip");
+        let file = fs::File::create(&resources).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let metadata = r#"{
+            "stub_application":"msk.d",
+            "stub_component_factory":"msk.f",
+            "native_library":"libmocikashield.so",
+            "native_name_placeholder":"mocikanativeslot",
+            "native_name_length":16,
+            "native_name_scheme":1,
+            "runtime_protocol":3,
+            "cache_schema":1,
+            "environment_policy":true,
+            "memory_dex":true,
+            "memory_dex_min_api":31
+        }"#;
+        zip.start_file("metadata.json", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(metadata.as_bytes()).unwrap();
+        zip.finish().unwrap();
+
+        let error =
+            read_runtime_selection(&resources, EnvironmentPolicy::Compatible, false).unwrap_err();
+        assert!(error.to_string().contains("显式资源路径"));
+        let selection =
+            read_runtime_selection(&resources, EnvironmentPolicy::Compatible, true).unwrap();
+        assert_eq!(selection.stub_application, "msk.d");
+        assert_eq!(selection.stub_component_factory.as_deref(), Some("msk.f"));
+        assert!(!selection.xop_pvm2);
+    }
+
+    #[test]
+    fn inject_runtime_rewrites_native_paths_and_stub_placeholder() {
+        verify_injection(false, false);
+    }
+
+    #[test]
+    fn 排除旧架构后注入仍完整且原始包不变() {
+        verify_injection(true, false);
+    }
+
+    #[test]
+    fn 排除旧架构不能掩盖受支持壳库缺失() {
+        verify_injection(true, true);
+    }
+
+    fn verify_injection(mixed: bool, missing_runtime: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let apk_dir = dir.path().join("apk");
+        fs::create_dir_all(&apk_dir).unwrap();
+        fs::write(dir.path().join("app.bin.tmp"), b"payload").unwrap();
+
+        let original_apk = dir.path().join("original.apk");
+        {
+            let file = fs::File::create(&original_apk).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            zip.start_file("classes.dex", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(b"dex").unwrap();
+            if mixed {
+                for abi in ["arm64-v8a", "armeabi-v7a", "x86", "x86_64", "mips"] {
+                    zip.start_file(
+                        format!("lib/{abi}/libbusiness.so"),
+                        zip::write::SimpleFileOptions::default(),
+                    )
+                    .unwrap();
+                    zip.write_all(b"business").unwrap();
+                    fs::create_dir_all(apk_dir.join("lib").join(abi)).unwrap();
+                    fs::write(
+                        apk_dir.join("lib").join(abi).join("libbusiness.so"),
+                        b"business",
+                    )
+                    .unwrap();
+                }
+            }
+            zip.finish().unwrap();
+        }
+        let original_bytes = fs::read(&original_apk).unwrap();
+        let excluded = if mixed {
+            vec!["mips".to_string()]
+        } else {
+            vec![]
+        };
+        super::super::abi_filter::remove_excluded(&apk_dir, &excluded).unwrap();
+
+        let resources = dir.path().join("resources.zip");
+        {
+            let file = fs::File::create(&resources).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default();
+            let metadata = r#"{
+                "stub_application":"msk.d",
+                "native_library":"libmocikashield.so",
+                "native_name_placeholder":"mocikanativeslot",
+                "native_name_length":16,
+                "native_name_scheme":1,
+                "runtime_protocol":2,
+                "cache_schema":1,
+                "environment_policy":false,
+                "memory_dex":false
+            }"#;
+            zip.start_file("metadata.json", options).unwrap();
+            zip.write_all(metadata.as_bytes()).unwrap();
+            let mut dex = vec![0u8; 96];
+            dex[0..8].copy_from_slice(b"dex\n035\0");
+            dex[32..36].copy_from_slice(&(96u32).to_le_bytes());
+            dex[48..64].copy_from_slice(b"mocikanativeslot");
+            zip.start_file("stub-classes.dex", options).unwrap();
+            zip.write_all(&dex).unwrap();
+            for abi in ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"] {
+                if missing_runtime && abi == "arm64-v8a" {
+                    continue;
+                }
+                zip.start_file(format!("lib/{abi}/libmocikashield.so"), options)
+                    .unwrap();
+                zip.write_all(abi.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+
+        let result = inject_runtime(&apk_dir, &resources, &original_apk, &excluded);
+        assert_eq!(fs::read(&original_apk).unwrap(), original_bytes);
+        assert!(!apk_dir.join("lib/mips").exists());
+        if missing_runtime {
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Runtime Native ABI 不完整"));
+            return;
+        }
+        let injected = result.unwrap();
+        assert_eq!(injected.injected_abis.len(), 4);
+        assert!(!apk_dir.join("metadata.json").exists());
+        for abi in ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"] {
+            if mixed {
+                assert_eq!(
+                    fs::read(apk_dir.join("lib").join(abi).join("libbusiness.so")).unwrap(),
+                    b"business"
+                );
+            }
+            assert!(apk_dir
+                .join("lib")
+                .join(abi)
+                .join(&injected.alias_file_name)
+                .exists());
+            assert!(!apk_dir
+                .join("lib")
+                .join(abi)
+                .join("libmocikashield.so")
+                .exists());
+        }
+        let dex = fs::read(apk_dir.join("classes.dex")).unwrap();
+        assert!(!dex.windows(16).any(|value| value == b"mocikanativeslot"));
+    }
+}

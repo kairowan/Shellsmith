@@ -1,0 +1,11 @@
+{
+  "identifier": "default",
+  "description": "shield-gui 默认桌面能力集合",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

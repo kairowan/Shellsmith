@@ -1,0 +1,388 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useApplicationSharing } from "@/hooks/use-application-sharing";
+import { confirm } from "@tauri-apps/plugin-dialog";
+import {
+  dirname,
+  isApk,
+  joinPath,
+  normalizeApkFilename,
+  protectedOutputFilename,
+  validateOutputFilename,
+} from "@/lib/path";
+import { t, tf, type Locale } from "@/lib/i18n";
+import { getProtectJavaError } from "@/lib/java";
+import { notifyError, notifySuccess } from "@/lib/notify";
+import {
+  api,
+  onTauriEvent,
+  openFileDialog,
+  type ApkCheckResult,
+  type BuildInfo,
+  type CertificateRecord,
+  type DragDropPayload,
+  type ProtectDefaults,
+  type TaskSnapshot,
+} from "@/lib/tauri";
+
+export type ProtectState = "idle" | "prechecking" | "confirming" | "running" | "done" | "failed";
+export type RuntimeMode = "standard" | "android_api19";
+export type EnvironmentPolicy = "compatible" | "strict";
+export type ProtectionProfile = "compat" | "balanced" | "strict";
+export type AiResistance = "off" | "balanced" | "high";
+
+export function useProtectWorkflow({
+  active,
+  locale,
+  certificate,
+  buildInfo,
+  defaults,
+}: {
+  active: boolean;
+  locale: Locale;
+  certificate: CertificateRecord | null;
+  buildInfo: BuildInfo | null;
+  defaults: ProtectDefaults;
+}) {
+  const [input, setInput] = useState("");
+  const sharing = useApplicationSharing(input);
+  const [outputFilename, setOutputFilenameState] = useState("");
+  const [filenameEdited, setFilenameEdited] = useState(false);
+  const [outputDirectoryMode, setOutputDirectoryMode] = useState<"source" | "fixed">(defaults.output_directory_mode);
+  const [fixedOutputDirectory, setFixedOutputDirectory] = useState(defaults.fixed_output_directory);
+  const [state, setState] = useState<ProtectState>("idle");
+  const [dragActive, setDragActive] = useState(false);
+  const [warning, setWarning] = useState("");
+  const [error, setError] = useState("");
+  const [precheck, setPrecheck] = useState("");
+  const [preflight, setPreflight] = useState<ApkCheckResult | null>(null);
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(defaults.runtime_mode);
+  const [environmentPolicy, setEnvironmentPolicy] = useState<EnvironmentPolicy>(defaults.environment_policy);
+  const [protectionProfile, setProtectionProfile] = useState<ProtectionProfile>(defaults.protection_profile);
+  const [aiResistance, setAiResistance] = useState<AiResistance>(defaults.ai_resistance);
+  const [xopPvm2PackerPath, setXopPvm2PackerPath] = useState(defaults.xop_pvm2_packer_path);
+  const [xopTrueVmpPrefixesText, setXopTrueVmpPrefixesText] = useState(defaults.xop_true_vmp_prefixes.join(", "));
+  const xopTrueVmpPrefixes = useMemo(
+    () => xopTrueVmpPrefixesText.split(/[,\s]+/).map((value) => value.trim()).filter(Boolean),
+    [xopTrueVmpPrefixesText],
+  );
+  const [currentStep, setCurrentStep] = useState("");
+  const [currentDetail, setCurrentDetail] = useState("");
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [finishedAt, setFinishedAt] = useState<number | null>(null);
+  const [taskAutoSign, setTaskAutoSign] = useState<boolean | null>(null);
+  const [taskCertificate, setTaskCertificate] = useState<CertificateRecord | null>(null);
+  const [excludedAbis, setExcludedAbis] = useState<string[]>([]);
+  const precheckRequest = useRef(0);
+  const taskId = useRef<string | null>(null);
+  const taskLocked = useRef(false);
+
+  const activeCertificate = taskAutoSign === null ? certificate : taskCertificate;
+  const autoSignReady = Boolean(activeCertificate);
+  const autoSignCertificateId = activeCertificate?.id ?? null;
+
+  const outputDirectory = outputDirectoryMode === "fixed" && fixedOutputDirectory
+    ? fixedOutputDirectory
+    : dirname(input);
+  const normalizedOutputFilename = normalizeApkFilename(outputFilename);
+  const output = useMemo(
+    () => input && normalizedOutputFilename ? joinPath(outputDirectory, normalizedOutputFilename) : "",
+    [input, normalizedOutputFilename, outputDirectory],
+  );
+  const outputFilenameError = validateOutputFilename(outputFilename);
+
+  useEffect(() => {
+    if (taskLocked.current) return;
+    setRuntimeMode(defaults.runtime_mode);
+    setEnvironmentPolicy(defaults.environment_policy);
+    setProtectionProfile(defaults.protection_profile);
+    setAiResistance(defaults.ai_resistance);
+    setXopPvm2PackerPath(defaults.xop_pvm2_packer_path);
+    setXopTrueVmpPrefixesText(defaults.xop_true_vmp_prefixes.join(", "));
+    setOutputDirectoryMode(defaults.output_directory_mode);
+    setFixedOutputDirectory(defaults.fixed_output_directory);
+  }, [defaults]);
+
+  useEffect(() => {
+    if (!taskLocked.current && !filenameEdited && input) {
+      setOutputFilenameState(protectedOutputFilename(input, autoSignReady));
+    }
+  }, [autoSignReady, filenameEdited, input]);
+
+  const resetSelection = useCallback(() => {
+    setInput("");
+    setOutputFilenameState("");
+    setFilenameEdited(false);
+    setState("idle");
+    setError("");
+    setPrecheck("");
+    setPreflight(null);
+    setWarning("");
+    setCurrentStep("");
+    setCurrentDetail("");
+    setStartedAt(null);
+    setFinishedAt(null);
+    setTaskAutoSign(null);
+    setTaskCertificate(null);
+    setExcludedAbis([]);
+    setRuntimeMode(defaults.runtime_mode);
+    setEnvironmentPolicy(defaults.environment_policy);
+    setProtectionProfile(defaults.protection_profile);
+    setAiResistance(defaults.ai_resistance);
+    setXopPvm2PackerPath(defaults.xop_pvm2_packer_path);
+    setXopTrueVmpPrefixesText(defaults.xop_true_vmp_prefixes.join(", "));
+    setOutputDirectoryMode(defaults.output_directory_mode);
+    setFixedOutputDirectory(defaults.fixed_output_directory);
+    taskId.current = null;
+    taskLocked.current = false;
+  }, [defaults]);
+
+  const setOutputFilename = useCallback((filename: string) => {
+    if (!taskLocked.current) {
+      setFilenameEdited(true);
+      setOutputFilenameState(filename);
+    }
+  }, []);
+
+  const handleSelected = useCallback(
+    (path: string) => {
+      if (taskLocked.current) {
+        return;
+      }
+      setWarning("");
+      setError("");
+      setPrecheck("");
+      setPreflight(null);
+      setCurrentStep("");
+      if (!isApk(path)) {
+        const message = t(locale, "onlyApk");
+        setWarning(message);
+        notifyError(message);
+        return;
+      }
+      setInput(path);
+      setFilenameEdited(false);
+      setOutputFilenameState(protectedOutputFilename(path, Boolean(certificate)));
+    },
+    [certificate, locale],
+  );
+
+  const runPrecheck = useCallback(
+    async (path: string) => {
+      const request = ++precheckRequest.current;
+      setState("prechecking");
+      setPrecheck("");
+      setPreflight(null);
+      try {
+        const result = await api.checkApk(path, runtimeMode, autoSignCertificateId);
+        if (request !== precheckRequest.current) {
+          return;
+        }
+        setPreflight(result);
+        if (result.error) {
+          const message = `${t(locale, "readApkFailed")}: ${result.error}`;
+          setPrecheck(message);
+          notifyError(message);
+        }
+        setState("idle");
+      } catch {
+        if (request !== precheckRequest.current) {
+          return;
+        }
+        const message = t(locale, "apkCheckFailed");
+        setPrecheck(message);
+        notifyError(message);
+        setState("idle");
+      }
+    },
+    [autoSignCertificateId, locale, runtimeMode],
+  );
+
+  useEffect(() => {
+    if (!input || taskLocked.current) {
+      return;
+    }
+    void runPrecheck(input);
+    return () => {
+      precheckRequest.current += 1;
+    };
+  }, [input, runPrecheck]);
+
+  useEffect(() => {
+    const unlisten = Promise.all([
+      onTauriEvent<TaskSnapshot>("task-state", (payload) => {
+        if (payload.kind !== "protect" || payload.task_id !== taskId.current) return;
+        setCurrentStep(payload.current_step);
+        setCurrentDetail(payload.logs.at(-1)?.message ?? "");
+        setStartedAt(payload.started_at_ms);
+        setFinishedAt(payload.finished_at_ms ?? null);
+        if (payload.status === "failed") {
+          setError(payload.error ?? t(locale, "failed"));
+          setState("failed");
+        }
+      }),
+    ]);
+    return () => { void unlisten.then((items) => items.forEach((fn) => fn())); };
+  }, [locale]);
+
+  useEffect(() => {
+    if (!active) { setDragActive(false); return; }
+    const unlisten = Promise.all([
+      onTauriEvent<DragDropPayload>("tauri://drag-drop", (payload) => {
+        const first = payload.paths?.[0];
+        setDragActive(false);
+        if (first) {
+          handleSelected(first);
+        }
+      }),
+      onTauriEvent<void>("tauri://drag-enter", () => setDragActive(true)),
+      onTauriEvent<void>("tauri://drag-leave", () => setDragActive(false)),
+    ]);
+    return () => {
+      void unlisten.then((items) => items.forEach((fn) => fn()));
+    };
+  }, [active, handleSelected]);
+
+  const browse = useCallback(async () => {
+    const path = await openFileDialog("APK", ["apk"]);
+    if (path) {
+      handleSelected(path);
+    }
+  }, [handleSelected]);
+
+  const start = useCallback(async () => {
+    if (sharing.isPending()) return;
+    if (taskLocked.current || !preflight || !input || !output || precheck || preflight.verdict === "blocked" || outputFilenameError || (outputDirectoryMode === "fixed" && !fixedOutputDirectory)) {
+      return;
+    }
+    taskLocked.current = true;
+    setState("confirming");
+    let started = false;
+    try {
+      const abiRisk = preflight.checks.find((item) => item.code === "runtime_abi" && item.severity === "warning");
+      const exclusions = runtimeMode === "standard" && abiRisk?.detail ? abiRisk.detail.split("、") : [];
+      if (exclusions.length > 0 && !await confirm(tf(locale, "confirmAbiExclusion", {
+        excluded: exclusions.join("、"),
+        retained: preflight.facts.native_abis.filter((abi) => !exclusions.includes(abi)).join("、"),
+      }), { title: t(locale, "preflightAbi"), kind: "warning", okLabel: t(locale, "excludeAbiContinue"), cancelLabel: t(locale, "cancel") })) return;
+      if (preflight.checks.some((item) => item.severity === "warning" && item.code !== "runtime_abi") && !window.confirm(t(locale, "confirmPreflightWarning"))) {
+        return;
+      }
+      if (await api.checkFileExists(output)) {
+        const confirmed = window.confirm(t(locale, "confirmOverwriteOutput"));
+        if (!confirmed) return;
+      }
+      const javaError = getProtectJavaError(locale, buildInfo);
+      if (javaError) {
+        setError(javaError);
+        notifyError(javaError);
+        setState("failed");
+        return;
+      }
+
+      const sharingChoice = sharing.freeze();
+      if (sharingChoice === undefined) return;
+      setState("running");
+      started = true;
+      setExcludedAbis(exclusions);
+      setError("");
+      setCurrentStep("CheckTools");
+      setCurrentDetail("");
+      setStartedAt(Date.now());
+      setFinishedAt(null);
+      setTaskAutoSign(autoSignReady);
+      setTaskCertificate(certificate);
+      taskLocked.current = true;
+      taskId.current = crypto.randomUUID();
+
+      const intermediateOutput = joinPath(outputDirectory, protectedOutputFilename(input, false));
+      const unsignedOutput = autoSignReady && intermediateOutput === output
+        ? joinPath(outputDirectory, `${protectedOutputFilename(input, false).replace(/\.apk$/i, "")}_unsigned.apk`)
+        : autoSignReady ? intermediateOutput : output;
+      await api.protectApk(
+        taskId.current,
+        input,
+        unsignedOutput,
+        runtimeMode,
+        environmentPolicy,
+        protectionProfile,
+        aiResistance,
+        runtimeMode === "standard" && xopPvm2PackerPath.trim() ? xopPvm2PackerPath.trim() : null,
+        runtimeMode === "standard" ? xopTrueVmpPrefixes : [],
+        autoSignReady ? output : null,
+        autoSignReady && certificate ? certificate.id : null,
+        exclusions,
+        sharingChoice,
+      );
+      setFinishedAt(Date.now());
+      setState("done");
+      notifySuccess(t(locale, "protectCompleted"));
+    } catch (err) {
+      const message = String(err);
+      setError(message);
+      notifyError(message);
+      setState("failed");
+    } finally {
+      if (!started) {
+        taskLocked.current = false;
+        setState("idle");
+      }
+    }
+  }, [aiResistance, autoSignReady, buildInfo, certificate, environmentPolicy, fixedOutputDirectory, input, locale, output, outputDirectory, outputDirectoryMode, outputFilenameError, precheck, preflight, protectionProfile, runtimeMode, sharing, xopPvm2PackerPath, xopTrueVmpPrefixes]);
+
+  const cancel = useCallback(async () => {
+    await api.cancelProtect().catch(() => undefined);
+  }, []);
+
+  const effectiveAutoSign = taskAutoSign ?? autoSignReady;
+  const steps = effectiveAutoSign
+    ? ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk", "PrepareSign", "SignApk", "Cleanup"]
+    : ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk"];
+
+  return {
+    sharing,
+    excludedAbis,
+    input,
+    output,
+    outputFilename,
+    setOutputFilename,
+    outputFilenameError,
+    outputDirectory,
+    outputDirectoryMode,
+    setOutputDirectoryMode,
+    fixedOutputDirectory,
+    setFixedOutputDirectory,
+    state,
+    dragActive,
+    warning,
+    error,
+    precheck,
+    preflight,
+    runtimeMode,
+    setRuntimeMode,
+    environmentPolicy,
+    setEnvironmentPolicy,
+    protectionProfile,
+    setProtectionProfile,
+    aiResistance,
+    setAiResistance,
+    xopPvm2PackerPath,
+    setXopPvm2PackerPath,
+    xopTrueVmpPrefixesText,
+    setXopTrueVmpPrefixesText,
+    xopTrueVmpPrefixes,
+    currentStep,
+    currentDetail,
+    startedAt,
+    finishedAt,
+    autoSignReady,
+    activeCertificate,
+    taskLocked: taskAutoSign !== null || state === "failed" || state === "confirming",
+    steps,
+    hasInput: Boolean(input),
+    showProgress: Boolean(input) && (state === "running" || state === "done" || state === "failed" || Boolean(currentStep)),
+    browse,
+    start,
+    cancel,
+    resetSelection,
+  };
+}

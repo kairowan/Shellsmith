@@ -1,0 +1,6 @@
+<resources>
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar" />
+    <string name="feature_name">Protected Feature</string>
+    <string name="conditional_feature_name">Conditional Protected Feature</string>
+    <string name="ondemand_feature_name">On Demand Protected Feature</string>
+</resources>

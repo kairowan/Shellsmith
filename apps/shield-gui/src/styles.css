@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 38 32% 98%;
+    --foreground: 211 28% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 211 28% 16%;
+    --primary: 194 82% 32%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 195 24% 92%;
+    --secondary-foreground: 211 25% 22%;
+    --muted: 195 18% 94%;
+    --muted-foreground: 210 10% 42%;
+    --accent: 18 76% 94%;
+    --accent-foreground: 14 35% 28%;
+    --destructive: 0 76% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 145 63% 38%;
+    --success-foreground: 0 0% 100%;
+    --warning: 34 92% 48%;
+    --warning-foreground: 28 74% 16%;
+    --border: 198 15% 85%;
+    --input: 198 15% 85%;
+    --ring: 194 82% 32%;
+    --radius: 12px;
+    color-scheme: light;
+    --sidebar-background: 36 30% 97%;
+    --sidebar-foreground: 211 22% 25%;
+    --sidebar-primary: 194 82% 32%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 192 35% 91%;
+    --sidebar-accent-foreground: 194 82% 25%;
+    --sidebar-border: 198 15% 88%;
+    --sidebar-ring: 194 82% 32%;
+  }
+
+  [data-theme="dark"] {
+    --background: 213 28% 10%;
+    --foreground: 210 24% 92%;
+    --card: 213 23% 15%;
+    --card-foreground: 210 24% 92%;
+    --primary: 190 72% 50%;
+    --primary-foreground: 213 34% 10%;
+    --secondary: 210 19% 20%;
+    --secondary-foreground: 210 20% 87%;
+    --muted: 212 19% 17%;
+    --muted-foreground: 212 11% 65%;
+    --accent: 18 40% 23%;
+    --accent-foreground: 20 76% 90%;
+    --destructive: 0 72% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 146 58% 44%;
+    --success-foreground: 222 24% 9%;
+    --warning: 36 92% 55%;
+    --warning-foreground: 32 72% 12%;
+    --border: 211 16% 27%;
+    --input: 211 16% 27%;
+    --ring: 190 72% 50%;
+    color-scheme: dark;
+    --sidebar-background: 214 27% 12%;
+    --sidebar-foreground: 210 20% 88%;
+    --sidebar-primary: 190 72% 50%;
+    --sidebar-primary-foreground: 213 34% 10%;
+    --sidebar-accent: 193 30% 19%;
+    --sidebar-accent-foreground: 190 78% 76%;
+    --sidebar-border: 211 16% 24%;
+    --sidebar-ring: 190 72% 50%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply m-0 overflow-hidden bg-background text-foreground antialiased;
+    font-family: Inter, "Noto Sans SC", "Segoe UI", "PingFang SC", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+  .dark {
+    --sidebar-background: 214 27% 12%;
+    --sidebar-foreground: 210 20% 88%;
+    --sidebar-primary: 190 72% 50%;
+    --sidebar-primary-foreground: 213 34% 10%;
+    --sidebar-accent: 193 30% 19%;
+    --sidebar-accent-foreground: 190 78% 76%;
+    --sidebar-border: 211 16% 24%;
+    --sidebar-ring: 190 72% 50%;
+  }
+}
+
+@layer components {
+  .app-panel {
+    @apply rounded-xl border bg-card text-card-foreground;
+  }
+
+  .field-label {
+    @apply text-[13px] font-medium text-foreground;
+  }
+
+  .field-hint {
+    @apply text-xs text-muted-foreground;
+  }
+
+  .path-text {
+    @apply min-w-0 break-all font-mono text-xs leading-5 text-muted-foreground;
+  }
+
+  .icon-button {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-md border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
