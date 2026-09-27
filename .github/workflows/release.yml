@@ -182,8 +182,8 @@ jobs:
           for path in required:
               shutil.copy2(path, staging / path.name)
           (staging / "README.txt").write_text(
-              "Shellsmith Android runtime resources\\n"
-              "用于桌面 CLI/GUI 生成 Android APK/AAB；这不是可直接安装在 Android 手机上的 GUI。\\n",
+              "Shellsmith Android runtime resources\n"
+              "用于桌面 CLI/GUI 生成 Android APK/AAB；这不是可直接安装在 Android 手机上的 GUI。\n",
               encoding="utf-8",
           )
           archive = output / f"Shellsmith_{version}_android-runtime.zip"
@@ -193,7 +193,7 @@ jobs:
                       handle.write(path, path.relative_to(output))
           digest = hashlib.sha256(archive.read_bytes()).hexdigest()
           (output / "checksums-sha256.txt").write_text(
-              f"{digest}  {archive.name}\\n", encoding="utf-8"
+              f"{digest}  {archive.name}\n", encoding="utf-8"
           )
           shutil.rmtree(staging)
           print(archive)

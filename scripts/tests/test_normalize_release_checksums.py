@@ -1,3 +1,4 @@
+import ast
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,12 @@ from scripts.normalize_release_checksums import (
 
 
 class NormalizeReleaseChecksumsTests(unittest.TestCase):
+    def test_android_workflow_checksum_keeps_archive_name(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        expression = next(line.strip().split(", encoding=")[0] for line in workflow.splitlines() if 'f"{digest}  {archive.name}' in line)
+        checksum = eval(compile(ast.parse(expression, mode="eval"), "workflow-checksum", "eval"), {"digest": "a" * 64, "archive": Path("Shellsmith_1.4.1_android-runtime.zip")})
+        self.assertEqual(normalize_checksum_text(checksum), "a" * 64 + "  Shellsmith_1.4.1_android-runtime.zip\n")
+
     def test_去掉构建目录并统一换行(self):
         content = (
             f"{'a' * 64}  ./gui-deb/Shellsmith_1.2.7_linux_amd64.deb\r\n"
