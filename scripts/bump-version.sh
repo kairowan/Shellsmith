@@ -63,7 +63,7 @@ echo "  ✓ shield-stub/compat/api19-rust/Cargo.toml"
 
 # API 19 兼容 crate 使用独立 workspace 和锁文件，Release 构建会传入 --locked。
 # 只更新本地根 package 版本，不解析或升级任何第三方依赖。
-cargo +1.77.2 update \
+rustup run 1.77.2 cargo update \
   --manifest-path "$ROOT/shield-stub/compat/api19-rust/Cargo.toml" \
   --package mocikashield-api19 \
   --precise "$VERSION" \

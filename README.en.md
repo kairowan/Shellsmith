@@ -42,7 +42,7 @@ Android quick start:
 4. Review the output directory, filename, automatic signing certificate, and per-app sharing choice, then start protection.
 5. Test the signed output on target devices: installation, launch, core functionality, and upgrade installation.
 
-iOS quick start: install full Xcode on macOS, open **Protect → iOS**, select an `.xcodeproj` or `.xcworkspace`, enter the scheme, Team ID, Bundle ID, `confidential.yml`, and freeRASP email, run the check, and choose a separate empty output directory. The `strict` profile also requires a real App Attest server endpoint. The source project is left unchanged.
+iOS quick start: install full Xcode on macOS, open **Protect → iOS**, select an `.xcodeproj` or `.xcworkspace`, enter the scheme, Team ID, and Bundle ID, run the check, and choose a separate empty output directory. `confidential.yml`, the freeRASP watcher email, and the App Attest server endpoint are all optional. Strict client hardening works without an endpoint, but it does not include a server-side device-attestation loop. The source project is left unchanged.
 
 Output defaults to the input APK's directory with a suggested filename; both can be changed before execution. Without automatic signing, sign the output with the original certificate. **Re-signing protected output with another certificate prevents startup.**
 
@@ -64,7 +64,7 @@ This removes quarantine; it does not mean the application is notarized by Apple.
 GitHub Actions live under `.github/workflows/`:
 
 - Every push to `main` and every pull request runs Rust, Python, iOS-core, and frontend checks.
-- After every successful CI run on `main`, the Release workflow automatically computes a `1.4.0-build.<CI run number>` version, builds native Linux, macOS, and Windows installers, and creates a GitHub Release. You can still run `Release` manually for a specified version.
+- After every successful CI run on `main`, the Release workflow automatically computes a `1.4.1-build.<CI run number>` version, builds native Linux, macOS, and Windows installers, and creates a GitHub Release. You can still run `Release` manually for a specified version.
 - The release job uploads Linux `.AppImage`/`.deb`, macOS `.dmg`, Windows `.exe`, Android runtime resources, and SHA-256 checksum files, and includes an automatic summary of the triggering commit.
 - macOS builds use ad-hoc signing by default. Set `MACOS_RELEASE_MODE=developer-id`, a Developer ID identity, and a notarytool profile to produce a distributable notarized package.
 

@@ -145,6 +145,74 @@ pub fn verify_archive(
         });
     }
 
+    let mut code_bundles = Vec::new();
+    collect_code_bundles(&app_path, &mut code_bundles)?;
+    let mut nested_failures = Vec::new();
+    for bundle in &code_bundles {
+        let signature = Command::new("codesign")
+            .args(["--verify", "--strict", "--verbose=2"])
+            .arg(bundle)
+            .output()
+            .context("启动 codesign 嵌套代码验证失败")?;
+        if !signature.status.success() {
+            nested_failures.push(format!(
+                "{}: {}",
+                bundle.display(),
+                concise(&String::from_utf8_lossy(&signature.stderr))
+            ));
+            continue;
+        }
+        let metadata = codesign_metadata(bundle)?;
+        if metadata.team_id.as_deref() != Some(expected_team_id) {
+            nested_failures.push(format!(
+                "{}: Team ID {}",
+                bundle.display(),
+                metadata.team_id.as_deref().unwrap_or("无法读取")
+            ));
+        }
+        let info = bundle.join("Info.plist");
+        if info.is_file() {
+            let plist = read_plist_json(&info)?;
+            if let Some(name) = plist.get("CFBundleExecutable").and_then(Value::as_str) {
+                let binary = bundle.join(name);
+                if binary.is_file() {
+                    let architectures = macho_architectures(&binary)?;
+                    if !architectures.iter().any(|value| value == "arm64") {
+                        nested_failures.push(format!(
+                            "{}: 缺少 arm64（{}）",
+                            binary.display(),
+                            architectures.join(", ")
+                        ));
+                    }
+                }
+            }
+        } else if bundle.extension().and_then(|value| value.to_str()) == Some("dylib") {
+            let architectures = macho_architectures(bundle)?;
+            if !architectures.iter().any(|value| value == "arm64") {
+                nested_failures.push(format!(
+                    "{}: 缺少 arm64（{}）",
+                    bundle.display(),
+                    architectures.join(", ")
+                ));
+            }
+        }
+    }
+    checks.push(if nested_failures.is_empty() {
+        IosCheck::ready(
+            "embedded_code_integrity",
+            format!(
+                "已验证 {} 个 App/Extension/Framework 代码包的签名、Team ID 和 arm64",
+                code_bundles.len()
+            ),
+        )
+    } else {
+        IosCheck::blocked(
+            "embedded_code_integrity",
+            format!("嵌套代码验证失败：{}", nested_failures.join("；")),
+            None,
+        )
+    });
+
     let frameworks = app_path.join("Frameworks");
     let talsec_framework = frameworks.join("TalsecRuntime.framework");
     let talsec_framework_present = talsec_framework.is_dir();
@@ -221,6 +289,11 @@ pub fn verify_archive(
             )
         });
     }
+    checks.push(IosCheck::warning(
+        "runtime_device_validation",
+        "静态 Archive 验证不等于真机 Release 验证；仍需执行冷启动、后台恢复、Scene、推送、深链、蓝牙/音频/定位和内存压力回归",
+        None,
+    ));
     Ok(ArchiveVerification {
         app_path,
         bundle_id,
@@ -369,6 +442,23 @@ fn directories_with_extension(root: &Path, extension: &str) -> Result<Vec<PathBu
         }
     }
     Ok(result)
+}
+
+fn collect_code_bundles(root: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
+    let extension = root.extension().and_then(|value| value.to_str());
+    if matches!(extension, Some("app" | "appex" | "framework" | "dylib")) {
+        output.push(root.to_path_buf());
+        if !matches!(extension, Some("app")) {
+            return Ok(());
+        }
+    }
+    for entry in fs::read_dir(root)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_code_bundles(&path, output)?;
+        }
+    }
+    Ok(())
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {

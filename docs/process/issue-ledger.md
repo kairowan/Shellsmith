@@ -41,7 +41,7 @@
 |---|---|---|---|---|---|
 | #55 SPM 无法集成 | P0 依赖解析 | 使用精确版本、本地 Package 直接依赖应用 target；Archive 前强制 `-resolvePackageDependencies`，失败关闭并保留诊断 | 已规避待验证 | 生成的 Package 清单可由 SwiftPM 解析；缺完整 Xcode 在线解析 | Xcode 干净缓存解析与 Archive 通过 |
 | #17 动态 framework 被嵌入二级 framework 后无法发布 | P0 发布兼容 | 禁止向 framework target 接线，TalsecRuntime 只作为主应用 target 的直接依赖 | 已规避待验证 | target 类型门禁和 pbxproj 接线单测通过 | App Store Connect 上传验证通过 |
-| #41 Dopamine 2 RootHide 未检测 | P1 残余风险 | 保留明确警告；`strict` 强制要求 App Attest 服务端地址，并将 RASP 作为风险输入而非唯一判据 | 上游限制 | 配置门禁与报告警告单测通过；freeRASP 为闭源二进制 | 上游修复并在对应越狱设备复测；修复前不得标为已解决 |
+| #41 Dopamine 2 RootHide 未检测 | P1 残余风险 | 保留明确警告；`strict` 可选接入 App Attest 服务端，并将 RASP 作为风险输入而非唯一判据 | 上游限制 | 配置门禁与报告警告单测通过；freeRASP 为闭源二进制 | 上游修复并在对应越狱设备复测；修复前不得标为已解决 |
 
 ## 状态定义
 

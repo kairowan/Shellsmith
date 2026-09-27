@@ -42,7 +42,7 @@ Android 快速流程：
 4. 确认输出目录、文件名和自动签名证书，按需调整当前应用的分享选择，再开始加固。
 5. 使用签名后的产物，在目标设备验证安装、启动、主要业务功能和覆盖升级。
 
-iOS 快速流程：在 macOS 安装完整 Xcode，在 **加固 → iOS** 选择 `.xcodeproj` 或 `.xcworkspace`，填写 scheme、Team ID、Bundle ID、`confidential.yml` 与 freeRASP 邮箱，先运行检查，再选择独立空目录执行保护。`strict` 还要求真实的 App Attest 服务端地址。原工程不会被修改。
+iOS 快速流程：在 macOS 安装完整 Xcode，在 **加固 → iOS** 选择 `.xcodeproj` 或 `.xcworkspace`，填写 scheme、Team ID、Bundle ID，先运行检查，再选择独立空目录执行保护。`confidential.yml`、freeRASP 邮箱和 App Attest 服务端地址均为可选项；没有后台地址时仍可执行严格客户端加固，但不包含服务端设备证明闭环。原工程不会被修改。
 
 输出默认位于原 APK 同目录，并自动建议文件名；执行前可修改。不启用自动签名时，产物仍需使用原证书签名才能安装运行。**加固产物与原证书绑定，换证书重签会导致应用无法启动。**
 
@@ -64,7 +64,7 @@ xattr -rd com.apple.quarantine /Applications/Shellsmith.app
 GitHub Actions 位于 `.github/workflows/`：
 
 - 每次推送到 `main` 或创建 Pull Request 时运行 Rust、Python、iOS 核心和前端检查。
-- `main` 每次通过 CI 后，Release 工作流会自动计算 `1.4.0-build.<CI运行号>` 版本，在 Linux、macOS 和 Windows 原生 runner 上构建安装包，并创建 GitHub Release；也可以手动运行 `Release` 发布指定版本。
+- `main` 每次通过 CI 后，Release 工作流会自动计算 `1.4.1-build.<CI运行号>` 版本，在 Linux、macOS 和 Windows 原生 runner 上构建安装包，并创建 GitHub Release；也可以手动运行 `Release` 发布指定版本。
 - 发布流程会上传 Linux `.AppImage`/`.deb`、macOS `.dmg`、Windows `.exe`、Android runtime 资源包及 SHA-256 校验文件，并自动生成本次提交的变更摘要。
 - macOS 默认生成 adhoc 签名包；配置 `MACOS_RELEASE_MODE=developer-id`、Developer ID 身份和 notarytool profile 后，才生成可分发的公证包。
 

@@ -99,13 +99,13 @@ GUI 会在应用启动时检测一次本机 Java 环境，并将结果缓存到�
 
 ### iOS 源码工程加固
 
-iOS 完整构建要求 macOS、完整 Xcode、可用的 Apple Team 和 Provisioning Profile。Windows/Linux 可以查看静态检查结果，但不能 Archive 或导出 IPA。
+iOS 完整构建要求 macOS、完整 Xcode、可用的 Apple Team 和 Provisioning Profile。Shellsmith 会自动发现常见位置的完整 Xcode，即使系统 `xcode-select` 暂时仍指向 Command Line Tools，也会对本次任务使用发现到的 Xcode；Windows/Linux 可以查看静态检查结果，但不能 Archive 或导出 IPA。
 
 1. 在 **加固** 页面切换到 **iOS**，选择 `.xcodeproj` 或 `.xcworkspace`。
 2. 填写 scheme、Release configuration、10 位 Team ID 和允许的 Bundle ID；多 Bundle ID 用逗号或空格分隔。
 3. 点击“检查工程”。存在非应用 target、共享 scheme 缺失、完整 Xcode 缺失或上游已知错误接法时，构建按钮保持禁用。
-4. `balanced`/`strict` 选择 `confidential.yml`，填写 freeRASP `watcherMail`。只保护明确列入配置的 Swift 字面量；本地化键、selector、反射名称和资源名不要加入。
-5. `strict` 还必须填写实际的 HTTPS App Attest 服务端地址。客户端只生成调用接口，服务端须实现挑战、证明校验和重放防护。
+4. `confidential.yml` 和 freeRASP `watcherMail` 都是可选项。提供 `confidential.yml` 时，只保护明确列入配置的 Swift 字面量；未提供时仍启用 freeRASP，只跳过项目自定义敏感字面量保护。本地化键、selector、反射名称和资源名不要加入。
+5. `strict` 的 App Attest 服务端地址可选。不填写时仍执行严格客户端加固；填写后，客户端只生成调用接口，业务服务端仍须实现挑战、证明校验和重放防护。
 6. 选择独立的空输出目录和导出方式。只有允许 Xcode 使用本机开发者账号更新描述文件时，才开启“允许更新 Provisioning”。
 7. 完成后在输出目录检查工作副本、`.xcarchive`、IPA 和 `shellsmith-report.json`，再用目标设备验证启动、敏感流程和威胁响应。
 
@@ -116,8 +116,8 @@ Shellsmith 不修改原工程，也不保存 Apple 账号令牌、钥匙串密�
 | 档位 | 行为 |
 |---|---|
 | `compat` | Apple 原生 Release/Archive、签名和产物检查，不接入第三方 RASP |
-| `balanced` | 选择性 Swift Confidential + freeRASP 分级事件，推荐默认值 |
-| `strict` | balanced + App Attest 客户端合同；必须已有服务端端点 |
+| `balanced` | freeRASP 分级事件；提供 `confidential.yml` 时再启用选择性 Swift Confidential，推荐默认值 |
+| `strict` | balanced + App Attest 客户端接口；服务端地址可选，未配置时明确标记为没有服务端证明闭环 |
 
 freeRASP 的越狱、Hook、签名异常等结果是风险信号。生成的封装会发出稳定回调与通知，不会擅自退出应用或封禁账号。Dopamine 2 RootHide 漏检属于上游闭源实现的残余风险，strict 应结合 App Attest 和服务端业务风控。完整说明见 [iOS 加固实现](design/ios-hardening.md)。
 
@@ -142,7 +142,7 @@ GUI 启动时会一次性加载应用配置与证书数据库，运行期间使�
 
 ### iOS
 
-先复制并修改 [`examples/shellsmith-ios.toml`](../examples/shellsmith-ios.toml) 与 [`examples/confidential.yml`](../examples/confidential.yml)：
+先复制并修改 [`examples/shellsmith-ios.toml`](../examples/shellsmith-ios.toml)。需要保护项目自定义敏感字面量时，再按需创建 [`examples/confidential.yml`](../examples/confidential.yml) 的副本：
 
 ```bash
 # 只读检查，输出 JSON；不要求修改工程
@@ -196,6 +196,10 @@ shield protect -i input.apk -o protected.apk \
 GUI 安装包已经内置 Xop PVM2 Packer：Packer 路径留空即使用内置版本，无需额外选择文件；“选择自定义 Packer JAR”会覆盖内置版本，“恢复使用内置 Packer”可随时切回。自定义 JAR 会以当前用户权限在本机执行，因此必须来自可信来源，并兼容 `pvm2-transform` 与 code.bin v6 契约；输出仍会由核心验证。业务类前缀仍需在“调整设置 → Xop PVM2 方法虚拟化”中用逗号填写。严格模式要求 PVM2 成功覆盖率至少达到 70%，并输出选中、尝试、成功、跳过原因及未覆盖指令统计；低于门槛会失败关闭。严格代码保护只有在标准运行时、Java 17+、可用 Packer 和有效前缀都就绪时才允许开始；路径和业务类名不会出现在脱敏诊断摘要中，摘要只记录 PVM2 是否已配置。
 
 PVM2 v6 已支持普通/复杂条件分支、`switch`、异常表与 `throw`、对象/原始数组、标准反射调用所需的 invoke 路径，以及 `monitor-enter/exit` 同步语义。每次构建会改变虚拟 Opcode、虚拟寄存器映射、立即数编码、Handler 顺序，并从三套 Dispatcher 模板中选择一套；覆盖报告中的 `isa` 可用于确认变体。仍不满足契约的方法（例如个别 `invoke-custom`/`invoke-polymorphic`、超出寄存器或代码预算的方法）必须记入跳过原因，不能当作成功。
+
+为保证音频/视频拖动和解码器状态，内置 Packer 会把播放器、解码器、音频/波形类及其 Kotlin/R8 合成访问器整体留在 ART；RecyclerView 适配器、Widget/View/Binding、资源/文件 Helper（兼容历史包名中的 `hepler`）也留在 ART，避免空接收者、回调和资源 ID 语义被 PVM2 改写。报告会以 `compatibility` 记录这些跳过项。资源 PAS2 同样默认跳过常见音视频扩展名，避免把需要随机访问的媒体流包装成只读顺序流。
+
+这些是按 DEX 描述符、方法指令和 Android 生命周期边界计算的通用规则，不依赖某个业务包名或某个应用的类名。PVM2 对对象接收者执行路径敏感的控制流保护：`if-eqz`/`if-nez` 已证明非空的路径可以继续虚拟化，多个路径合流时只保留所有路径都能证明的非空事实；直线调用仍保持 ART 与 PVM2 相同的空接收者异常语义。跨分支或异常边界、又无法证明非空的接收者记为 `nullable_receiver` 并保留 ART，本地创建且可证明非空的对象仍可继续虚拟化。静态调用不会被误当作需要接收者证明的实例调用。工具对无法证明语义等价的方法失败关闭并保留 ART；这能显著降低兼容风险，但不能对任意第三方 APK、厂商 ROM 或未提供的业务 Native SDK 做绝对“零崩溃”保证，正式发布仍需用目标 APK 和设备矩阵回归。
 
 业务 `.so` 的 APK 后处理层是“按库策略选择 + ELF 符号函数边界静态加密 + PSO2 认证密钥表 + 私有目录按函数区域解密加载”，能够提高直接静态反汇编成本。任一 ABI 缺少安全函数符号、含不安全重定位、超预算或属于系统/壳/高风险运行库时，整个同名库会跳过并计入报告，避免只加密部分 ABI。它仍是函数粒度的静态保护。
 
@@ -487,12 +491,6 @@ DEX 文件经 Zstd 压缩后体积通常会明显减小；`high` 会再增加压
 
 ## 更多界面预览
 
-以下截图用于展示页面布局，具体选项以当前版本为准。
+以下截图使用当前 Shellsmith 界面，具体选项以当前版本为准。
 
-| 签名页 | 证书页 |
-|---|---|
-| ![签名页](assets/screenshots/readme-sign-main.png) | ![证书页](assets/screenshots/readme-certificates.png) |
-
-| 设置页 | 关于页 |
-|---|---|
-| ![设置页](assets/screenshots/readme-settings.png) | ![关于页](assets/screenshots/readme-about.png) |
+![Shellsmith 当前加固页](assets/screenshots/readme-protect-main.png)

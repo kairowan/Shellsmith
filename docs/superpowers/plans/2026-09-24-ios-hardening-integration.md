@@ -14,7 +14,7 @@
 - [x] 阶段四：Archive、ExportOptions、IPA 定位及 codesign/Team/Bundle/Entitlements/arm64/隐私清单/dSYM 验证代码已完成；完整 Xcode 实跑仍是发布门禁。
 - [x] 阶段五：CLI、Tauri 命令、取消/进度状态和 Android/iOS 界面切换已接入。
 - [ ] 阶段六：完成真实设备、兼容性、许可证及发布验收。
-- [ ] 阶段七：已完成 App Attest 客户端合同和 strict 端点门禁；服务端挑战、证明校验与重放防护尚未实现，因此不标记为第四代。
+- [ ] 阶段七：已完成 App Attest 客户端合同；服务端地址为可选增强项，服务端挑战、证明校验与重放防护尚未实现，因此不标记为第四代。
 
 当前主机只有 Apple Command Line Tools，没有完整 Xcode。Rust、SwiftPM 清单、CLI、Tauri 后端与前端验证已完成；`.xcarchive`、IPA、App Store Connect、真机 RASP 与 App Attest 服务端闭环没有被伪报为通过。准确执行证据见[兼容性矩阵](../../process/compatibility-matrix.md)和[测试清单](../../process/test-checklist.md)。
 

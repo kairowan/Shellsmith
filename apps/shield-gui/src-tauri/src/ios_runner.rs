@@ -104,8 +104,15 @@ pub(crate) fn cancel_ios_protect(cancel: tauri::State<'_, IosCancelHandle>) {
 impl IosProtectRequest {
     fn into_options(self) -> (ProtectIosOptions, String) {
         let task_id = self.task_id;
-        let uses_confidential = self.profile.uses_confidential();
+        let confidential_config = self
+            .confidential_config
+            .filter(|path| !path.trim().is_empty());
+        let uses_confidential = self.profile.uses_confidential() && confidential_config.is_some();
         let uses_rasp = self.profile.uses_rasp();
+        let watcher_mail = self
+            .watcher_mail
+            .map(|mail| mail.trim().to_string())
+            .filter(|mail| !mail.is_empty());
         let config = ShellsmithIosConfig {
             project: IosProjectConfig {
                 path: PathBuf::from(self.project),
@@ -122,12 +129,12 @@ impl IosProtectRequest {
             },
             confidential: uses_confidential.then(|| IosConfidentialConfig {
                 enabled: true,
-                config: PathBuf::from(self.confidential_config.unwrap_or_default()),
+                config: PathBuf::from(confidential_config.expect("enabled config")),
             }),
             rasp: uses_rasp.then(|| IosRaspConfig {
                 provider: "freerasp".to_string(),
                 enabled: true,
-                watcher_mail: self.watcher_mail,
+                watcher_mail,
                 critical: ["signature", "jailbreak", "debugger", "runtimeManipulation"]
                     .into_iter()
                     .map(str::to_string)

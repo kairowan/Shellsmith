@@ -146,7 +146,13 @@ pub fn inspect_ios_project(path: &Path, scheme: Option<&str>) -> Result<IosProje
     }];
 
     let (schemes, targets) = if xcode.available {
-        inspect_with_xcode(&project_path, kind, scheme).unwrap_or_else(|error| {
+        inspect_with_xcode(
+            &project_path,
+            kind,
+            scheme,
+            xcode.developer_dir.as_deref().map(Path::new),
+        )
+        .unwrap_or_else(|error| {
             checks.push(IosCheck::blocked(
                 "xcode_project",
                 format!("Xcode 无法读取工程：{error:#}"),
@@ -218,6 +224,8 @@ pub fn inspect_ios_project(path: &Path, scheme: Option<&str>) -> Result<IosProje
 pub(crate) fn validate_protection_target(
     inspection: &IosProjectInspection,
     profile: IosProtectionProfile,
+    expected_team_id: &str,
+    expected_bundle_ids: &[String],
 ) -> Result<()> {
     if inspection
         .checks
@@ -226,18 +234,37 @@ pub(crate) fn validate_protection_target(
     {
         anyhow::bail!("iOS 工程预检存在阻断项，请先查看检查报告");
     }
-    if profile != IosProtectionProfile::Compat {
-        if !inspection.xcode.available {
-            return Ok(());
-        }
-        let target = inspection
-            .primary_application_target()
-            .context("所选 scheme 不是应用 target，不能接入 Swift Confidential/freeRASP")?;
-        if target.is_framework() || target.build_library_for_distribution {
+    if !inspection.xcode.available {
+        return Ok(());
+    }
+    let target = inspection
+        .primary_application_target()
+        .context("所选 scheme 不是应用 target，不能接入 iOS 保护")?;
+    match target.team_id.as_deref() {
+        Some(team_id) if team_id == expected_team_id => {}
+        Some(team_id) => anyhow::bail!(
+            "配置 Team ID {} 与 Xcode target Team ID {} 不一致",
+            expected_team_id,
+            team_id
+        ),
+        None => anyhow::bail!("Xcode target 缺少 DEVELOPMENT_TEAM"),
+    }
+    if let Some(bundle_id) = target.bundle_id.as_deref() {
+        if !expected_bundle_ids.iter().any(|value| value == bundle_id) {
             anyhow::bail!(
-                "Swift Confidential/freeRASP 只能直接接入应用 target；framework/XCFramework 接法存在已知 Archive 或嵌套 framework 问题"
+                "配置 Bundle ID 列表不包含 Xcode target 的 Bundle ID：{}",
+                bundle_id
             );
         }
+    } else {
+        anyhow::bail!("Xcode target 缺少 PRODUCT_BUNDLE_IDENTIFIER");
+    }
+    if profile != IosProtectionProfile::Compat
+        && (target.is_framework() || target.build_library_for_distribution)
+    {
+        anyhow::bail!(
+            "Swift Confidential/freeRASP 只能直接接入应用 target；framework/XCFramework 接法存在已知 Archive 或嵌套 framework 问题"
+        );
     }
     Ok(())
 }
@@ -245,9 +272,10 @@ pub(crate) fn validate_protection_target(
 pub(crate) fn known_issue_checks(
     inspection: &IosProjectInspection,
     profile: IosProtectionProfile,
+    confidential_enabled: bool,
 ) -> Vec<IosCheck> {
     let mut checks = Vec::new();
-    if profile.uses_confidential() {
+    if confidential_enabled {
         let unsupported = inspection
             .targets
             .iter()
@@ -326,36 +354,109 @@ fn inspect_xcode() -> XcodeEnvironment {
             ..XcodeEnvironment::default()
         };
     }
-    let developer_dir = Command::new("xcode-select")
+    let selected_developer_dir = Command::new("xcode-select")
         .arg("-p")
         .output()
         .ok()
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string());
-    let output = Command::new("xcodebuild").arg("-version").output();
-    match output {
-        Ok(output) if output.status.success() => XcodeEnvironment {
-            available: true,
-            version: Some(
-                String::from_utf8_lossy(&output.stdout)
-                    .trim()
-                    .replace('\n', " · "),
-            ),
-            developer_dir,
-            diagnostic: None,
-        },
-        Ok(output) => XcodeEnvironment {
-            available: false,
-            version: None,
-            developer_dir,
-            diagnostic: Some(clean_command_error(&output.stderr)),
-        },
-        Err(error) => XcodeEnvironment {
-            available: false,
-            version: None,
-            developer_dir,
-            diagnostic: Some(format!("无法启动 xcodebuild：{error}")),
-        },
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os("DEVELOPER_DIR") {
+        add_developer_candidate(&mut candidates, PathBuf::from(path));
+    }
+    if let Some(path) = selected_developer_dir.as_deref() {
+        add_developer_candidate(&mut candidates, PathBuf::from(path));
+    }
+    add_developer_candidate(
+        &mut candidates,
+        PathBuf::from("/Applications/Xcode.app/Contents/Developer"),
+    );
+    if let Some(home) = std::env::var_os("HOME") {
+        add_developer_candidate(
+            &mut candidates,
+            PathBuf::from(home).join("Applications/Xcode.app/Contents/Developer"),
+        );
+    }
+    add_installed_xcodes(Path::new("/Applications"), &mut candidates);
+    if let Some(home) = std::env::var_os("HOME") {
+        add_installed_xcodes(&PathBuf::from(home).join("Applications"), &mut candidates);
+    }
+    if let Ok(output) = Command::new("mdfind")
+        .args(["kMDItemCFBundleIdentifier == 'com.apple.dt.Xcode'"])
+        .output()
+    {
+        for path in String::from_utf8_lossy(&output.stdout).lines() {
+            add_developer_candidate(&mut candidates, PathBuf::from(path.trim()));
+        }
+    }
+
+    let mut diagnostics = Vec::new();
+    for developer_dir in candidates {
+        let output = Command::new("xcodebuild")
+            .env("DEVELOPER_DIR", &developer_dir)
+            .arg("-version")
+            .output();
+        match output {
+            Ok(output) if output.status.success() => {
+                return XcodeEnvironment {
+                    available: true,
+                    version: Some(
+                        String::from_utf8_lossy(&output.stdout)
+                            .trim()
+                            .replace('\n', " · "),
+                    ),
+                    developer_dir: Some(developer_dir.display().to_string()),
+                    diagnostic: None,
+                };
+            }
+            Ok(output) => diagnostics.push(clean_command_error(&output.stderr)),
+            Err(error) => diagnostics.push(format!("无法启动 xcodebuild：{error}")),
+        }
+    }
+    let selected = selected_developer_dir.as_deref().unwrap_or("未设置");
+    XcodeEnvironment {
+        available: false,
+        version: None,
+        developer_dir: Some(selected.to_string()),
+        diagnostic: Some(format!(
+            "未找到可用的完整 Xcode；当前开发者目录为 {selected}。已自动检查常见 Xcode 安装位置{}",
+            diagnostics
+                .last()
+                .map(|value| format!("：{value}"))
+                .unwrap_or_default()
+        )),
+    }
+}
+
+fn add_developer_candidate(candidates: &mut Vec<PathBuf>, path: PathBuf) {
+    let path = if path.extension().and_then(|value| value.to_str()) == Some("app") {
+        path.join("Contents").join("Developer")
+    } else {
+        path
+    };
+    if path.is_dir() && !candidates.iter().any(|item| item == &path) {
+        candidates.push(path);
+    }
+}
+
+fn add_installed_xcodes(root: &Path, candidates: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    let mut apps = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().and_then(|value| value.to_str()) == Some("app")
+                && path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|value| value.starts_with("Xcode"))
+        })
+        .collect::<Vec<_>>();
+    apps.sort();
+    for app in apps {
+        add_developer_candidate(candidates, app);
     }
 }
 
@@ -363,13 +464,14 @@ fn inspect_with_xcode(
     project: &Path,
     kind: &str,
     scheme: Option<&str>,
+    developer_dir: Option<&Path>,
 ) -> Result<(Vec<String>, Vec<IosTargetInspection>)> {
     let selector = if kind == "workspace" {
         "-workspace"
     } else {
         "-project"
     };
-    let list = Command::new("xcodebuild")
+    let list = xcodebuild_command(developer_dir)
         .arg("-list")
         .arg("-json")
         .arg(selector)
@@ -392,7 +494,7 @@ fn inspect_with_xcode(
     let Some(scheme) = scheme else {
         return Ok((schemes, Vec::new()));
     };
-    let settings = Command::new("xcodebuild")
+    let settings = xcodebuild_command(developer_dir)
         .arg(selector)
         .arg(project)
         .arg("-scheme")
@@ -437,6 +539,14 @@ fn inspect_with_xcode(
         });
     }
     Ok((schemes, targets))
+}
+
+fn xcodebuild_command(developer_dir: Option<&Path>) -> Command {
+    let mut command = Command::new("xcodebuild");
+    if let Some(developer_dir) = developer_dir {
+        command.env("DEVELOPER_DIR", developer_dir);
+    }
+    command
 }
 
 fn inspect_statically(
@@ -645,12 +755,44 @@ mod tests {
             xcode: XcodeEnvironment::default(),
             checks: vec![],
         };
-        let checks = known_issue_checks(&report, IosProtectionProfile::Balanced);
+        let checks = known_issue_checks(&report, IosProtectionProfile::Balanced, true);
         assert!(checks
             .iter()
             .any(|check| check.code == "freerasp_roothide_residual"));
         assert!(checks
             .iter()
             .any(|check| check.code == "freerasp_spm_resolution"));
+    }
+
+    #[test]
+    fn target_identity_must_match_protection_configuration() {
+        let report = IosProjectInspection {
+            project_path: PathBuf::from("Demo.xcodeproj"),
+            source_root: PathBuf::from("."),
+            kind: "project".into(),
+            requested_scheme: Some("Demo".into()),
+            schemes: vec!["Demo".into()],
+            targets: vec![IosTargetInspection {
+                name: "Demo".into(),
+                product_type: "com.apple.product-type.application".into(),
+                bundle_id: Some("com.example.real".into()),
+                team_id: Some("ABCDE12345".into()),
+                deployment_target: Some("13.0".into()),
+                project_file: None,
+                build_library_for_distribution: false,
+            }],
+            xcode: XcodeEnvironment {
+                available: true,
+                ..XcodeEnvironment::default()
+            },
+            checks: vec![],
+        };
+        assert!(validate_protection_target(
+            &report,
+            IosProtectionProfile::Balanced,
+            "ABCDE12345",
+            &["com.example.other".into()]
+        )
+        .is_err());
     }
 }

@@ -53,9 +53,9 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
     ...(report?.checks ?? []),
   ].filter((check, index, items) => items.findIndex((item) => item.code === check.code && item.message === check.message) === index), [inspection, report]);
   const buildBlocked = !inspection?.xcode.available || inspection.checks.some((check) => check.severity === "blocked" && check.code !== "xcode");
-  const profileReady = profile === "compat" || Boolean(confidentialConfig.trim() && watcherMail.trim());
-  const strictReady = profile !== "strict" || /^https:\/\/\S+$/.test(appAttestEndpoint.trim());
-  const formReady = Boolean(project && scheme.trim() && /^[A-Z0-9]{10}$/.test(teamId.trim()) && bundleIds.trim() && output && profileReady && strictReady);
+  const strictEndpoint = appAttestEndpoint.trim();
+  const strictReady = profile !== "strict" || !strictEndpoint || /^https:\/\/\S+$/.test(strictEndpoint);
+  const formReady = Boolean(project && scheme.trim() && /^[A-Z0-9]{10}$/.test(teamId.trim()) && bundleIds.trim() && output && strictReady);
 
   async function chooseProject() {
     const path = await openFileDialog("Xcode", ["xcodeproj", "xcworkspace"]);
@@ -102,10 +102,10 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
         entrypoint: entrypoint.trim() || null,
         output,
         profile,
-        confidentialConfig: profile === "compat" ? null : confidentialConfig,
-        watcherMail: profile === "compat" ? null : watcherMail.trim(),
+        confidentialConfig: profile === "compat" ? null : (confidentialConfig.trim() || null),
+        watcherMail: profile === "compat" ? null : (watcherMail.trim() || null),
         isProd: true,
-        appAttestEndpoint: profile === "strict" ? appAttestEndpoint.trim() : null,
+        appAttestEndpoint: profile === "strict" ? (appAttestEndpoint.trim() || null) : null,
         exportOptions: exportOptions || null,
         exportMethod,
         allowProvisioningUpdates,
@@ -178,10 +178,10 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
                 </SelectInput>
               </Field>
               {profile !== "compat" && <>
-                <Field className="mt-4" label="confidential.yml"><PathChooser value={confidentialConfig} placeholder={t(locale, "notSelected")} button={t(locale, "chooseFile")} disabled={running} onChoose={async () => { const value = await openFileDialog("YAML", ["yml", "yaml"]); if (value) setConfidentialConfig(value); }} /></Field>
-                <Field className="mt-4" label="freeRASP watcherMail"><TextInput type="email" value={watcherMail} disabled={running} onChange={(event) => setWatcherMail(event.target.value)} placeholder="security@example.com" /></Field>
+                <Field className="mt-4" label={t(locale, "iosConfidentialOptional")} hint={t(locale, "iosConfidentialOptionalHint")}><PathChooser value={confidentialConfig} placeholder={t(locale, "notSelectedOptional")} button={t(locale, "chooseFile")} disabled={running} onChoose={async () => { const value = await openFileDialog("YAML", ["yml", "yaml"]); if (value) setConfidentialConfig(value); }} /></Field>
+                <Field className="mt-4" label={t(locale, "iosWatcherMailOptional")} hint={t(locale, "iosWatcherMailOptionalHint")}><TextInput type="email" value={watcherMail} disabled={running} onChange={(event) => setWatcherMail(event.target.value)} placeholder="security@example.com" /></Field>
               </>}
-              {profile === "strict" && <Field className="mt-4" label="App Attest Endpoint" hint={t(locale, "appAttestHint")}><TextInput value={appAttestEndpoint} disabled={running} onChange={(event) => setAppAttestEndpoint(event.target.value)} placeholder="https://api.example.com/attest" /></Field>}
+              {profile === "strict" && <Field className="mt-4" label={t(locale, "appAttestEndpointOptional")} hint={t(locale, "appAttestHint")}><TextInput value={appAttestEndpoint} disabled={running} onChange={(event) => setAppAttestEndpoint(event.target.value)} placeholder="https://api.example.com/attest" /></Field>}
               <Field className="mt-4" label={t(locale, "iosExportMethod")}>
                 <SelectInput value={exportMethod} disabled={running} onChange={(event) => setExportMethod(event.target.value)}>
                   <option value="development">development</option>

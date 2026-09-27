@@ -77,7 +77,8 @@ pub(crate) fn runtime_source(rasp: bool) -> String {
     if !rasp {
         return "import Foundation\n\npublic enum ShellsmithRuntime {}\n".to_string();
     }
-    r#"import Foundation
+    r#"import Dispatch
+import Foundation
 import TalsecRuntime
 
 public enum ShellsmithThreatSeverity: String, Sendable {
@@ -96,11 +97,17 @@ public extension Notification.Name {
 }
 
 public enum ShellsmithRuntime {
+    private enum State {
+        case idle
+        case starting
+        case started
+    }
+
     private static let lock = NSLock()
-    private static var started = false
+    private static var state: State = .idle
     private static var criticalThreats = Set<String>()
     private static var handler: ((ShellsmithThreatEvent) -> Void)?
-    private static var detected = Set<String>()
+    private static var events: [String: ShellsmithThreatEvent] = [:]
 
     public static func start(
         bundleIds: [String],
@@ -110,31 +117,64 @@ public enum ShellsmithRuntime {
         critical: [String],
         onThreat: ((ShellsmithThreatEvent) -> Void)? = nil
     ) {
+        var shouldStart = false
+        var replay: [ShellsmithThreatEvent] = []
         lock.lock()
-        defer { lock.unlock() }
-        guard !started else { return }
-        criticalThreats = Set(critical)
-        handler = onThreat
-        started = true
-        Talsec.start(config: TalsecConfig(
-            appBundleIds: bundleIds,
-            appTeamId: teamId,
-            watcherMailAddress: watcherMail,
-            isProd: isProd
-        ))
+        switch state {
+        case .idle:
+            state = .starting
+            criticalThreats = Set(critical)
+            handler = onThreat
+            shouldStart = true
+        case .starting, .started:
+            if let onThreat {
+                handler = onThreat
+                replay = events.values.sorted { $0.name < $1.name }
+            }
+        }
+        lock.unlock()
+
+        // Do not call third-party startup while holding our lock. Some RASP
+        // implementations can report a finding synchronously during startup.
+        if shouldStart {
+            Talsec.start(config: TalsecConfig(
+                appBundleIds: bundleIds,
+                appTeamId: teamId,
+                watcherMailAddress: watcherMail,
+                isProd: isProd
+            ))
+            lock.lock()
+            state = .started
+            lock.unlock()
+        }
+        for event in replay {
+            deliver(event, to: onThreat)
+        }
     }
 
     public static func hasDetected(_ threat: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return detected.contains(threat)
+        return events[threat] != nil
+    }
+
+    public static func observedThreats() -> [ShellsmithThreatEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events.values.sorted { $0.name < $1.name }
+    }
+
+    public static func shouldRestrictSensitiveOperations() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return events.values.contains { event in
+            event.severity == .restrict || event.severity == .critical
+        }
     }
 
     static func receive(_ threat: SecurityThreat) {
         let name = stableName(threat)
         lock.lock()
-        detected.insert(name)
-        let callback = handler
         let severity: ShellsmithThreatSeverity
         if criticalThreats.contains(name) {
             severity = .critical
@@ -143,14 +183,26 @@ public enum ShellsmithRuntime {
         } else {
             severity = .observe
         }
-        lock.unlock()
         let event = ShellsmithThreatEvent(name: name, severity: severity)
-        callback?(event)
-        NotificationCenter.default.post(
-            name: .shellsmithThreatDetected,
-            object: nil,
-            userInfo: ["threat": name, "severity": severity.rawValue]
-        )
+        let isNew = events.updateValue(event, forKey: name) == nil
+        let callback = handler
+        lock.unlock()
+        guard isNew else { return }
+        deliver(event, to: callback)
+    }
+
+    private static func deliver(
+        _ event: ShellsmithThreatEvent,
+        to callback: ((ShellsmithThreatEvent) -> Void)?
+    ) {
+        DispatchQueue.main.async {
+            callback?(event)
+            NotificationCenter.default.post(
+                name: .shellsmithThreatDetected,
+                object: nil,
+                userInfo: ["threat": event.name, "severity": event.severity.rawValue]
+            )
+        }
     }
 
     private static func stableName(_ threat: SecurityThreat) -> String {
@@ -194,6 +246,8 @@ pub(crate) fn protection_source(config: &ShellsmithIosConfig) -> String {
         .join(", ");
     let watcher = rasp
         .and_then(|item| item.watcher_mail.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .map(|value| format!("\"{}\"", swift_escape(value)))
         .unwrap_or_else(|| "nil".to_string());
     let critical = rasp
@@ -239,12 +293,37 @@ pub(crate) fn app_attest_source(enabled: bool) -> String {
     if !enabled {
         return String::new();
     }
-    r#"import DeviceCheck
+    r#"import CryptoKit
+import DeviceCheck
 import Foundation
+import Security
+
+@available(iOS 14.0, *)
+public struct ShellsmithAppAttestEnvelope: Codable, Sendable {
+    public let keyId: String
+    public let clientDataHash: String
+    public let object: String
+
+    public init(keyId: String, clientDataHash: String, object: String) {
+        self.keyId = keyId
+        self.clientDataHash = clientDataHash
+        self.object = object
+    }
+}
 
 @available(iOS 14.0, *)
 public enum ShellsmithAppAttest {
+    private static let keychainService = "dev.shellsmith.app-attest-key"
     public static var isSupported: Bool { DCAppAttestService.shared.isSupported }
+
+    public static func keyId() async throws -> String {
+        if let stored = try readKeyId() {
+            return stored
+        }
+        let generated = try await generateKey()
+        try saveKeyId(generated)
+        return try readKeyId() ?? generated
+    }
 
     public static func generateKey() async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
@@ -253,6 +332,61 @@ public enum ShellsmithAppAttest {
                 else { continuation.resume(throwing: error ?? ShellsmithAppAttestError.missingResult) }
             }
         }
+    }
+
+    public static func makeAttestationEnvelope(challenge: Data) async throws -> ShellsmithAppAttestEnvelope {
+        let keyId = try await keyId()
+        let digest = clientDataHash(challenge)
+        let object = try await attestKey(keyId, clientDataHash: digest)
+        return ShellsmithAppAttestEnvelope(
+            keyId: keyId,
+            clientDataHash: digest.base64EncodedString(),
+            object: object.base64EncodedString()
+        )
+    }
+
+    public static func makeAssertionEnvelope(challenge: Data) async throws -> ShellsmithAppAttestEnvelope {
+        let keyId = try await keyId()
+        let digest = clientDataHash(challenge)
+        let object = try await generateAssertion(keyId, clientDataHash: digest)
+        return ShellsmithAppAttestEnvelope(
+            keyId: keyId,
+            clientDataHash: digest.base64EncodedString(),
+            object: object.base64EncodedString()
+        )
+    }
+
+    public static func submit(
+        _ envelope: ShellsmithAppAttestEnvelope,
+        to endpoint: String
+    ) async throws -> Data {
+        guard let url = URL(string: endpoint), url.scheme == "https" else {
+            throw ShellsmithAppAttestError.invalidEndpoint
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(envelope)
+        return try await withCheckedThrowingContinuation { continuation in
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode),
+                      let data else {
+                    continuation.resume(throwing: ShellsmithAppAttestError.invalidResponse)
+                    return
+                }
+                continuation.resume(returning: data)
+            }.resume()
+        }
+    }
+
+    public static func clientDataHash(_ challenge: Data) -> Data {
+        Data(SHA256.hash(data: challenge))
     }
 
     public static func attestKey(_ keyId: String, clientDataHash: Data) async throws -> Data {
@@ -272,10 +406,44 @@ public enum ShellsmithAppAttest {
             }
         }
     }
+
+    private static func readKeyId() throws -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: Bundle.main.bundleIdentifier ?? "app",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else {
+            throw ShellsmithAppAttestError.keychain(status)
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func saveKeyId(_ keyId: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: Bundle.main.bundleIdentifier ?? "app",
+            kSecValueData as String: Data(keyId.utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let status = SecItemAdd(query as CFDictionary, nil)
+        guard status == errSecSuccess || status == errSecDuplicateItem else {
+            throw ShellsmithAppAttestError.keychain(status)
+        }
+    }
 }
 
 public enum ShellsmithAppAttestError: Error {
     case missingResult
+    case keychain(OSStatus)
+    case invalidEndpoint
+    case invalidResponse
 }
 "#
     .to_string()
@@ -358,5 +526,49 @@ mod tests {
             assert!(source.contains(threat));
         }
         assert!(source.contains("SecurityThreatHandler"));
+    }
+
+    #[test]
+    fn runtime_events_are_safe_for_lifecycle_consumers() {
+        let source = runtime_source(true);
+        assert!(source.contains("DispatchQueue.main.async"));
+        assert!(source.contains("events.updateValue"));
+        assert!(source.contains("observedThreats"));
+        assert!(source.contains("shouldRestrictSensitiveOperations"));
+        let startup = source.find("Talsec.start").unwrap();
+        assert!(source[..startup].rfind("lock.unlock()").is_some());
+    }
+
+    #[test]
+    fn app_attest_source_keeps_key_and_exposes_server_envelope() {
+        let source = app_attest_source(true);
+        assert!(source.contains("kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly"));
+        assert!(source.contains("makeAttestationEnvelope"));
+        assert!(source.contains("makeAssertionEnvelope"));
+        assert!(source.contains("invalidEndpoint"));
+    }
+
+    #[test]
+    fn generated_swift_sources_are_parseable_when_swift_is_available() {
+        if Command::new("swiftc").arg("--version").output().is_err() {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let runtime = temp.path().join("Runtime.swift");
+        let attest = temp.path().join("Attest.swift");
+        fs::write(&runtime, runtime_source(true)).unwrap();
+        fs::write(&attest, app_attest_source(true)).unwrap();
+        for path in [runtime, attest] {
+            let output = Command::new("swiftc")
+                .args(["-parse"])
+                .arg(path)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }

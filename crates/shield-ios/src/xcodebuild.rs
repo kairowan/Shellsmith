@@ -12,6 +12,7 @@ use std::time::Duration;
 pub(crate) fn resolve_packages(
     project: &Path,
     scheme: &str,
+    developer_dir: Option<&Path>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
     let mut args = project_selector(project)?;
@@ -20,13 +21,20 @@ pub(crate) fn resolve_packages(
         OsString::from(scheme),
         OsString::from("-resolvePackageDependencies"),
     ]);
-    run("xcodebuild", &args, cancel, "解析 Swift Package 失败")
+    run(
+        "xcodebuild",
+        &args,
+        developer_dir,
+        cancel,
+        "解析 Swift Package 失败",
+    )
 }
 
 pub(crate) fn archive(
     project: &Path,
     config: &IosProjectConfig,
     archive_path: &Path,
+    developer_dir: Option<&Path>,
     allow_provisioning_updates: bool,
     cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
@@ -40,21 +48,26 @@ pub(crate) fn archive(
         OsString::from("generic/platform=iOS"),
         OsString::from("-archivePath"),
         archive_path.as_os_str().to_os_string(),
-        OsString::from("-skipMacroValidation"),
-        OsString::from("-skipPackagePluginValidation"),
         OsString::from(format!("DEVELOPMENT_TEAM={}", config.team_id)),
     ]);
     if allow_provisioning_updates {
         args.push(OsString::from("-allowProvisioningUpdates"));
     }
     args.push(OsString::from("archive"));
-    run("xcodebuild", &args, cancel, "生成 Xcode Archive 失败")
+    run(
+        "xcodebuild",
+        &args,
+        developer_dir,
+        cancel,
+        "生成 Xcode Archive 失败",
+    )
 }
 
 pub(crate) fn export_archive(
     archive_path: &Path,
     export_path: &Path,
     export_options: &Path,
+    developer_dir: Option<&Path>,
     allow_provisioning_updates: bool,
     cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
@@ -70,7 +83,7 @@ pub(crate) fn export_archive(
     if allow_provisioning_updates {
         args.push(OsString::from("-allowProvisioningUpdates"));
     }
-    run("xcodebuild", &args, cancel, "导出 IPA 失败")
+    run("xcodebuild", &args, developer_dir, cancel, "导出 IPA 失败")
 }
 
 fn project_selector(project: &Path) -> Result<Vec<OsString>> {
@@ -85,15 +98,26 @@ fn project_selector(project: &Path) -> Result<Vec<OsString>> {
     ])
 }
 
-fn run(program: &str, args: &[OsString], cancel: &Arc<AtomicBool>, context: &str) -> Result<()> {
+fn run(
+    program: &str,
+    args: &[OsString],
+    developer_dir: Option<&Path>,
+    cancel: &Arc<AtomicBool>,
+    context: &str,
+) -> Result<()> {
     if cancel.load(Ordering::SeqCst) {
         anyhow::bail!("iOS 保护任务已取消");
     }
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(developer_dir) = developer_dir {
+        command.env("DEVELOPER_DIR", developer_dir);
+    }
+    let mut child = command
         .spawn()
         .with_context(|| format!("启动 {program} 失败"))?;
     let stdout = child.stdout.take().context("无法读取 xcodebuild stdout")?;

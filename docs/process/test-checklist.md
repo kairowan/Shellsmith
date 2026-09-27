@@ -177,13 +177,14 @@ cargo test -p mocika-shield 中文证书真实 -- --ignored --nocapture
 - `check-ios` 在没有完整 Xcode时返回静态报告和明确阻断，不修改工程
 - 输出目录位于源码目录内、非空或含逃逸符号链接时失败关闭
 - SwiftUI `@main` 与 UIKit AppDelegate 启动入口各验证一次，重复执行不会重复插入启动代码
-- Swift Confidential 主包和插件固定为相同精确版本，freeRASP 固定为审查版本
+- 如提供 `confidential.yml`，Swift Confidential 主包和插件固定为相同精确版本；未提供时不接入该可选层。freeRASP 固定为审查版本
+- `watcherMail` 可为空；为空时仍验证 freeRASP 本地威胁检测和事件分发
 - framework/XCFramework target、`BUILD_LIBRARY_FOR_DISTRIBUTION` 错误接法与已有 `SecurityThreatHandler` 冲突被阻断
 - 完整 Xcode 下先解析依赖，再执行 Archive 和 Export；取消后子进程终止且原工程不变
 - Archive 的 codesign、Team ID、Bundle ID、Entitlements、arm64、Privacy Manifest、TalsecRuntime dSYM 和所选敏感字符串完成验证
 - SwiftUI/UIKit、development/App Store Connect、真机启动与后台恢复分别保留证据
 - freeRASP 的签名异常、越狱、调试器、Hook、模拟器、非官方安装、截图录屏、VPN 和时间伪造事件完成受控验证
-- `strict` 未配置真实 App Attest 端点时失败；服务端验证覆盖挑战、证明、断言、重放、断网和设备迁移
+- `strict` 未配置 App Attest 端点时仍可完成客户端加固并产生明确 warning；配置端点后，服务端验证覆盖挑战、证明、断言、重放、断网和设备迁移
 - 发布前审查 freeRASP 许可、fair usage、`watcherMail`、遥测和隐私披露；Shellsmith 安装包不重新分发其二进制
 
 ## CLI 与核心库
@@ -327,6 +328,18 @@ cargo test -p mocika-shield 中文证书真实 -- --ignored --nocapture
 | 运行时加载 | 三个原始 DEX 均完成解密和加载，两个页面中的独立模块组件正常绘制 |
 | 异常检查 | 进程持续存活；无签名校验失败、解密失败、类加载失败或崩溃日志 |
 | 加固状态预检 | `check-apk` 能识别载荷超过 4 KB 的 MSHD 追加块，`already_protected` 返回 `true` |
+
+## iOS 加固发布前 P2 真机回归
+
+在 macOS + Xcode 的 Release Archive 和实际签名 IPA 上，至少记录以下项目；没有设备证据时不得把 iOS 保护标记为已完成：
+
+- 冷启动、热启动、后台恢复、锁屏解锁和内存压力下进程持续存活。
+- SwiftUI/UIKit/SceneDelegate 生命周期、推送点击、深链、Universal Link 和 URL Scheme 顺序正常。
+- 蓝牙、音频、定位、相机/麦克风权限、录屏/截图和网络断开重连不出现重复或丢失事件。
+- freeRASP 威胁事件只在预期线程投递，重复信号被去重；低置信信号不会退出应用。
+- 越狱/调试/篡改测试只限制配置的敏感功能，不破坏普通页面和系统生命周期。
+- App Attest 服务端验证挑战、证明、断言、计数器和重放防护；设备不支持时按明确的降级策略处理。
+- Archive/IPA 中主 App、Extension、Framework、动态库的签名、Team ID、Bundle ID、Entitlements、Privacy Manifest 和 arm64 全部通过。
 
 ## 记录要求
 

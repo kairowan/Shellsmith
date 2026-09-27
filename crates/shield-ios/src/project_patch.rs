@@ -45,7 +45,7 @@ pub(crate) fn integrate_runtime(
         .join("ShellsmithRuntime");
     let sources = runtime_root.join("Sources").join("ShellsmithRuntime");
     fs::create_dir_all(&sources)?;
-    let uses_confidential = config.protection.profile.uses_confidential();
+    let uses_confidential = config.confidential_enabled();
     let uses_rasp = config.protection.profile.uses_rasp();
     fs::write(
         runtime_root.join("Package.swift"),
@@ -59,7 +59,10 @@ pub(crate) fn integrate_runtime(
         sources.join("ShellsmithProtection.swift"),
         freerasp::protection_source(config),
     )?;
-    let attest = freerasp::app_attest_source(config.protection.app_attest_endpoint.is_some());
+    let attest = freerasp::app_attest_source(matches!(
+        config.protection.profile,
+        crate::IosProtectionProfile::Strict
+    ));
     if !attest.is_empty() {
         fs::write(sources.join("ShellsmithAppAttest.swift"), attest)?;
     }
@@ -215,16 +218,15 @@ fn patch_swift_entrypoint(path: &Path) -> Result<()> {
     if content.contains("ShellsmithProtection.start(") {
         return Ok(());
     }
-    let main_index = content.find("@main").context("启动入口缺少 @main")?;
+    let main_index = find_swift_main(&content).context("启动入口缺少 @main")?;
     let type_open = content[main_index..]
         .find('{')
         .map(|index| main_index + index)
         .context("无法识别 @main 类型主体")?;
     let type_close = matching_brace(&content, type_open).context("@main 类型大括号不完整")?;
-    let type_text = &content[main_index..type_open];
     let call =
         "// Shellsmith 自动生成：应用启动时尽早启用保护。\n        ShellsmithProtection.start()\n";
-    let insertion = if type_text.contains(": App") {
+    let insertion = if code_contains_conformance(&content, main_index, type_open, "App") {
         find_top_level_initializer(&content, type_open, type_close)
             .map(|brace| (brace + 1, format!("\n        {call}")))
             .unwrap_or_else(|| {
@@ -233,14 +235,12 @@ fn patch_swift_entrypoint(path: &Path) -> Result<()> {
                     format!("\n    init() {{\n        {call}    }}\n"),
                 )
             })
-    } else if content[main_index..type_close].contains("UIApplicationDelegate") {
+    } else if code_contains_conformance(&content, main_index, type_close, "UIApplicationDelegate") {
         content[main_index..type_close]
             .find("didFinishLaunchingWithOptions")
             .and_then(|relative| {
                 let signature = main_index + relative;
-                content[signature..type_close]
-                    .find('{')
-                    .map(|brace| signature + brace)
+                find_code_char(&content, signature, type_close, b'{')
             })
             .map(|brace| (brace + 1, format!("\n        {call}")))
             .unwrap_or_else(|| {
@@ -276,9 +276,14 @@ fn patch_swift_entrypoint(path: &Path) -> Result<()> {
 
 fn find_top_level_initializer(content: &str, open: usize, close: usize) -> Option<usize> {
     let bytes = content.as_bytes();
+    let mask = swift_code_mask(content);
     let mut depth = 1usize;
     let mut index = open + 1;
     while index < close {
+        if !mask[index] {
+            index += 1;
+            continue;
+        }
         match bytes[index] {
             b'{' => depth += 1,
             b'}' => depth = depth.saturating_sub(1),
@@ -286,8 +291,8 @@ fn find_top_level_initializer(content: &str, open: usize, close: usize) -> Optio
                 let before_ok = index == 0 || !is_identifier(bytes[index - 1]);
                 let after = bytes.get(index + 4).copied();
                 if before_ok && matches!(after, Some(b'(' | b' ' | b'\t' | b'\n')) {
-                    if let Some(relative) = content[index..close].find('{') {
-                        return Some(index + relative);
+                    if let Some(brace) = find_code_char(content, index, close, b'{') {
+                        return Some(brace);
                     }
                 }
             }
@@ -298,13 +303,45 @@ fn find_top_level_initializer(content: &str, open: usize, close: usize) -> Optio
     None
 }
 
+fn code_contains_conformance(content: &str, start: usize, end: usize, needle: &str) -> bool {
+    let mask = swift_code_mask(content);
+    let bytes = content.as_bytes();
+    content[start..end]
+        .match_indices(needle)
+        .any(|(offset, _)| {
+            let begin = start + offset;
+            let before = (0..begin)
+                .rev()
+                .find(|index| !bytes[*index].is_ascii_whitespace())
+                .and_then(|index| bytes.get(index).copied());
+            let after = bytes.get(begin + needle.len()).copied();
+            mask[begin..begin + needle.len()].iter().all(|value| *value)
+                && matches!(before, Some(b':' | b','))
+                && !after.is_some_and(is_identifier)
+        })
+}
+
+fn find_code_char(content: &str, start: usize, end: usize, needle: u8) -> Option<usize> {
+    let mask = swift_code_mask(content);
+    content.as_bytes()[start..end]
+        .iter()
+        .enumerate()
+        .find_map(|(offset, byte)| {
+            (*byte == needle && mask[start + offset]).then_some(start + offset)
+        })
+}
+
 fn is_identifier(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn matching_brace(content: &str, open: usize) -> Option<usize> {
+    let mask = swift_code_mask(content);
     let mut depth = 0usize;
     for (offset, byte) in content.as_bytes()[open..].iter().enumerate() {
+        if !mask[open + offset] {
+            continue;
+        }
         match byte {
             b'{' => depth += 1,
             b'}' => {
@@ -317,6 +354,104 @@ fn matching_brace(content: &str, open: usize) -> Option<usize> {
         }
     }
     None
+}
+
+fn find_swift_main(content: &str) -> Option<usize> {
+    let mask = swift_code_mask(content);
+    content
+        .as_bytes()
+        .windows(b"@main".len())
+        .enumerate()
+        .find_map(|(index, bytes)| {
+            (bytes == b"@main"
+                && mask[index..index + b"@main".len()]
+                    .iter()
+                    .all(|value| *value))
+            .then_some(index)
+        })
+}
+
+fn swift_code_mask(content: &str) -> Vec<bool> {
+    let bytes = content.as_bytes();
+    let mut mask = vec![true; bytes.len()];
+    let mut index = 0usize;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut string_delimiter = 0usize;
+    let mut escaped = false;
+    while index < bytes.len() {
+        if line_comment {
+            mask[index] = false;
+            if bytes[index] == b'\n' {
+                line_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if block_comment {
+            mask[index] = false;
+            if index + 1 < bytes.len() && bytes[index] == b'*' && bytes[index + 1] == b'/' {
+                mask[index + 1] = false;
+                block_comment = false;
+                index += 2;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if string_delimiter != 0 {
+            mask[index] = false;
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if bytes[index] == b'\\' && string_delimiter == 1 {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if string_delimiter == 3
+                && index + 2 < bytes.len()
+                && &bytes[index..index + 3] == b"\"\"\""
+            {
+                mask[index + 1] = false;
+                mask[index + 2] = false;
+                string_delimiter = 0;
+                index += 3;
+            } else if string_delimiter == 1 && bytes[index] == b'\"' {
+                string_delimiter = 0;
+                index += 1;
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'/' {
+            mask[index] = false;
+            mask[index + 1] = false;
+            line_comment = true;
+            index += 2;
+        } else if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'*' {
+            mask[index] = false;
+            mask[index + 1] = false;
+            block_comment = true;
+            index += 2;
+        } else if index + 2 < bytes.len() && &bytes[index..index + 3] == b"\"\"\"" {
+            mask[index] = false;
+            mask[index + 1] = false;
+            mask[index + 2] = false;
+            string_delimiter = 3;
+            index += 3;
+        } else if bytes[index] == b'\"' {
+            mask[index] = false;
+            string_delimiter = 1;
+            index += 1;
+        } else {
+            index += 1;
+        }
+    }
+    mask
 }
 
 fn find_pbxproj_for_target(
@@ -603,6 +738,19 @@ mod tests {
         let start = content.find("ShellsmithProtection.start()").unwrap();
         let returns = content.find("return true").unwrap();
         assert!(start < returns);
+    }
+
+    #[test]
+    fn ignores_main_and_braces_inside_comments_and_strings() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "// @main struct Fake { let value = \"{\" }\nimport SwiftUI\n@main\nstruct DemoApp: App {\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        assert_eq!(content.matches("ShellsmithProtection.start()").count(), 1);
     }
 
     #[test]

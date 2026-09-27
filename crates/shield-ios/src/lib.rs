@@ -8,6 +8,7 @@ mod xcodebuild;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, Arc};
@@ -151,12 +152,11 @@ impl ShellsmithIosConfig {
         for bundle_id in &self.project.bundle_ids {
             validate_bundle_id(bundle_id)?;
         }
-        if self.protection.profile.uses_confidential() {
+        if self.confidential_enabled() {
             let confidential = self
                 .confidential
                 .as_ref()
-                .filter(|item| item.enabled)
-                .ok_or_else(|| anyhow::anyhow!("balanced/strict 必须启用 Swift Confidential"))?;
+                .expect("confidential_enabled implies a configuration");
             if !confidential.config.is_file() {
                 anyhow::bail!(
                     "Swift Confidential 配置不存在：{}",
@@ -174,7 +174,9 @@ impl ShellsmithIosConfig {
                 anyhow::bail!("第一版只支持 freerasp provider");
             }
             if let Some(mail) = &rasp.watcher_mail {
-                validate_email(mail)?;
+                if !mail.trim().is_empty() {
+                    validate_email(mail.trim())?;
+                }
             }
             for threat in &rasp.critical {
                 if !freerasp::KNOWN_THREATS.contains(&threat.as_str()) {
@@ -183,20 +185,24 @@ impl ShellsmithIosConfig {
             }
         }
         if matches!(self.protection.profile, IosProtectionProfile::Strict) {
-            let endpoint = self
+            if let Some(endpoint) = self
                 .protection
                 .app_attest_endpoint
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "strict 必须配置 app_attest_endpoint；只有客户端 RASP 不能标记为第四代"
-                    )
-                })?;
-            validate_https_endpoint(endpoint)?;
+            {
+                validate_https_endpoint(endpoint)?;
+            }
         }
         Ok(())
+    }
+
+    /// Swift Confidential is an optional enhancement. RASP remains active when
+    /// the caller does not provide a project-specific literal configuration.
+    pub fn confidential_enabled(&self) -> bool {
+        self.protection.profile.uses_confidential()
+            && self.confidential.as_ref().is_some_and(|item| item.enabled)
     }
 }
 
@@ -258,11 +264,41 @@ where
         Some(&options.config.project.scheme),
     )?;
     let mut checks = inspection.checks.clone();
-    project_inspect::validate_protection_target(&inspection, options.config.protection.profile)?;
+    project_inspect::validate_protection_target(
+        &inspection,
+        options.config.protection.profile,
+        &options.config.project.team_id,
+        &options.config.project.bundle_ids,
+    )?;
     checks.extend(project_inspect::known_issue_checks(
         &inspection,
         options.config.protection.profile,
+        options.config.confidential_enabled(),
     ));
+    if matches!(
+        options.config.protection.profile,
+        IosProtectionProfile::Strict
+    ) {
+        let endpoint_configured = options
+            .config
+            .protection
+            .app_attest_endpoint
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
+        checks.push(if endpoint_configured {
+            IosCheck::ready(
+                "app_attest_endpoint",
+                "已配置 App Attest 服务端地址；仍需由业务服务端完成证明和重放校验",
+            )
+        } else {
+            IosCheck::warning(
+                "app_attest_endpoint",
+                "未配置 App Attest 服务端地址；本次仍执行客户端严格加固，但不包含服务端设备证明闭环",
+                None,
+            )
+        });
+    }
 
     if options.dry_run {
         return Ok(IosProtectionReport {
@@ -300,9 +336,7 @@ where
         .context("工程路径不在源码根目录内")?;
     let working_project = working_root.join(relative_project);
 
-    if options.config.protection.profile.uses_confidential()
-        || options.config.protection.profile.uses_rasp()
-    {
+    if options.config.confidential_enabled() || options.config.protection.profile.uses_rasp() {
         progress(
             &on_progress,
             "IntegrateProtection",
@@ -331,7 +365,20 @@ where
         "ResolvePackages",
         "正在解析并锁定 Swift Package 依赖",
     );
-    xcodebuild::resolve_packages(&working_project, &options.config.project.scheme, &cancel)?;
+    let developer_dir = inspection.xcode.developer_dir.as_deref().map(Path::new);
+    xcodebuild::resolve_packages(
+        &working_project,
+        &options.config.project.scheme,
+        developer_dir,
+        &cancel,
+    )?;
+    if options.config.confidential_enabled() || options.config.protection.profile.uses_rasp() {
+        checks.push(verify_package_lock(
+            &working_root,
+            options.config.confidential_enabled(),
+            options.config.protection.profile.uses_rasp(),
+        )?);
+    }
 
     let archive = options.output_dir.join("Shellsmith.xcarchive");
     progress(&on_progress, "Archive", "正在生成 Xcode Archive");
@@ -339,6 +386,7 @@ where
         &working_project,
         &options.config.project,
         &archive,
+        developer_dir,
         options.allow_provisioning_updates,
         &cancel,
     )?;
@@ -355,6 +403,7 @@ where
         &archive,
         &export_dir,
         &export_options,
+        developer_dir,
         options.allow_provisioning_updates,
         &cancel,
     )?;
@@ -371,7 +420,7 @@ where
             .config
             .confidential
             .as_ref()
-            .filter(|item| item.enabled)
+            .filter(|item| options.config.confidential_enabled() && item.enabled)
             .map(|item| item.config.as_path()),
         options.config.protection.profile.uses_rasp(),
         &options.config.project.team_id,
@@ -411,6 +460,130 @@ fn progress<F: Fn(IosProgressEvent)>(callback: &F, step: &str, message: &str) {
         step: step.to_string(),
         message: message.to_string(),
     });
+}
+
+fn verify_package_lock(
+    root: &Path,
+    require_confidential: bool,
+    require_rasp: bool,
+) -> Result<IosCheck> {
+    let mut matches = Vec::new();
+    collect_package_locks(root, 0, &mut matches)?;
+    let preferred = matches
+        .iter()
+        .filter(|path| path.to_string_lossy().contains("swiftpm"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let selected = if preferred.len() == 1 {
+        preferred
+    } else {
+        matches
+    };
+    match selected.as_slice() {
+        [] => Ok(IosCheck::blocked(
+            "swift_package_lock",
+            "未找到 Package.resolved；无法证明 Swift Package 依赖可复现",
+            None,
+        )),
+        [path] => {
+            let bytes = fs::read(path)
+                .with_context(|| format!("读取 Swift Package 锁文件失败：{}", path.display()))?;
+            if bytes.is_empty() {
+                return Ok(IosCheck::blocked(
+                    "swift_package_lock",
+                    "Package.resolved 为空",
+                    None,
+                ));
+            }
+            let document: serde_json::Value = match serde_json::from_slice(&bytes) {
+                Ok(value) => value,
+                Err(error) => {
+                    return Ok(IosCheck::blocked(
+                        "swift_package_lock",
+                        format!("Package.resolved 不是有效 JSON：{error}"),
+                        None,
+                    ));
+                }
+            };
+            let pins = document
+                .get("pins")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let has_version = |needle: &str, version: &str| {
+                pins.iter().any(|pin| {
+                    let identity = pin
+                        .get("identity")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    let resolved = pin
+                        .get("state")
+                        .and_then(|state| state.get("version"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default();
+                    identity.contains(needle) && resolved == version
+                })
+            };
+            if require_confidential
+                && (!has_version("swift-confidential", SWIFT_CONFIDENTIAL_VERSION)
+                    || !has_version(
+                        "swift-confidential-plugin",
+                        SWIFT_CONFIDENTIAL_PLUGIN_VERSION,
+                    ))
+            {
+                return Ok(IosCheck::blocked(
+                    "swift_package_lock",
+                    "Package.resolved 未锁定 Swift Confidential 主包和插件的要求版本",
+                    None,
+                ));
+            }
+            if require_rasp && !has_version("free-rasp-ios", FREERASP_IOS_VERSION) {
+                return Ok(IosCheck::blocked(
+                    "swift_package_lock",
+                    "Package.resolved 未锁定 freeRASP iOS 的要求版本",
+                    None,
+                ));
+            }
+            let digest = Sha256::digest(&bytes);
+            let hash = digest
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            Ok(IosCheck::ready(
+                "swift_package_lock",
+                format!("Package.resolved 已锁定，SHA-256：{hash}"),
+            ))
+        }
+        _ => Ok(IosCheck::blocked(
+            "swift_package_lock",
+            "工作副本包含多个 Package.resolved，无法确定实际依赖锁文件",
+            None,
+        )),
+    }
+}
+
+fn collect_package_locks(root: &Path, depth: usize, output: &mut Vec<PathBuf>) -> Result<()> {
+    if depth > 5 {
+        return Ok(());
+    }
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if matches!(
+            name.to_str(),
+            Some(".git" | ".build" | "DerivedData" | "Pods")
+        ) {
+            continue;
+        }
+        let path = entry.path();
+        if path.file_name().and_then(|value| value.to_str()) == Some("Package.resolved") {
+            output.push(path);
+        } else if path.is_dir() {
+            collect_package_locks(&path, depth + 1, output)?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_bundle_id(value: &str) -> Result<()> {
@@ -478,7 +651,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn strict_requires_app_attest_server() {
+    fn strict_allows_missing_app_attest_server() {
         let confidential = tempfile::NamedTempFile::new().unwrap();
         let config = ShellsmithIosConfig {
             project: IosProjectConfig {
@@ -505,11 +678,7 @@ mod tests {
                 critical: default_critical_threats(),
             }),
         };
-        assert!(config
-            .validate()
-            .unwrap_err()
-            .to_string()
-            .contains("app_attest_endpoint"));
+        assert!(config.validate().is_ok());
     }
 
     #[test]
@@ -520,6 +689,30 @@ mod tests {
         assert!(validate_email("security@example").is_err());
         assert!(validate_https_endpoint("http://example.com/attest").is_err());
         assert!(validate_https_endpoint("https://example.com/attest").is_ok());
+    }
+
+    #[test]
+    fn balanced_allows_optional_confidential_and_watcher_mail() {
+        let config = ShellsmithIosConfig {
+            project: IosProjectConfig {
+                path: PathBuf::from("App.xcodeproj"),
+                scheme: "App".into(),
+                configuration: "Release".into(),
+                team_id: "ABCDE12345".into(),
+                bundle_ids: vec!["com.example.app".into()],
+                entrypoint: None,
+            },
+            protection: IosProtectionConfig::default(),
+            confidential: None,
+            rasp: Some(IosRaspConfig {
+                provider: "freerasp".into(),
+                enabled: true,
+                watcher_mail: Some("  ".into()),
+                critical: default_critical_threats(),
+            }),
+        };
+        assert!(config.validate().is_ok());
+        assert!(!config.confidential_enabled());
     }
 
     #[test]
@@ -556,5 +749,37 @@ profile = "compat"
             config.project.entrypoint.unwrap(),
             config_dir.join("../App/Sources/App.swift")
         );
+    }
+
+    #[test]
+    fn package_lock_check_requires_one_non_empty_lock() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("Package.resolved"), b"{\"pins\":[]}").unwrap();
+        let check = verify_package_lock(temp.path(), false, false).unwrap();
+        assert_eq!(check.code, "swift_package_lock");
+        assert_eq!(check.severity, IosCheckSeverity::Ready);
+
+        fs::write(temp.path().join("nested.lock"), b"not a package lock").unwrap();
+        fs::create_dir_all(temp.path().join("Nested")).unwrap();
+        fs::write(
+            temp.path().join("Nested/Package.resolved"),
+            b"{\"pins\":[]}",
+        )
+        .unwrap();
+        let duplicate = verify_package_lock(temp.path(), false, false).unwrap();
+        assert_eq!(duplicate.severity, IosCheckSeverity::Blocked);
+
+        fs::remove_file(temp.path().join("Nested/Package.resolved")).unwrap();
+        fs::write(
+            temp.path().join("Package.resolved"),
+            br#"{"pins":[
+                {"identity":"swift-confidential","state":{"version":"0.5.2"}},
+                {"identity":"swift-confidential-plugin","state":{"version":"0.5.2"}},
+                {"identity":"free-rasp-ios","state":{"version":"7.1.4"}}
+            ]}"#,
+        )
+        .unwrap();
+        let versions = verify_package_lock(temp.path(), true, true).unwrap();
+        assert_eq!(versions.severity, IosCheckSeverity::Ready);
     }
 }

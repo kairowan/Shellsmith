@@ -11,15 +11,19 @@ bundle_ids = ["com.example.yourapp"]
 [protection]
 profile = "balanced"
 is_prod = true
-# strict 必须配置真实服务端；服务端负责挑战、证明校验和重放防护。
+# App Attest 服务端地址可选；服务端负责挑战、证明校验和重放防护。
 # app_attest_endpoint = "https://api.example.com/app-attest"
 
-[confidential]
-enabled = true
-config = "confidential.yml"
+# Optional: enable Swift Confidential for project-specific sensitive literals.
+# Omit this section when you do not have a confidential.yml file; freeRASP
+# and the rest of the iOS protection pipeline will still run.
+# [confidential]
+# enabled = true
+# config = "confidential.yml"
 
 [rasp]
 provider = "freerasp"
 enabled = true
-watcher_mail = "security@example.com"
+# watcher_mail is optional; omit it when no Talsec watcher email is desired.
+# watcher_mail = "security@example.com"
 critical = ["signature", "jailbreak", "debugger", "runtimeManipulation"]
