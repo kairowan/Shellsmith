@@ -64,18 +64,18 @@ xattr -rd com.apple.quarantine /Applications/Shellsmith.app
 GitHub Actions 位于 `.github/workflows/`：
 
 - 每次推送到 `main` 或创建 Pull Request 时运行 Rust、Python、iOS 核心和前端检查。
-- `main` 每次通过 CI 后，Release 工作流会自动计算 `1.4.1-build.<CI运行号>` 版本，在 Linux、macOS 和 Windows 原生 runner 上构建安装包，并创建 GitHub Release；也可以手动运行 `Release` 发布指定版本。
+- `main` 每次通过 CI 后，Release 工作流会自动计算 `1.4.2-build.<CI运行号>` 版本，在 Linux、macOS 和 Windows 原生 runner 上构建安装包，并创建 GitHub Release；也可以手动运行 `Release` 发布指定版本。
 - 发布流程会上传 Linux `.AppImage`/`.deb`、macOS `.dmg`、Windows `.exe`、Android runtime 资源包及 SHA-256 校验文件，并自动生成本次提交的变更摘要。
 - macOS 默认生成 adhoc 签名包；配置 `MACOS_RELEASE_MODE=developer-id`、Developer ID 身份和 notarytool profile 后，才生成可分发的公证包。
 
 本地也可以复用同一套脚本：
 
 ```bash
-VERSION=1.4.1 ./scripts/release-linux.sh
-VERSION=1.4.1 ./scripts/release-macos.sh 1.4.1 universal
+VERSION=1.4.2 ./scripts/release-linux.sh
+VERSION=1.4.2 ./scripts/release-macos.sh 1.4.2 universal
 ```
 
-Windows 使用管理员 PowerShell 执行 `./scripts/release-windows.ps1 -Version 1.4.1`。三平台构建都包含 Stub、PVM2 Packer、Android 资源和签名工具，发布前仍应在目标系统安装并验证。
+Windows 使用管理员 PowerShell 执行 `./scripts/release-windows.ps1 -Version 1.4.2`。三平台构建都包含 Stub、PVM2 Packer、Android 资源和签名工具，发布前仍应在目标系统安装并验证。
 
 ## 界面预览
 

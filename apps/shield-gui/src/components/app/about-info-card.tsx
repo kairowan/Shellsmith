@@ -2,12 +2,10 @@ import { ClipboardList, Download, Loader2, RotateCcw } from "lucide-react";
 import { appIconUrl, appName } from "@/components/app/branding";
 import { AppButton, SummaryRow } from "@/components/app/common";
 import { t, type Locale } from "@/lib/i18n";
-import { getJavaStatusText } from "@/lib/java";
 import type { BuildInfo } from "@/lib/tauri";
 
 type AppInfo = {
   version: string;
-  git_hash: string;
   build_date: string;
 };
 
@@ -34,8 +32,6 @@ export function AboutInfoCard({
   runtimeInfoRefreshing: boolean;
   onRefreshRuntimeInfo: () => void;
 }) {
-  const javaStatus = getJavaStatusText(locale, buildInfo);
-
   return (
     <div className="mx-auto flex w-full max-w-[620px] flex-col items-center text-center">
       <img src={appIconUrl} alt={appName} className="h-[72px] w-[72px] rounded-[20px]" />
@@ -57,10 +53,6 @@ export function AboutInfoCard({
       </div>
 
       <div className="mt-8 w-full max-w-[460px] border-y border-border/60 py-2 text-left">
-        <SummaryRow label={t(locale, "java")} value={javaStatus || t(locale, "unknown")} muted={!javaStatus} />
-        <div className="border-t border-border/60" />
-        <SummaryRow label="Git" value={appInfo.git_hash || t(locale, "unknown")} muted={!appInfo.git_hash} />
-        <div className="border-t border-border/60" />
         <SummaryRow
           label={t(locale, "build")}
           value={appInfo.build_date || t(locale, "unknown")}

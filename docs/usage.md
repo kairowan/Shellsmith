@@ -125,6 +125,8 @@ freeRASP 的越狱、Hook、签名异常等结果是风险信号。生成的封�
 
 GUI 启动时会一次性加载应用配置与证书数据库，运行期间使用同一份内存状态，不会在页面切换时反复从磁盘读取。应用级配置写入 `config.toml`；证书列表、默认证书、签名密码与校验状态写入本地 SQLite 数据库 `shield.db`。密码字段以 `enc:v1` 格式加密落盘；旧明文记录不再兼容，如遇到旧测试数据请重新导入或创建证书。
 
+证书记录和托管 keystore 属于当前 macOS/Linux/Windows 用户的本地应用数据，不会打进项目、APK 或 Shellsmith 安装包，也不会上传到 CI。升级或重新下载并安装 Shellsmith 时，系统通常会保留原应用数据目录，因此旧证书仍会显示。要删除单条记录，请在 **证书** 页面使用删除按钮；若要彻底清空本机资料，请退出 Shellsmith 后备份并删除下表中的应用数据目录，再重新启动应用。不要直接删除仍在使用的生产 keystore。
+
 | 平台 | 应用配置 | 证书数据库 |
 |------|----------|------------|
 | Linux | `~/.config/dev.mocika.shield-gui/config.toml` | `~/.local/share/dev.mocika.shield-gui/shield.db` |
