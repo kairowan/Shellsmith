@@ -3,8 +3,8 @@
   "repository": "kairowan/Shellsmith",
   "snapshots": [
     {
-      "date": "2026-10-06",
-      "collected_at": "2026-10-06T06:56:48.863907Z",
+      "date": "2026-10-07",
+      "collected_at": "2026-10-07T06:38:40.960550Z",
       "repository": {
         "stars": 0,
         "forks": 0,
@@ -20,21 +20,12 @@
       },
       "usage": {
         "available": true,
-        "active_devices": 1,
-        "latest_complete_date": "2026-10-05",
-        "app_starts": 108,
-        "protect_successes": 102,
+        "active_devices": 7,
+        "latest_complete_date": "2026-10-06",
+        "app_starts": 116,
+        "protect_successes": 104,
         "protect_failures": 5,
         "trend": [
-          {
-            "usage_date": "2026-09-22",
-            "active_devices": 5,
-            "app_starts": 7,
-            "protect_successes": 10,
-            "protect_failures": 0,
-            "sign_successes": 12,
-            "date": "2026-09-22"
-          },
           {
             "usage_date": "2026-09-23",
             "active_devices": 6,
@@ -151,46 +142,19 @@
             "protect_failures": 0,
             "sign_successes": 2,
             "date": "2026-10-05"
+          },
+          {
+            "usage_date": "2026-10-06",
+            "active_devices": 7,
+            "app_starts": 15,
+            "protect_successes": 12,
+            "protect_failures": 0,
+            "sign_successes": 10,
+            "date": "2026-10-06"
           }
         ],
         "version_breakdown_available": true,
         "version_trend": [
-          {
-            "usage_date": "2026-09-22",
-            "app_version": "1.3.0",
-            "active_devices": 2,
-            "app_starts": 1,
-            "protect_starts": 5,
-            "protect_successes": 5,
-            "protect_failures": 0,
-            "sign_successes": 8,
-            "sign_failures": 1,
-            "date": "2026-09-22"
-          },
-          {
-            "usage_date": "2026-09-22",
-            "app_version": "1.4.0",
-            "active_devices": 2,
-            "app_starts": 5,
-            "protect_starts": 4,
-            "protect_successes": 4,
-            "protect_failures": 0,
-            "sign_successes": 3,
-            "sign_failures": 0,
-            "date": "2026-09-22"
-          },
-          {
-            "usage_date": "2026-09-22",
-            "app_version": "1.4.0-alpha.1",
-            "active_devices": 1,
-            "app_starts": 1,
-            "protect_starts": 1,
-            "protect_successes": 1,
-            "protect_failures": 0,
-            "sign_successes": 1,
-            "sign_failures": 0,
-            "date": "2026-09-22"
-          },
           {
             "usage_date": "2026-09-23",
             "app_version": "1.3.0",
@@ -526,6 +490,30 @@
             "sign_successes": 2,
             "sign_failures": 0,
             "date": "2026-10-05"
+          },
+          {
+            "usage_date": "2026-10-06",
+            "app_version": "1.3.0",
+            "active_devices": 3,
+            "app_starts": 6,
+            "protect_starts": 3,
+            "protect_successes": 3,
+            "protect_failures": 0,
+            "sign_successes": 3,
+            "sign_failures": 0,
+            "date": "2026-10-06"
+          },
+          {
+            "usage_date": "2026-10-06",
+            "app_version": "1.4.0",
+            "active_devices": 4,
+            "app_starts": 9,
+            "protect_starts": 9,
+            "protect_successes": 9,
+            "protect_failures": 0,
+            "sign_successes": 7,
+            "sign_failures": 0,
+            "date": "2026-10-06"
           }
         ],
         "failure_breakdown_available": true,
@@ -558,320 +546,312 @@
         "failure_reason_breakdown_available": true,
         "failure_reason_breakdown": [
           {
-            "code": "APK_REPACK_FAILED",
-            "stage": "manifest",
-            "operation": "protect",
-            "flow": "protect",
-            "usage_date": "2026-09-26",
-            "app_version": "1.4.0",
             "date": "2026-09-26",
+            "stage": "manifest",
+            "flow": "protect",
             "classifier_version": 1,
-            "count": 2
+            "usage_date": "2026-09-26",
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "count": 2,
+            "app_version": "1.4.0"
           },
           {
-            "code": "KEY_ALIAS_NOT_FOUND",
-            "stage": "execute",
-            "operation": "certificate",
-            "flow": "certificate",
-            "usage_date": "2026-09-28",
-            "app_version": "1.4.0",
             "date": "2026-09-28",
+            "stage": "execute",
+            "flow": "certificate",
             "classifier_version": 1,
-            "count": 1
+            "usage_date": "2026-09-28",
+            "operation": "certificate",
+            "code": "KEY_ALIAS_NOT_FOUND",
+            "count": 1,
+            "app_version": "1.4.0"
           },
           {
-            "code": "TOOL_PROCESS_FAILED",
-            "stage": "execute",
-            "operation": "certificate",
-            "flow": "certificate",
-            "usage_date": "2026-09-29",
-            "app_version": "1.4.0",
             "date": "2026-09-29",
-            "classifier_version": 1,
-            "count": 1
-          },
-          {
-            "code": "APK_REPACK_FAILED",
-            "stage": "manifest",
-            "operation": "protect",
-            "flow": "protect",
-            "usage_date": "2026-09-30",
-            "app_version": "1.4.0",
-            "date": "2026-09-30",
-            "classifier_version": 1,
-            "count": 2
-          },
-          {
-            "code": "TOOL_NOT_FOUND",
             "stage": "execute",
-            "operation": "certificate",
             "flow": "certificate",
-            "usage_date": "2026-10-01",
-            "app_version": "1.4.0",
-            "date": "2026-10-01",
             "classifier_version": 1,
-            "count": 3
+            "usage_date": "2026-09-29",
+            "operation": "certificate",
+            "code": "TOOL_PROCESS_FAILED",
+            "count": 1,
+            "app_version": "1.4.0"
           },
           {
-            "code": "APK_REPACK_FAILED",
+            "date": "2026-09-30",
             "stage": "manifest",
-            "operation": "protect",
             "flow": "protect",
-            "usage_date": "2026-10-01",
-            "app_version": "1.4.0",
-            "date": "2026-10-01",
             "classifier_version": 1,
-            "count": 1
+            "usage_date": "2026-09-30",
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "count": 2,
+            "app_version": "1.4.0"
+          },
+          {
+            "date": "2026-10-01",
+            "stage": "execute",
+            "flow": "certificate",
+            "classifier_version": 1,
+            "usage_date": "2026-10-01",
+            "operation": "certificate",
+            "code": "TOOL_NOT_FOUND",
+            "count": 3,
+            "app_version": "1.4.0"
+          },
+          {
+            "date": "2026-10-01",
+            "stage": "manifest",
+            "flow": "protect",
+            "classifier_version": 1,
+            "usage_date": "2026-10-01",
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "count": 1,
+            "app_version": "1.4.0"
           }
         ],
         "failure_classifier_coverage": [
           {
-            "usage_date": "2026-09-22",
-            "reporting_devices": 2,
-            "app_version": "1.3.0",
-            "date": "2026-09-22",
-            "failure_classifier_version": null,
-            "failure_count": 1
-          },
-          {
-            "usage_date": "2026-09-22",
-            "reporting_devices": 2,
-            "app_version": "1.4.0",
-            "date": "2026-09-22",
-            "failure_classifier_version": 1,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-22",
-            "reporting_devices": 1,
-            "app_version": "1.4.0-alpha.1",
-            "date": "2026-09-22",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-23",
-            "reporting_devices": 1,
-            "app_version": "1.3.0",
             "date": "2026-09-23",
+            "reporting_devices": 1,
             "failure_classifier_version": null,
-            "failure_count": 0
+            "usage_date": "2026-09-23",
+            "failure_count": 0,
+            "app_version": "1.3.0"
           },
           {
-            "usage_date": "2026-09-23",
+            "date": "2026-09-23",
             "reporting_devices": 3,
-            "app_version": "1.4.0",
-            "date": "2026-09-23",
             "failure_classifier_version": 1,
-            "failure_count": 0
-          },
-          {
             "usage_date": "2026-09-23",
-            "reporting_devices": 2,
-            "app_version": "1.4.0-alpha.1",
+            "failure_count": 0,
+            "app_version": "1.4.0"
+          },
+          {
             "date": "2026-09-23",
+            "reporting_devices": 2,
             "failure_classifier_version": null,
-            "failure_count": 0
+            "usage_date": "2026-09-23",
+            "failure_count": 0,
+            "app_version": "1.4.0-alpha.1"
           },
           {
-            "usage_date": "2026-09-24",
+            "date": "2026-09-24",
             "reporting_devices": 4,
-            "app_version": "1.3.0",
-            "date": "2026-09-24",
             "failure_classifier_version": null,
-            "failure_count": 0
+            "usage_date": "2026-09-24",
+            "failure_count": 0,
+            "app_version": "1.3.0"
           },
           {
-            "usage_date": "2026-09-24",
-            "reporting_devices": 1,
-            "app_version": "1.4.0",
             "date": "2026-09-24",
+            "reporting_devices": 1,
             "failure_classifier_version": 1,
-            "failure_count": 0
-          },
-          {
             "usage_date": "2026-09-24",
-            "reporting_devices": 1,
-            "app_version": "1.4.0-alpha.1",
-            "date": "2026-09-24",
-            "failure_classifier_version": null,
-            "failure_count": 0
+            "failure_count": 0,
+            "app_version": "1.4.0"
           },
           {
-            "usage_date": "2026-09-25",
-            "reporting_devices": 4,
-            "app_version": "1.4.0",
+            "date": "2026-09-24",
+            "reporting_devices": 1,
+            "failure_classifier_version": null,
+            "usage_date": "2026-09-24",
+            "failure_count": 0,
+            "app_version": "1.4.0-alpha.1"
+          },
+          {
             "date": "2026-09-25",
-            "failure_classifier_version": 1,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-26",
-            "reporting_devices": 1,
-            "app_version": "1.3.0",
-            "date": "2026-09-26",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-26",
-            "reporting_devices": 2,
-            "app_version": "1.4.0",
-            "date": "2026-09-26",
-            "failure_classifier_version": 1,
-            "failure_count": 2
-          },
-          {
-            "usage_date": "2026-09-27",
-            "reporting_devices": 1,
-            "app_version": "1.4.0",
-            "date": "2026-09-27",
-            "failure_classifier_version": 1,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-27",
-            "reporting_devices": 1,
-            "app_version": "1.4.0-alpha.1",
-            "date": "2026-09-27",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-28",
-            "reporting_devices": 2,
-            "app_version": "1.3.0",
-            "date": "2026-09-28",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-28",
-            "reporting_devices": 3,
-            "app_version": "1.4.0",
-            "date": "2026-09-28",
-            "failure_classifier_version": 1,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-28",
-            "reporting_devices": 1,
-            "app_version": "1.4.0-alpha.1",
-            "date": "2026-09-28",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-29",
-            "reporting_devices": 2,
-            "app_version": "1.3.0",
-            "date": "2026-09-29",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-29",
-            "reporting_devices": 3,
-            "app_version": "1.4.0",
-            "date": "2026-09-29",
-            "failure_classifier_version": 1,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-29",
-            "reporting_devices": 1,
-            "app_version": "1.4.0-alpha.1",
-            "date": "2026-09-29",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-30",
-            "reporting_devices": 2,
-            "app_version": "1.3.0",
-            "date": "2026-09-30",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-09-30",
-            "reporting_devices": 3,
-            "app_version": "1.4.0",
-            "date": "2026-09-30",
-            "failure_classifier_version": 1,
-            "failure_count": 2
-          },
-          {
-            "usage_date": "2026-10-01",
-            "reporting_devices": 1,
-            "app_version": "1.3.0",
-            "date": "2026-10-01",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-10-01",
             "reporting_devices": 4,
-            "app_version": "1.4.0",
-            "date": "2026-10-01",
             "failure_classifier_version": 1,
-            "failure_count": 1
+            "usage_date": "2026-09-25",
+            "failure_count": 0,
+            "app_version": "1.4.0"
           },
           {
-            "usage_date": "2026-10-02",
+            "date": "2026-09-26",
             "reporting_devices": 1,
-            "app_version": "1.3.0",
-            "date": "2026-10-02",
             "failure_classifier_version": null,
-            "failure_count": 0
+            "usage_date": "2026-09-26",
+            "failure_count": 0,
+            "app_version": "1.3.0"
           },
           {
-            "usage_date": "2026-10-02",
-            "reporting_devices": 1,
-            "app_version": "1.4.0",
-            "date": "2026-10-02",
-            "failure_classifier_version": 1,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-10-03",
-            "reporting_devices": 1,
-            "app_version": "1.3.0",
-            "date": "2026-10-03",
-            "failure_classifier_version": null,
-            "failure_count": 0
-          },
-          {
-            "usage_date": "2026-10-03",
+            "date": "2026-09-26",
             "reporting_devices": 2,
-            "app_version": "1.4.0",
-            "date": "2026-10-03",
             "failure_classifier_version": 1,
-            "failure_count": 0
+            "usage_date": "2026-09-26",
+            "failure_count": 2,
+            "app_version": "1.4.0"
           },
           {
-            "usage_date": "2026-10-04",
+            "date": "2026-09-27",
             "reporting_devices": 1,
-            "app_version": "1.3.0",
-            "date": "2026-10-04",
-            "failure_classifier_version": null,
-            "failure_count": 0
+            "failure_classifier_version": 1,
+            "usage_date": "2026-09-27",
+            "failure_count": 0,
+            "app_version": "1.4.0"
           },
           {
-            "usage_date": "2026-10-04",
+            "date": "2026-09-27",
+            "reporting_devices": 1,
+            "failure_classifier_version": null,
+            "usage_date": "2026-09-27",
+            "failure_count": 0,
+            "app_version": "1.4.0-alpha.1"
+          },
+          {
+            "date": "2026-09-28",
+            "reporting_devices": 2,
+            "failure_classifier_version": null,
+            "usage_date": "2026-09-28",
+            "failure_count": 0,
+            "app_version": "1.3.0"
+          },
+          {
+            "date": "2026-09-28",
             "reporting_devices": 3,
-            "app_version": "1.4.0",
-            "date": "2026-10-04",
             "failure_classifier_version": 1,
-            "failure_count": 0
+            "usage_date": "2026-09-28",
+            "failure_count": 0,
+            "app_version": "1.4.0"
           },
           {
-            "usage_date": "2026-10-05",
+            "date": "2026-09-28",
             "reporting_devices": 1,
-            "app_version": "1.2.6",
-            "date": "2026-10-05",
             "failure_classifier_version": null,
-            "failure_count": 0
+            "usage_date": "2026-09-28",
+            "failure_count": 0,
+            "app_version": "1.4.0-alpha.1"
+          },
+          {
+            "date": "2026-09-29",
+            "reporting_devices": 2,
+            "failure_classifier_version": null,
+            "usage_date": "2026-09-29",
+            "failure_count": 0,
+            "app_version": "1.3.0"
+          },
+          {
+            "date": "2026-09-29",
+            "reporting_devices": 3,
+            "failure_classifier_version": 1,
+            "usage_date": "2026-09-29",
+            "failure_count": 0,
+            "app_version": "1.4.0"
+          },
+          {
+            "date": "2026-09-29",
+            "reporting_devices": 1,
+            "failure_classifier_version": null,
+            "usage_date": "2026-09-29",
+            "failure_count": 0,
+            "app_version": "1.4.0-alpha.1"
+          },
+          {
+            "date": "2026-09-30",
+            "reporting_devices": 2,
+            "failure_classifier_version": null,
+            "usage_date": "2026-09-30",
+            "failure_count": 0,
+            "app_version": "1.3.0"
+          },
+          {
+            "date": "2026-09-30",
+            "reporting_devices": 3,
+            "failure_classifier_version": 1,
+            "usage_date": "2026-09-30",
+            "failure_count": 2,
+            "app_version": "1.4.0"
+          },
+          {
+            "date": "2026-10-01",
+            "reporting_devices": 1,
+            "failure_classifier_version": null,
+            "usage_date": "2026-10-01",
+            "failure_count": 0,
+            "app_version": "1.3.0"
+          },
+          {
+            "date": "2026-10-01",
+            "reporting_devices": 4,
+            "failure_classifier_version": 1,
+            "usage_date": "2026-10-01",
+            "failure_count": 1,
+            "app_version": "1.4.0"
+          },
+          {
+            "date": "2026-10-02",
+            "reporting_devices": 1,
+            "failure_classifier_version": null,
+            "usage_date": "2026-10-02",
+            "failure_count": 0,
+            "app_version": "1.3.0"
+          },
+          {
+            "date": "2026-10-02",
+            "reporting_devices": 1,
+            "failure_classifier_version": 1,
+            "usage_date": "2026-10-02",
+            "failure_count": 0,
+            "app_version": "1.4.0"
+          },
+          {
+            "date": "2026-10-03",
+            "reporting_devices": 1,
+            "failure_classifier_version": null,
+            "usage_date": "2026-10-03",
+            "failure_count": 0,
+            "app_version": "1.3.0"
+          },
+          {
+            "date": "2026-10-03",
+            "reporting_devices": 2,
+            "failure_classifier_version": 1,
+            "usage_date": "2026-10-03",
+            "failure_count": 0,
+            "app_version": "1.4.0"
+          },
+          {
+            "date": "2026-10-04",
+            "reporting_devices": 1,
+            "failure_classifier_version": null,
+            "usage_date": "2026-10-04",
+            "failure_count": 0,
+            "app_version": "1.3.0"
+          },
+          {
+            "date": "2026-10-04",
+            "reporting_devices": 3,
+            "failure_classifier_version": 1,
+            "usage_date": "2026-10-04",
+            "failure_count": 0,
+            "app_version": "1.4.0"
+          },
+          {
+            "date": "2026-10-05",
+            "reporting_devices": 1,
+            "failure_classifier_version": null,
+            "usage_date": "2026-10-05",
+            "failure_count": 0,
+            "app_version": "1.2.6"
+          },
+          {
+            "date": "2026-10-06",
+            "reporting_devices": 3,
+            "failure_classifier_version": null,
+            "usage_date": "2026-10-06",
+            "failure_count": 0,
+            "app_version": "1.3.0"
+          },
+          {
+            "date": "2026-10-06",
+            "reporting_devices": 4,
+            "failure_classifier_version": 1,
+            "usage_date": "2026-10-06",
+            "failure_count": 0,
+            "app_version": "1.4.0"
           }
         ]
       },
@@ -1098,5 +1078,5 @@
       }
     }
   ],
-  "updated_at": "2026-10-06T06:56:48.863907Z"
+  "updated_at": "2026-10-07T06:38:40.960550Z"
 }
