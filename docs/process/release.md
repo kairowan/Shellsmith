@@ -115,7 +115,7 @@ bash scripts/bump-version.sh x.y.z
 bash scripts/bump-version.sh x.y.z-rc.1
 ```
 
-脚本会使用 Rust 1.77.2 离线同步 API 19 兼容 crate 的独立锁文件；修改后仍需运行 `cargo build` 或 `make build-all`，使根 `Cargo.lock` 同步更新。
+脚本会使用 Rust 1.77.2 同步 API 19 兼容 crate 的独立锁文件，冷启动环境允许联网获取依赖索引；修改后仍需运行 `cargo build` 或 `make build-all`，使根 `Cargo.lock` 同步更新。
 
 ---
 
