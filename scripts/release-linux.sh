@@ -39,6 +39,7 @@ error()   { echo -e "${RED}✗ $1${NC}" >&2; exit 1; }
 # ========== 检查依赖 ==========
 check_deps() {
   info "检查构建依赖..."
+  [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]] || error "发布需要设置 TAURI_SIGNING_PRIVATE_KEY"
 
   if [[ "$SKIP_CLI_RELEASE" != "1" ]]; then
     # musl 目标（CLI 静态链接用）
@@ -229,6 +230,7 @@ collect_gui() {
   if [[ -n "$APPIMAGE" ]]; then
     local APPIMAGE_OUT="Shellsmith_${VERSION}_linux_amd64.AppImage"
     cp "$APPIMAGE" "$DIST_DIR/gui-appimage/$APPIMAGE_OUT"
+    cp "$APPIMAGE.sig" "$DIST_DIR/gui-appimage/$APPIMAGE_OUT.sig"
     success "AppImage → $APPIMAGE_OUT"
   else
     warn "AppImage 未找到，可能需要在 Ubuntu 22.04 上构建"

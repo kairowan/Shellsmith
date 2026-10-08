@@ -476,11 +476,8 @@ fn redact_certificate(mut record: CertificateRecord) -> CertificateRecord {
 }
 
 #[tauri::command]
-async fn check_update(
-    state: tauri::State<'_, AppConfigState>,
-    force: bool,
-) -> Result<UpdateCheckResult, String> {
-    check_update_impl(&state, force).await
+async fn check_update(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+    check_update_impl(&app).await
 }
 
 #[tauri::command]
@@ -531,12 +528,20 @@ fn main() {
     configure_linux_webview();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CancelHandle(Arc::new(AtomicBool::new(false))))
         .manage(ios_runner::IosCancelHandle::default())
         .manage(telemetry::TelemetryRuntime::default())
         .manage(TaskManager::default())
         .manage(error_report::ErrorReportState::default())
         .manage(application_sharing::SharingState::default())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.state::<TaskManager>().updating() {
+                    api.prevent_close();
+                }
+            }
+        })
         .setup(|app| {
             let loaded = load_app_config(app.handle())?;
             save_app_config_file(&loaded.path, &loaded.config)?;
@@ -579,6 +584,7 @@ fn main() {
             create_managed_certificate_command,
             list_keystore_aliases,
             check_update,
+            updates::install_update,
             sync_telemetry,
             open_url,
             dismiss_update,
@@ -588,8 +594,16 @@ fn main() {
             get_diagnostic_info,
             get_latest_task
         ])
-        .run(tauri::generate_context!())
-        .unwrap_or_else(|err| panic!("启动 shield-gui 失败: {err}"));
+        .build(tauri::generate_context!())
+        .unwrap_or_else(|err| panic!("启动 shield-gui 失败: {err}"))
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if app.state::<TaskManager>().updating() {
+                    // Tauri 的正常更新重启不受 prevent_exit 阻止。
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 fn configure_linux_webview() {

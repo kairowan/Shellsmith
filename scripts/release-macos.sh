@@ -50,6 +50,7 @@ GUI_BINARY="shield-gui"
 # ========== 检查运行环境 ==========
 check_env() {
   info "检查运行环境..."
+  [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]] || error "发布需要设置 TAURI_SIGNING_PRIVATE_KEY"
 
   if [[ "$OSTYPE" != "darwin"* ]]; then
     error "此脚本仅支持 macOS，当前系统: $OSTYPE"
@@ -179,7 +180,7 @@ build_gui() {
   npm ci
   local AAB_TAURI_CONFIG
   AAB_TAURI_CONFIG=$(GUI_BUNDLETOOL="$GUI_BUNDLETOOL" GUI_AAPT2="$GUI_AAPT2" node -e '
-    process.stdout.write(JSON.stringify({bundle:{resources:{
+    process.stdout.write(JSON.stringify({bundle:{createUpdaterArtifacts:false,resources:{
       [process.env.GUI_BUNDLETOOL]: "tools/bundletool.jar",
       [process.env.GUI_AAPT2]: "tools/aapt2"
     }}}))
@@ -364,6 +365,20 @@ collect_gui() {
   APP_DIR=$(find "$BUNDLE_BASE/macos" -name "*.app" -maxdepth 1 2>/dev/null | head -n 1)
   if [[ -n "$APP_DIR" ]]; then
     ditto "$APP_DIR" "$DIST_DIR/gui-app/Shellsmith.app"
+    # 更新包必须取最终签名的应用，不能使用 Tauri 构建阶段的中间包。
+    local UPDATE_ARCH
+    if [[ "$BUILD_UNIVERSAL" == "universal" ]]; then
+      UPDATE_ARCH="universal"
+    else
+      UPDATE_ARCH="$(uname -m)"
+    fi
+    local UPDATE_PACKAGE="$DIST_DIR/gui-app/Shellsmith_${VERSION}_macos_${UPDATE_ARCH}.app.tar.gz"
+    if [[ "$MACOS_RELEASE_MODE" == "developer-id" ]]; then
+      xcrun stapler staple "$DIST_DIR/gui-app/Shellsmith.app"
+      xcrun stapler validate "$DIST_DIR/gui-app/Shellsmith.app"
+    fi
+    COPYFILE_DISABLE=1 tar -czf "$UPDATE_PACKAGE" -C "$DIST_DIR/gui-app" Shellsmith.app
+    cargo tauri signer sign --app-version "$VERSION" "$UPDATE_PACKAGE"
     success ".app: Shellsmith.app（应用显示名：$(basename "$APP_DIR" .app)）"
   else
     warn ".app 未找到: $BUNDLE_BASE/macos/"

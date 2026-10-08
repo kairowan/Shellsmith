@@ -10,7 +10,7 @@ type AppInfo = {
 };
 
 const defaultAppInfo: AppInfo = {
-  version: "1.4.4",
+  version: "1.4.5",
   git_hash: "dev",
   build_date: "unknown",
 };
@@ -35,11 +35,12 @@ export function useAboutPage({
     setChecking(true);
     setMessage("");
     try {
-      const result = await api.checkUpdate(true);
+      const result = await api.checkUpdate();
       if (result.has_update && result.latest_version) {
         setUpdateInfo(result);
         setMessage(`${t(locale, "updateAvailable")} v${result.latest_version}`);
       } else {
+        setUpdateInfo(null);
         setMessage(t(locale, "upToDate"));
       }
     } catch {

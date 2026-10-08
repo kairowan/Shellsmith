@@ -69,7 +69,7 @@ export function useAutoUpdateNotice() {
     async function run() {
       try {
         const dismissed = await api.getDismissedVersion().catch(() => null);
-        const result = await api.checkUpdate(false);
+        const result = await api.checkUpdate();
         if (disposed || !result.has_update || !result.latest_version) {
           return;
         }
@@ -78,7 +78,7 @@ export function useAutoUpdateNotice() {
         }
         setUpdateInfo(result);
         if (result.update_level === "major") {
-          window.setTimeout(() => setMajorDialogOpen(true), 1200);
+          setMajorDialogOpen(true);
         }
       } catch {
         // 自动更新检查静默失败。

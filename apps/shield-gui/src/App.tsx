@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { FolderKey, Info, LoaderCircle, PencilLine, Settings, ShieldCheck } from "lucide-react";
 import { Toaster } from "sonner";
-import { AppSidebarHeader, MajorUpdateDialog, UpdateBanner } from "@/components/app/common";
+import { AppSidebarHeader, UpdateBanner } from "@/components/app/common";
+import { UpdateDialog } from "@/components/app/update-dialog";
 import { ErrorReportDialog } from "@/components/app/error-report-dialog";
 import {
   Sidebar,
@@ -79,10 +80,6 @@ export function App() {
     setUpdateInfo(null);
   }
 
-  function openRelease(url: string) {
-    void api.openUrl(url);
-  }
-
   return (
     <SidebarProvider>
       <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
@@ -130,7 +127,7 @@ export function App() {
             locale={locale}
             updateInfo={updateInfo}
             onDismiss={() => void dismissUpdate(updateInfo?.latest_version ?? undefined)}
-            onViewRelease={openRelease}
+            onUpdate={() => setMajorDialogOpen(true)}
           />
           <div className="scrollbar-none min-h-0 flex-1 overflow-auto">
             <div className={page === "protect" ? undefined : "hidden"} aria-hidden={page !== "protect"}>
@@ -238,13 +235,12 @@ export function App() {
           </div>
         </SidebarInset>
 
-        <MajorUpdateDialog
+        <UpdateDialog
           locale={locale}
           open={majorDialogOpen}
-          latestVersion={updateInfo?.latest_version ?? undefined}
-          releaseUrl={updateInfo?.release_url}
+          updateInfo={updateInfo}
+          taskRunning={Boolean(runningTasks.protect || runningTasks.ios_protect || runningTasks.sign)}
           onClose={() => setMajorDialogOpen(false)}
-          onViewRelease={openRelease}
         />
         <ErrorReportDialog telemetryEnabled={telemetryEnabled} />
         <Toaster

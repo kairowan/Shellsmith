@@ -6,14 +6,6 @@ use tauri::Manager;
 
 const CONFIG_FILE: &str = "config.toml";
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub(crate) struct UpdateCache {
-    pub last_check: Option<i64>,
-    pub latest_tag: Option<String>,
-    pub release_url: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct TelemetryConfig {
@@ -58,7 +50,6 @@ pub(crate) struct AppConfig {
     pub locale: String,
     pub theme_mode: String,
     pub dismissed_version: Option<String>,
-    pub update_cache: UpdateCache,
     pub telemetry: TelemetryConfig,
     pub protect_defaults: ProtectDefaults,
     pub application_sharing: ApplicationSharingConfig,
@@ -114,7 +105,6 @@ impl Default for AppConfig {
             locale: "zh".to_string(),
             theme_mode: "system".to_string(),
             dismissed_version: None,
-            update_cache: UpdateCache::default(),
             telemetry: TelemetryConfig::default(),
             protect_defaults: ProtectDefaults::default(),
             application_sharing: ApplicationSharingConfig::default(),

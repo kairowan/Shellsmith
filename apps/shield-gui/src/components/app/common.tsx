@@ -353,12 +353,12 @@ export function UpdateBanner({
   locale,
   updateInfo,
   onDismiss,
-  onViewRelease,
+  onUpdate,
 }: {
   locale: Locale;
   updateInfo: UpdateCheckResult | null;
   onDismiss: () => void;
-  onViewRelease: (url: string) => void;
+  onUpdate: () => void;
 }) {
   if (!updateInfo?.has_update || !updateInfo.latest_version) {
     return null;
@@ -373,11 +373,9 @@ export function UpdateBanner({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {updateInfo.release_url && (
-            <AppButton size="sm" variant="ghost" onClick={() => onViewRelease(updateInfo.release_url!)}>
-              {t(locale, "viewRelease")}
-            </AppButton>
-          )}
+          <AppButton size="sm" variant="ghost" onClick={onUpdate}>
+            {t(locale, "viewUpdate")}
+          </AppButton>
           {updateInfo.update_level !== "major" && (
             <button className="icon-button" type="button" aria-label={t(locale, "ignore")} onClick={onDismiss}>
               <X className="h-4 w-4" />
@@ -385,56 +383,6 @@ export function UpdateBanner({
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-export function MajorUpdateDialog({
-  locale,
-  open,
-  latestVersion,
-  releaseUrl,
-  onClose,
-  onViewRelease,
-}: {
-  locale: Locale;
-  open: boolean;
-  latestVersion?: string;
-  releaseUrl?: string | null;
-  onClose: () => void;
-  onViewRelease: (url: string) => void;
-}) {
-  if (!open || !latestVersion) {
-    return null;
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6">
-      <section className="app-panel w-full max-w-md p-6 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-md bg-primary/12 text-primary">
-          <Download className="h-6 w-6" />
-        </div>
-        <h2 className="text-lg font-semibold">{t(locale, "majorUpdate")}</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {t(locale, "updateAvailable")} v{latestVersion}
-        </p>
-        <div className="mt-6 flex justify-center gap-3">
-          <AppButton
-            onClick={() => {
-              if (releaseUrl) {
-                onViewRelease(releaseUrl);
-              }
-              onClose();
-            }}
-          >
-            <Download className="h-4 w-4" />
-            {t(locale, "viewRelease")}
-          </AppButton>
-          <AppButton variant="secondary" onClick={onClose}>
-            {t(locale, "ignore")}
-          </AppButton>
-        </div>
-      </section>
     </div>
   );
 }
