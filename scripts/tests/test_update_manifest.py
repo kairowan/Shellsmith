@@ -31,6 +31,18 @@ class UpdateManifestTests(unittest.TestCase):
             self.assertEqual(len(manifest["platforms"]), 4)
             self.assertEqual(manifest["platforms"]["darwin-aarch64"], manifest["platforms"]["darwin-x86_64"])
             self.assertEqual(manifest["platforms"]["linux-x86_64"]["signature"], signature)
+            draft_assets = copy.deepcopy(assets)
+            for asset in draft_assets:
+                asset["url"] = asset["url"].replace(f"/v{version}/", "/untagged-7438ccb79dba712267e0/")
+            self.assertEqual(generate_manifest(version, draft_assets, signatures, "更新说明", draft_tag=f"v{version}"), manifest)
+            for draft_tag in [None, "v1.4.4"]:
+                with self.assertRaises(ValueError):
+                    generate_manifest(version, draft_assets, signatures, "", draft_tag=draft_tag)
+            for wrong_url in ["https://example.com/wrong.exe", draft_assets[0]["url"] + ".wrong"]:
+                invalid = copy.deepcopy(draft_assets)
+                invalid[0]["url"] = wrong_url
+                with self.assertRaises(ValueError):
+                    generate_manifest(version, invalid, signatures, "", draft_tag=f"v{version}")
             for index in range(len(assets)):
                 with self.assertRaises(ValueError):
                     generate_manifest(version, assets[:index] + assets[index + 1:], signatures, "")

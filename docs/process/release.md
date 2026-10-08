@@ -85,7 +85,7 @@ Pull Request 合并前必须通过以下 CI 检查：
 - 首次发布前生成专用更新签名密钥，把私钥设为 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY`，公钥放 `tauri.conf.json`。私钥必须另行安全备份，不能提交仓库或放进安装包；丢失后旧客户端无法信任新密钥。当前私钥无口令，CI 设置空的 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
 - 发布脚本要求提供该环境变量（可为密钥文件路径），Tauri CLI 使用 2.11.5。普通开发构建无需私钥；仅做本地打包测试时可传 `--config '{"bundle":{"createUpdaterArtifacts":false}}'`，不得用这种构建覆盖正式更新产物。
 - macOS 在最终应用签名后重新生成 `.app.tar.gz` 并签名；Windows 上传 NSIS `.exe` 和 `.sig`；Linux 上传 AppImage 和 `.sig`。macOS universal 包同时服务两种架构。
-- 工作流同步实际打包版本；所有产物上传完成后执行 `scripts/generate_update_manifest.py` 验证文件、地址和签名版本，再上传清单并公开 Release。客户端仍会执行密码学验签，不能用 SHA-256 替代。
+- 工作流同步实际打包版本；所有产物上传完成后执行 `scripts/generate_update_manifest.py` 验证文件、地址和签名版本，再上传清单并公开 Release。GitHub 草稿的 `untagged-…` 临时地址仅在确认草稿 tag 匹配后接受，清单始终写正式 tag 地址。客户端仍会执行密码学验签，不能用 SHA-256 替代。
 - `requireSignedVersion` 必须保留为 `true`，阻止清单把旧包标成新版本。草稿和预发布不更新稳定通道，已公开的版本不得覆盖，失败只重跑原草稿或提升版本号。
 - 更新签名与 Apple Developer ID / 公证、Windows Authenticode 是不同机制；当前 CI 的 macOS adhoc 模式并不等于 Apple 公证。
 - 回归入口：`cargo test -p mocika-shield`（含真实签名、篡改及伪造版本测试）、`python3 -m unittest discover -s scripts/tests -v`（含三平台清单完整性测试）。

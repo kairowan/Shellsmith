@@ -18,6 +18,7 @@ class ReleaseDirectUploadTests(unittest.TestCase):
         self.assertNotIn("actions/download-artifact@", workflow)
         self.assertEqual(workflow.count("gh release upload"), 4)
         self.assertIn("generate_update_manifest.py", workflow)
+        self.assertIn('--json tagName,isDraft,assets > release-assets.json', workflow)
         self.assertLess(workflow.index("generate_update_manifest.py"), workflow.index("--draft=false"))
         self.assertIn("secrets.TAURI_SIGNING_PRIVATE_KEY", workflow)
         self.assertIn("禁止覆盖已公开的 Release", workflow)
