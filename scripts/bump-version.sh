@@ -62,12 +62,11 @@ si "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$ROOT/shield-stub/compat/a
 echo "  ✓ shield-stub/compat/api19-rust/Cargo.toml"
 
 # API 19 兼容 crate 使用独立 workspace 和锁文件，Release 构建会传入 --locked。
-# 只更新本地根 package 版本，不解析或升级任何第三方依赖。
+# 只更新根 package 版本；冷启动 CI 允许获取锁定依赖的索引，不强制要求本机缓存。
 rustup run 1.77.2 cargo update \
   --manifest-path "$ROOT/shield-stub/compat/api19-rust/Cargo.toml" \
   --package mocikashield-api19 \
-  --precise "$VERSION" \
-  --offline
+  --precise "$VERSION"
 echo "  ✓ shield-stub/compat/api19-rust/Cargo.lock"
 
 # tauri.conf.json 顶层 "version" 字段缩进固定为 2 空格

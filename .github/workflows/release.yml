@@ -60,6 +60,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' > release-draft.txt 2>/dev/null; then
             test "$(cat release-draft.txt)" = true || { echo "禁止覆盖已公开的 Release，请提升版本号"; exit 1; }
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --target "$(git rev-parse HEAD)"
           else
             gh release create "$tag" \
               --repo "$GITHUB_REPOSITORY" \
