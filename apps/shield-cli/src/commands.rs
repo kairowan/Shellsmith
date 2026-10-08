@@ -130,6 +130,8 @@ pub(crate) fn run_protect_ios(args: ProtectIosArgs) -> Result<()> {
             export_method: args.export_method,
             allow_provisioning_updates: args.allow_provisioning_updates,
             dry_run: args.dry_run,
+            ios_cache_dir: args.ios_cache_dir,
+            freerasp_zip: args.freerasp_zip,
         },
         move |event| {
             if json {

@@ -1178,15 +1178,14 @@ mod tests {
         };
         integrate_runtime(temp.path(), &project, &target, &config, None).unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
+        let import = std::env::var_os("SHELLSMITH_TEST_FREERASP_ZIP").map(PathBuf::from);
+        let sdk =
+            crate::prepare_ios_sdk(&temp.path().join("sdk-cache"), import.as_deref(), &cancel)
+                .unwrap();
+        crate::dependency_cache::install_sdk(&sdk, temp.path(), &cancel).unwrap();
         for input in [&project, &workspace] {
             crate::xcodebuild::resolve_packages(input, "Demo", None, &cancel).unwrap();
-            let lock = crate::verify_package_lock(input, false, true).unwrap();
-            assert_eq!(
-                lock.severity,
-                crate::IosCheckSeverity::Ready,
-                "{}",
-                lock.message
-            );
+            crate::dependency_cache::verify_installed_sdk(temp.path()).unwrap();
             let archive = temp.path().join(format!(
                 "{}.xcarchive",
                 input.extension().unwrap().to_string_lossy()

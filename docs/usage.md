@@ -124,6 +124,10 @@ iOS 完整构建要求 macOS、完整 Xcode、可用的 Apple Team 和 Provision
 
 Shellsmith 不修改原工程，也不保存 Apple 账号令牌、钥匙串密码或私钥。生成的本地 Swift Package 锁定 Swift Confidential 0.5.2 和 freeRASP iOS 7.1.4，并直接链接到应用 target，避免 XCFramework 重复产物与二级 framework 嵌套问题。
 
+freeRASP 支持“一次准备，多次复用”：在 iOS 保护方案中点击“下载 / 检查缓存”，或从能访问 GitHub 的电脑下载 [官方 v7.1.4 源码 ZIP](https://github.com/talsec/Free-RASP-iOS/archive/refs/tags/v7.1.4.zip)，再点击“导入官方 ZIP”。无需付费授权字段，但仍须遵守上游免费版许可、公平使用与隐私要求。首次开始加固也会自动准备；缓存后使用相对路径本地依赖，换输出目录无需重新克隆 freeRASP。文件会逐项校验，损坏或错误版本会阻断，不能靠关闭保护绕过。
+
+缓存仅保存在当前用户的 `~/Library/Caches/dev.mocika.shield-gui/ios-dependencies/`，不进入 Shellsmith 安装包；CLI 可用 `--freerasp-zip` 导入、`--ios-cache-dir` 指定缓存目录。官方许可证、说明和隐私清单会保留在输出工作副本。缓存解决 freeRASP 的构建下载问题，不关闭 SDK 运行时通信；Swift Confidential、工程原有依赖和签名仍可能需要网络。详见 [本机依赖准备](design/ios-hardening.md#本机依赖准备)。
+
 三个档位的边界：
 
 | 档位 | 行为 |

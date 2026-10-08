@@ -564,6 +564,8 @@ fn main() {
             ios_runner::check_ios_project,
             ios_runner::protect_ios_project,
             ios_runner::cancel_ios_protect,
+            ios_runner::ios_sdk_status,
+            ios_runner::prepare_ios_sdk,
             show_in_folder,
             check_file_exists,
             delete_file,

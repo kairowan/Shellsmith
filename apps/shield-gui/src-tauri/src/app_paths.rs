@@ -83,15 +83,12 @@ pub(crate) fn find_bundletool_path(app: &tauri::AppHandle) -> Option<PathBuf> {
             return Some(path);
         }
     }
-    for path in [
+    [
         project_root_path().join("tools/bundletool.jar"),
         project_root_path().join("target/e2e-tools/bundletool-all-1.18.3.jar"),
-    ] {
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
 }
 
 pub(crate) fn find_aapt2_path(app: &tauri::AppHandle) -> Option<PathBuf> {

@@ -292,6 +292,13 @@ export type IosProtectionReport = {
   checks: IosCheck[];
 };
 
+export type IosSdkStatus = {
+  version: string;
+  path: string;
+  ready: boolean;
+  diagnostic: string | null;
+};
+
 export type IosProtectRequest = {
   taskId: string;
   project: string;
@@ -347,6 +354,9 @@ export const api = {
   protectIosProject: (request: IosProtectRequest) =>
     invoke<IosProtectionReport>("protect_ios_project", { request }),
   cancelIosProtect: () => invoke<void>("cancel_ios_protect"),
+  iosSdkStatus: () => invoke<IosSdkStatus>("ios_sdk_status"),
+  prepareIosSdk: (taskId: string, importZip: string | null) =>
+    invoke<IosSdkStatus>("prepare_ios_sdk", { taskId, importZip }),
   cancelProtect: () => invoke<void>("cancel_protect"),
   checkFileExists: (path: string) => invoke<boolean>("check_file_exists", { path }),
   showInFolder: (path: string) => invoke<void>("show_in_folder", { path }),
