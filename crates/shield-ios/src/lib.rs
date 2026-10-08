@@ -373,11 +373,15 @@ where
         &cancel,
     )?;
     if options.config.confidential_enabled() || options.config.protection.profile.uses_rasp() {
-        checks.push(verify_package_lock(
-            &working_root,
+        let package_check = verify_package_lock(
+            &working_project,
             options.config.confidential_enabled(),
             options.config.protection.profile.uses_rasp(),
-        )?);
+        )?;
+        if package_check.severity == IosCheckSeverity::Blocked {
+            anyhow::bail!("Swift Package 依赖检查失败：{}", package_check.message);
+        }
+        checks.push(package_check);
     }
 
     let archive = options.output_dir.join("Shellsmith.xcarchive");

@@ -733,9 +733,19 @@ fn find_first_object_with_isa(content: &str, isa: &str) -> Option<String> {
 
 fn object_block(content: &str, id: &str) -> Option<(usize, usize)> {
     let marker = format!("{id} ");
-    let start = content.find(&marker)?;
-    let open = content[start..].find('{').map(|value| start + value)?;
-    matching_brace(content, open).map(|close| (start, close + 1))
+    // 只匹配对象声明，不能从 containerPortal 等 ID 引用向后寻找花括号。
+    content.match_indices(&marker).find_map(|(start, _)| {
+        let mut suffix = content[start + id.len()..].trim_start();
+        if let Some(comment) = suffix.strip_prefix("/*") {
+            suffix = comment.split_once("*/")?.1.trim_start();
+        }
+        suffix = suffix.strip_prefix('=')?.trim_start();
+        if !suffix.starts_with('{') {
+            return None;
+        }
+        let open = content.len() - suffix.len();
+        matching_brace(content, open).map(|close| (start, close + 1))
+    })
 }
 
 fn list_ids(block: &str, field: &str) -> Vec<String> {
@@ -946,39 +956,117 @@ mod tests {
     #[test]
     fn patches_local_package_into_application_target() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("project.pbxproj");
+        let project = temp.path().join("Demo.xcodeproj");
+        fs::create_dir(&project).unwrap();
+        let path = project.join("project.pbxproj");
         fs::write(
             &path,
             r#"// !$*UTF8*$!
 {
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
 	objects = {
 /* Begin PBXBuildFile section */
+		000000000000000000000050 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000040 /* main.m */; };
+		000000000000000000000051 /* Share.m in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000041 /* Share.m */; };
+		000000000000000000000052 /* Share.appex in Embed */ = {isa = PBXBuildFile; fileRef = 000000000000000000000043 /* Share.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+/* Begin PBXContainerItemProxy section */
+		DDDDDDDDDDDDDDDDDDDDDDDD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CCCCCCCCCCCCCCCCCCCCCCCC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EEEEEEEEEEEEEEEEEEEEEEEE;
+			remoteInfo = "Share Extension";
+		};
+/* End PBXContainerItemProxy section */
+/* Begin PBXCopyFilesBuildPhase section */
+		000000000000000000000013 /* Embed */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (000000000000000000000052 /* Share.appex in Embed */, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
+/* Begin PBXFileReference section */
+		000000000000000000000040 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		000000000000000000000041 /* Share.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Share.m; sourceTree = "<group>"; };
+		000000000000000000000042 /* Demo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Demo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000043 /* Share.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = Share.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
 /* Begin PBXFrameworksBuildPhase section */
 		BBBBBBBBBBBBBBBBBBBBBBBB /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
+		000000000000000000000014 /* Share Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
+/* Begin PBXGroup section */
+		000000000000000000000030 = {isa = PBXGroup; children = (000000000000000000000040, 000000000000000000000041, 000000000000000000000031, ); sourceTree = "<group>"; };
+		000000000000000000000031 /* Products */ = {isa = PBXGroup; children = (000000000000000000000042, 000000000000000000000043, ); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
 /* Begin PBXNativeTarget section */
 		AAAAAAAAAAAAAAAAAAAAAAAA /* Demo */ = {
 			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000022;
 			buildPhases = (
+				000000000000000000000011 /* Sources */,
 				BBBBBBBBBBBBBBBBBBBBBBBB /* Frameworks */,
+				000000000000000000000013 /* Embed */,
 			);
+			dependencies = (000000000000000000000060, );
 			name = Demo;
+			productName = Demo;
+			productReference = 000000000000000000000042;
 			productType = "com.apple.product-type.application";
+		};
+		EEEEEEEEEEEEEEEEEEEEEEEE /* Share Extension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000000000024;
+			buildPhases = (
+				000000000000000000000015 /* Sources */,
+				000000000000000000000014 /* Share Frameworks */,
+			);
+			dependencies = ();
+			name = "Share Extension";
+			productName = Share;
+			productReference = 000000000000000000000043;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 /* Begin PBXProject section */
 		CCCCCCCCCCCCCCCCCCCCCCCC /* Project object */ = {
 			isa = PBXProject;
+			buildConfigurationList = 000000000000000000000020;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			knownRegions = (en, Base, );
+			mainGroup = 000000000000000000000030;
+			productRefGroup = 000000000000000000000031;
+			projectDirPath = "";
+			projectRoot = "";
 			targets = (
 				AAAAAAAAAAAAAAAAAAAAAAAA,
+				EEEEEEEEEEEEEEEEEEEEEEEE,
 			);
 		};
 /* End PBXProject section */
+/* Begin PBXSourcesBuildPhase section */
+		000000000000000000000011 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000050, ); runOnlyForDeploymentPostprocessing = 0; };
+		000000000000000000000015 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (000000000000000000000051, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+/* Begin PBXTargetDependency section */
+		000000000000000000000060 = {isa = PBXTargetDependency; target = EEEEEEEEEEEEEEEEEEEEEEEE; targetProxy = DDDDDDDDDDDDDDDDDDDDDDDDDD; };
+/* End PBXTargetDependency section */
+/* Begin XCBuildConfiguration section */
+		000000000000000000000021 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 15.0; SWIFT_VERSION = 5.0; CODE_SIGNING_ALLOWED = NO; }; name = Release; };
+		000000000000000000000023 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; PRODUCT_NAME = Demo; PRODUCT_BUNDLE_IDENTIFIER = com.example.demo; MARKETING_VERSION = 1.0; CURRENT_PROJECT_VERSION = 1; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		000000000000000000000025 = {isa = XCBuildConfiguration; buildSettings = {INFOPLIST_FILE = "Share-Info.plist"; PRODUCT_NAME = Share; PRODUCT_BUNDLE_IDENTIFIER = com.example.demo.share; SKIP_INSTALL = YES; APPLICATION_EXTENSION_API_ONLY = YES; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+/* End XCBuildConfiguration section */
+/* Begin XCConfigurationList section */
+		000000000000000000000020 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000021, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		000000000000000000000022 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000023, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		000000000000000000000024 = {isa = XCConfigurationList; buildConfigurations = (000000000000000000000025, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
 	};
 	rootObject = CCCCCCCCCCCCCCCCCCCCCCCC;
 }
@@ -987,7 +1075,7 @@ mod tests {
         .unwrap();
         patch_pbxproj(&path, "Demo", Path::new(".shellsmith/ShellsmithRuntime")).unwrap();
         patch_pbxproj(&path, "Demo", Path::new(".shellsmith/ShellsmithRuntime")).unwrap();
-        let content = fs::read_to_string(path).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
         assert_eq!(
             content
                 .matches("ShellsmithRuntime in Frameworks */ =")
@@ -996,5 +1084,121 @@ mod tests {
         );
         assert!(content.contains("XCLocalSwiftPackageReference"));
         assert!(content.contains("packageProductDependencies = ("));
+        let project_section = section_range(&content, "PBXProject").unwrap();
+        assert!(content[project_section.0..project_section.1].contains("packageReferences = ("));
+        let frameworks_section = section_range(&content, "PBXFrameworksBuildPhase").unwrap();
+        assert!(!content[frameworks_section.0..frameworks_section.1].contains("packageReferences"));
+        if cfg!(target_os = "macos") {
+            let output = std::process::Command::new("plutil")
+                .arg("-lint")
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+
+        // 本地结构检查始终执行；CI 另外启用完整 Xcode、上游依赖和无签名归档检查。
+        if std::env::var_os("SHELLSMITH_TEST_XCODE_ARCHIVE").is_none() {
+            return;
+        }
+        fs::write(
+            temp.path().join("main.m"),
+            "#import <UIKit/UIKit.h>\n@interface AppDelegate : UIResponder <UIApplicationDelegate>\n@property(strong, nonatomic) UIWindow *window;\n@end\n@implementation AppDelegate\n- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options { return YES; }\n@end\nint main(int argc, char **argv) { @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class])); } }\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("Share.m"),
+            "#import <UIKit/UIKit.h>\n@interface ShareViewController : UIViewController\n@end\n@implementation ShareViewController\n@end\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("Share-Info.plist"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+<key>CFBundlePackageType</key><string>XPC!</string>
+<key>CFBundleShortVersionString</key><string>1.0</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>NSExtension</key><dict>
+<key>NSExtensionPointIdentifier</key><string>com.apple.share-services</string>
+<key>NSExtensionPrincipalClass</key><string>ShareViewController</string>
+</dict></dict></plist>"#,
+        )
+        .unwrap();
+        let schemes = project.join("xcshareddata/xcschemes");
+        fs::create_dir_all(&schemes).unwrap();
+        fs::write(
+            schemes.join("Demo.xcscheme"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="1600" version="1.3">
+<BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries>
+<BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="AAAAAAAAAAAAAAAAAAAAAAAA" BuildableName="Demo.app" BlueprintName="Demo" ReferencedContainer="container:Demo.xcodeproj"/>
+</BuildActionEntry></BuildActionEntries></BuildAction>
+<ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
+</Scheme>"#,
+        )
+        .unwrap();
+        let workspace = temp.path().join("Demo.xcworkspace");
+        fs::create_dir(&workspace).unwrap();
+        fs::write(
+            workspace.join("contents.xcworkspacedata"),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Workspace version=\"1.0\"><FileRef location=\"group:Demo.xcodeproj\"/></Workspace>",
+        )
+        .unwrap();
+        let config = ShellsmithIosConfig {
+            project: IosProjectConfig {
+                path: project.clone(),
+                scheme: "Demo".into(),
+                configuration: "Release".into(),
+                team_id: "ABCDE12345".into(),
+                bundle_ids: vec!["com.example.demo".into()],
+                entrypoint: None,
+            },
+            protection: IosProtectionConfig {
+                profile: crate::IosProtectionProfile::Strict,
+                ..IosProtectionConfig::default()
+            },
+            confidential: None,
+            rasp: None,
+        };
+        let target = IosTargetInspection {
+            name: "Demo".into(),
+            product_type: "com.apple.product-type.application".into(),
+            bundle_id: None,
+            team_id: None,
+            deployment_target: None,
+            project_file: Some(project.clone()),
+            build_library_for_distribution: false,
+        };
+        integrate_runtime(temp.path(), &project, &target, &config, None).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        for input in [&project, &workspace] {
+            crate::xcodebuild::resolve_packages(input, "Demo", None, &cancel).unwrap();
+            let lock = crate::verify_package_lock(input, false, true).unwrap();
+            assert_eq!(
+                lock.severity,
+                crate::IosCheckSeverity::Ready,
+                "{}",
+                lock.message
+            );
+            let archive = temp.path().join(format!(
+                "{}.xcarchive",
+                input.extension().unwrap().to_string_lossy()
+            ));
+            crate::xcodebuild::archive(input, &config.project, &archive, None, false, &cancel)
+                .unwrap();
+            let app = archive.join("Products/Applications/Demo.app");
+            assert!(app.join("Demo").is_file());
+            assert!(app.join("PlugIns/Share.appex/Share").is_file());
+            assert!(app
+                .join("Frameworks/TalsecRuntime.framework/TalsecRuntime")
+                .is_file());
+        }
     }
 }
