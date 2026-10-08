@@ -83,7 +83,7 @@ MATRIX_MODE=apks MATRIX_ARTIFACT=/path/to/protected.apks \
 |---|---|
 | 输入 | 拥有源码与签名权限的 `.xcodeproj`、`.xcworkspace` |
 | 最低系统 | iOS 13；最终下限以应用依赖及锁定包共同要求为准 |
-| 工程类型 | SwiftUI、UIKit 应用 target；Objective-C 可接入 RASP，Swift Confidential 只处理 Swift |
+| 工程类型 | SwiftUI/Swift UIKit `@main`；具有 `didFinishLaunchingWithOptions` 回调的标准 Objective-C UIKit 工程可接入 RASP；Swift Confidential 不处理 OC 字符串 |
 | 构建主机 | macOS + 完整 Xcode；Windows/Linux 只做静态检查和配置编辑 |
 | 架构 | 导出产物主可执行文件必须包含 arm64 |
 | 签名 | Bundle ID、Team ID、Entitlements、Provisioning、codesign 严格检查 |

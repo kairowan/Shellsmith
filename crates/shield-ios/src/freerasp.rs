@@ -282,6 +282,12 @@ pub(crate) fn protection_source(config: &ShellsmithIosConfig) -> String {
              public static func start(onThreat: ((ShellsmithThreatEvent) -> Void)? = nil) {{\n\
                  {}\n\
              }}\n\
+         }}\n\n\
+         @objc(ShellsmithProtectionBootstrap)\n\
+         public final class ShellsmithProtectionBootstrap: NSObject {{\n\
+             @objc public static func start() {{\n\
+                 ShellsmithProtection.start()\n\
+             }}\n\
          }}\n",
         config.protection.profile.as_str(),
         endpoint,
@@ -485,7 +491,9 @@ fn swift_escape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{IosProjectConfig, IosProtectionConfig, IosProtectionProfile};
     use std::fs;
+    use std::path::PathBuf;
     use std::process::Command;
 
     #[test]
@@ -570,5 +578,69 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+
+    #[test]
+    fn objc_bootstrap_is_exported_by_swift_module_on_macos() {
+        if !cfg!(target_os = "macos") || Command::new("swift").arg("--version").output().is_err() {
+            return;
+        }
+        let config = ShellsmithIosConfig {
+            project: IosProjectConfig {
+                path: PathBuf::from("App.xcodeproj"),
+                scheme: "App".into(),
+                configuration: "Release".into(),
+                team_id: "ABCDE12345".into(),
+                bundle_ids: vec!["com.example.app".into()],
+                entrypoint: None,
+            },
+            protection: IosProtectionConfig {
+                profile: IosProtectionProfile::Compat,
+                ..IosProtectionConfig::default()
+            },
+            confidential: None,
+            rasp: None,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let package = temp.path().join("Package.swift");
+        fs::write(
+            &package,
+            "// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(name: \"BridgeCheck\", platforms: [.macOS(.v11)], products: [.library(name: \"Client\", targets: [\"Client\"])], targets: [.target(name: \"ShellsmithRuntime\"), .target(name: \"Client\", dependencies: [\"ShellsmithRuntime\"])])\n",
+        )
+        .unwrap();
+        let runtime_sources = temp.path().join("Sources/ShellsmithRuntime");
+        let client_sources = temp.path().join("Sources/Client");
+        fs::create_dir_all(&runtime_sources).unwrap();
+        fs::create_dir_all(client_sources.join("include")).unwrap();
+        fs::write(
+            runtime_sources.join("Bootstrap.swift"),
+            format!(
+                "public struct ShellsmithThreatEvent {{}}\n{}",
+                protection_source(&config)
+            ),
+        )
+        .unwrap();
+        fs::write(
+            client_sources.join("include/Client.h"),
+            "void startProtection(void);\n",
+        )
+        .unwrap();
+        fs::write(
+            client_sources.join("Client.m"),
+            "@import ShellsmithRuntime;\nvoid startProtection(void) { [ShellsmithProtectionBootstrap start]; }\n",
+        )
+        .unwrap();
+        let output = Command::new("swift")
+            .args(["build", "--package-path"])
+            .arg(temp.path())
+            .arg("--scratch-path")
+            .arg(temp.path().join("build"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

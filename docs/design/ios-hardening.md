@@ -23,7 +23,7 @@ Rust 核心位于 `crates/shield-ios`，CLI/Tauri GUI 调用同一接口。保�
 工程预检
   -> 独立工作副本
   -> .shellsmith/ShellsmithRuntime 本地 Swift Package
-  -> 修改唯一 @main 启动入口
+  -> 修改唯一 Swift @main 或 Objective-C AppDelegate 启动回调
   -> 应用 target 接入本地 Package
   -> 解析精确版本依赖
   -> Archive
@@ -33,6 +33,8 @@ Rust 核心位于 `crates/shield-ios`，CLI/Tauri GUI 调用同一接口。保�
 ```
 
 生成的本地 Package 直接依赖上游仓库，Shellsmith 安装包不携带或改名 freeRASP 闭源二进制。启用 Swift Confidential 时，主包与插件使用相同精确版本；未启用时不接入该插件。Archive 前必须生成唯一且非空的 `Package.resolved`，报告记录其 SHA-256；生产构建不跳过已启用的 Swift Package 插件或宏校验。构建失败、取消或验证阻断只影响输出工作副本。
+
+纯 Objective-C UIKit 工程通过 `AppDelegate.m` 的 `application:didFinishLaunchingWithOptions:` 接入同一 Swift Package 的 Objective-C 启动桥，在已有回调的开头启动保护；其余回调逻辑和 `main.m` 保持不变。Swift Confidential 不保护 OC 字符串。无该启动回调或无法唯一确定目标时明确阻断，需人工适配。
 
 ## 配置
 

@@ -155,7 +155,7 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
                 <Field label="Apple Team ID"><TextInput value={teamId} disabled={running} onChange={(event) => setTeamId(event.target.value.toUpperCase())} placeholder="ABCDE12345" maxLength={10} /></Field>
                 <Field label="Bundle ID"><TextInput value={bundleIds} disabled={running} onChange={(event) => setBundleIds(event.target.value)} placeholder="com.example.app" /></Field>
               </div>
-              <Field className="mt-4" label={t(locale, "iosEntrypoint")} hint={t(locale, "iosEntrypointHint")}><TextInput value={entrypoint} disabled={running} onChange={(event) => setEntrypoint(event.target.value)} placeholder="App/App.swift" /></Field>
+              <Field className="mt-4" label={t(locale, "iosEntrypoint")} hint={t(locale, "iosEntrypointHint")}><TextInput value={entrypoint} disabled={running} onChange={(event) => setEntrypoint(event.target.value)} placeholder="App/App.swift 或 App/AppDelegate.m" /></Field>
               <AppButton className="mt-4" variant="secondary" disabled={!project || checking || running} onClick={() => void runCheck()}>
                 {checking ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}{t(locale, "checkIosProject")}
               </AppButton>

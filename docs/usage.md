@@ -109,6 +109,8 @@ iOS 完整构建要求 macOS、完整 Xcode、可用的 Apple Team 和 Provision
 6. 选择独立的空输出目录和导出方式。只有允许 Xcode 使用本机开发者账号更新描述文件时，才开启“允许更新 Provisioning”。
 7. 完成后在输出目录检查工作副本、`.xcarchive`、IPA 和 `shellsmith-report.json`，再用目标设备验证启动、敏感流程和威胁响应。
 
+标准纯 Objective-C UIKit 工程可通过 `AppDelegate.m` 中已有的 `application:didFinishLaunchingWithOptions:` 回调接入 balanced/strict 运行时保护；若发现多个启动回调，在“iOS 启动入口”中明确填写目标 `.m` 路径。Shellsmith 会在工作副本该回调的开头启动保护，保持 `main.m` 和原有回调逻辑不变。Swift Confidential 不处理 OC 字符串，纯 OC 工程请勿提供 `confidential.yml`；无该回调的自定义启动方式暂不支持自动注入。
+
 Shellsmith 不修改原工程，也不保存 Apple 账号令牌、钥匙串密码或私钥。生成的本地 Swift Package 锁定 Swift Confidential 0.5.2 和 freeRASP iOS 7.1.4，并直接链接到应用 target，避免 XCFramework 重复产物与二级 framework 嵌套问题。
 
 三个档位的边界：

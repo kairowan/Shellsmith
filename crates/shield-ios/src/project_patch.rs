@@ -74,7 +74,18 @@ pub(crate) fn integrate_runtime(
     }
 
     let entrypoint = resolve_entrypoint(working_root, config)?;
-    patch_swift_entrypoint(&entrypoint)?;
+    match entrypoint.extension().and_then(|value| value.to_str()) {
+        Some("swift") => patch_swift_entrypoint(&entrypoint)?,
+        Some("m") => {
+            if uses_confidential {
+                anyhow::bail!("Objective-C 启动工程不能使用 Swift Confidential 保护 OC 字符串；请取消 confidential.yml 后重试");
+            }
+            patch_objc_entrypoint(&entrypoint)?;
+        }
+        _ => anyhow::bail!(
+            "iOS 启动入口必须是 Swift @main 文件或包含 didFinishLaunchingWithOptions 的 Objective-C .m 文件"
+        ),
+    }
     let pbxproj = find_pbxproj_for_target(working_root, working_project, target)?;
     let project_directory = pbxproj
         .parent()
@@ -185,15 +196,124 @@ fn resolve_entrypoint(working_root: &Path, config: &ShellsmithIosConfig) -> Resu
     collect_files(working_root, "swift", &mut files)?;
     let matches = files
         .into_iter()
-        .filter(|path| fs::read_to_string(path).is_ok_and(|content| content.contains("@main")))
+        .filter(|path| {
+            fs::read_to_string(path).is_ok_and(|content| find_swift_main(&content).is_some())
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [path] => return Ok(path.clone()),
+        [] => {}
+        _ => anyhow::bail!("发现多个 Swift @main 启动入口；请在配置中填写 project.entrypoint"),
+    }
+    let mut files = Vec::new();
+    // ponytail: only auto-patch a single UIKit launch callback; custom launch flows need a dedicated adapter.
+    collect_files(working_root, "m", &mut files)?;
+    let matches = files
+        .into_iter()
+        .filter(|path| {
+            fs::read_to_string(path).is_ok_and(|content| find_objc_launch_body(&content).is_some())
+        })
         .collect::<Vec<_>>();
     match matches.as_slice() {
         [path] => Ok(path.clone()),
-        [] => {
-            anyhow::bail!("没有找到唯一的 Swift @main 启动入口；请在配置中填写 project.entrypoint")
-        }
-        _ => anyhow::bail!("发现多个 Swift @main 启动入口；请在配置中填写 project.entrypoint"),
+        [] => anyhow::bail!("没有找到 Swift @main 或 Objective-C didFinishLaunchingWithOptions 启动入口；请在配置中填写 project.entrypoint"),
+        _ => anyhow::bail!("发现多个 Objective-C 启动回调；请在配置中填写 project.entrypoint"),
     }
+}
+
+fn patch_objc_entrypoint(path: &Path) -> Result<()> {
+    let mut content = fs::read_to_string(path)
+        .with_context(|| format!("读取 Objective-C 启动入口失败：{}", path.display()))?;
+    let launch_open = find_objc_launch_body(&content)
+        .context("Objective-C 启动入口缺少 didFinishLaunchingWithOptions 方法实现")?;
+    let mask = swift_code_mask(&content);
+    let call = "[ShellsmithProtectionBootstrap start]";
+    if content
+        .match_indices(call)
+        .any(|(index, _)| mask[index..index + call.len()].iter().all(|value| *value))
+    {
+        return Ok(());
+    }
+    content.insert_str(
+        launch_open + 1,
+        "\n    [ShellsmithProtectionBootstrap start];",
+    );
+    content.insert_str(0, "@import ShellsmithRuntime;\n");
+    fs::write(path, content)?;
+    Ok(())
+}
+
+fn find_objc_launch_body(content: &str) -> Option<usize> {
+    let mask = swift_code_mask(content);
+    let mut cursor = 0;
+    while let Some(callback) = find_code_word(
+        content,
+        &mask,
+        "didFinishLaunchingWithOptions",
+        cursor,
+        content.len(),
+    ) {
+        cursor = callback + "didFinishLaunchingWithOptions".len();
+        let before = (0..callback)
+            .rev()
+            .find(|index| mask[*index] && matches!(content.as_bytes()[*index], b';' | b'{' | b'}'))
+            .map_or(0, |index| index + 1);
+        let signature = content.as_bytes()[before..callback]
+            .iter()
+            .enumerate()
+            .filter_map(|(offset, byte)| mask[before + offset].then_some(*byte))
+            .collect::<Vec<_>>();
+        if !signature
+            .windows(b"application:".len())
+            .any(|part| part == b"application:")
+            || !signature.contains(&b'-')
+            || !signature.windows(b"BOOL".len()).any(|part| part == b"BOOL")
+        {
+            continue;
+        }
+        let colon = content.as_bytes()[cursor..]
+            .iter()
+            .position(|byte| !byte.is_ascii_whitespace())?
+            + cursor;
+        if content.as_bytes().get(colon) != Some(&b':') {
+            continue;
+        }
+        let open = find_code_char(content, colon + 1, content.len(), b'{')?;
+        if content.as_bytes()[colon + 1..open]
+            .iter()
+            .enumerate()
+            .any(|(offset, byte)| mask[colon + 1 + offset] && *byte == b';')
+        {
+            continue;
+        }
+        if matching_brace(content, open).is_some() {
+            return Some(open);
+        }
+    }
+    None
+}
+
+fn find_code_word(
+    content: &str,
+    mask: &[bool],
+    word: &str,
+    start: usize,
+    end: usize,
+) -> Option<usize> {
+    let bytes = content.as_bytes();
+    bytes[start..end]
+        .windows(word.len())
+        .enumerate()
+        .find_map(|(offset, found)| {
+            let index = start + offset;
+            (found == word.as_bytes()
+                && mask[index..index + word.len()].iter().all(|value| *value)
+                && (index == 0 || !is_identifier(bytes[index - 1]))
+                && bytes
+                    .get(index + word.len())
+                    .is_none_or(|byte| !is_identifier(*byte)))
+            .then_some(index)
+        })
 }
 
 fn collect_files(root: &Path, extension: &str, output: &mut Vec<PathBuf>) -> Result<()> {
@@ -378,6 +498,7 @@ fn swift_code_mask(content: &str) -> Vec<bool> {
     let mut line_comment = false;
     let mut block_comment = false;
     let mut string_delimiter = 0usize;
+    let mut quote = b'"';
     let mut escaped = false;
     while index < bytes.len() {
         if line_comment {
@@ -419,7 +540,7 @@ fn swift_code_mask(content: &str) -> Vec<bool> {
                 mask[index + 2] = false;
                 string_delimiter = 0;
                 index += 3;
-            } else if string_delimiter == 1 && bytes[index] == b'\"' {
+            } else if string_delimiter == 1 && bytes[index] == quote {
                 string_delimiter = 0;
                 index += 1;
             } else {
@@ -446,6 +567,12 @@ fn swift_code_mask(content: &str) -> Vec<bool> {
         } else if bytes[index] == b'\"' {
             mask[index] = false;
             string_delimiter = 1;
+            quote = b'"';
+            index += 1;
+        } else if bytes[index] == b'\'' {
+            mask[index] = false;
+            string_delimiter = 1;
+            quote = b'\'';
             index += 1;
         } else {
             index += 1;
@@ -709,6 +836,7 @@ fn relative_path(from: &Path, to: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{IosProjectConfig, IosProtectionConfig};
 
     #[test]
     fn patches_swiftui_entrypoint_once() {
@@ -751,6 +879,68 @@ mod tests {
         patch_swift_entrypoint(temp.path()).unwrap();
         let content = fs::read_to_string(temp.path()).unwrap();
         assert_eq!(content.matches("ShellsmithProtection.start()").count(), 1);
+    }
+
+    #[test]
+    fn patches_pure_objc_app_delegate_once_without_touching_main() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("Demo.xcodeproj");
+        fs::create_dir(&project).unwrap();
+        let main = temp.path().join("main.m");
+        let main_source = "#import <UIKit/UIKit.h>\nint main(int argc, char * argv[]) { @autoreleasepool { return UIApplicationMain(argc, argv, nil, @\"AppDelegate\"); } }\n";
+        fs::write(&main, main_source).unwrap();
+        let entrypoint = temp.path().join("AppDelegate.m");
+        fs::write(
+            &entrypoint,
+            "// didFinishLaunchingWithOptions in a comment\n// [ShellsmithProtectionBootstrap start]\n#import \"AppDelegate.h\"\n@implementation AppDelegate\n- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {\n    char brace = '{';\n    NSString *example = @\"didFinishLaunchingWithOptions\";\n    return YES;\n}\n@end\n",
+        )
+        .unwrap();
+        let config = ShellsmithIosConfig {
+            project: IosProjectConfig {
+                path: project,
+                scheme: "Demo".into(),
+                configuration: "Release".into(),
+                team_id: "ABCDE12345".into(),
+                bundle_ids: vec!["com.example.demo".into()],
+                entrypoint: None,
+            },
+            protection: IosProtectionConfig::default(),
+            confidential: None,
+            rasp: None,
+        };
+        assert_eq!(
+            resolve_entrypoint(temp.path(), &config).unwrap(),
+            entrypoint
+        );
+        patch_objc_entrypoint(&entrypoint).unwrap();
+        patch_objc_entrypoint(&entrypoint).unwrap();
+        let content = fs::read_to_string(&entrypoint).unwrap();
+        assert_eq!(content.matches("@import ShellsmithRuntime;").count(), 1);
+        assert_eq!(
+            content
+                .matches("[ShellsmithProtectionBootstrap start]")
+                .count(),
+            2
+        );
+        assert!(
+            content
+                .rfind("[ShellsmithProtectionBootstrap start]")
+                .unwrap()
+                < content.rfind("return YES").unwrap()
+        );
+        assert_eq!(fs::read_to_string(main).unwrap(), main_source);
+        assert!(
+            freerasp::protection_source(&config).contains("@objc(ShellsmithProtectionBootstrap)")
+        );
+    }
+
+    #[test]
+    fn objc_file_without_launch_callback_fails_without_changes() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let original = "#import \"AppDelegate.h\"\n@implementation AppDelegate\n// didFinishLaunchingWithOptions\n- (void)applicationDidBecomeActive:(UIApplication *)application { NSLog(@\"ready\"); }\n@end\n";
+        fs::write(temp.path(), original).unwrap();
+        assert!(patch_objc_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), original);
     }
 
     #[test]
