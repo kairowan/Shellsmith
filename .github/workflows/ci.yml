@@ -109,8 +109,13 @@ jobs:
           grep -q 'preflight-only' docs/usage.md
 
   ios-core:
-    name: iOS 核心与 SwiftPM 合同
+    name: iOS 核心与 Xcode ${{ matrix.xcode }} 归档
     runs-on: macos-15
+    strategy:
+      matrix:
+        xcode: ["16.4", "26.0.1"]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
 
     steps:
       - name: 检出代码
