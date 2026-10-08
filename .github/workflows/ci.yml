@@ -126,6 +126,11 @@ jobs:
           cargo clippy -p shield-ios --all-targets -- -D warnings
           cargo test -p shield-ios
 
+      - name: 归档带扩展的 Objective-C 工程与工作区
+        env:
+          SHELLSMITH_TEST_XCODE_ARCHIVE: "1"
+        run: cargo test -p shield-ios patches_local_package_into_application_target -- --nocapture
+
   full-quality:
     name: 完整代码质量检查
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'

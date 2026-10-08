@@ -36,6 +36,8 @@ Rust 核心位于 `crates/shield-ios`，CLI/Tauri GUI 调用同一接口。保�
 
 纯 Objective-C UIKit 工程通过 `AppDelegate.m` 的 `application:didFinishLaunchingWithOptions:` 接入同一 Swift Package 的 Objective-C 启动桥，在已有回调的开头启动保护；其余回调逻辑和 `main.m` 保持不变。Swift Confidential 不保护 OC 字符串。无该启动回调或无法唯一确定目标时明确阻断，需人工适配。
 
+包含 Share Extension 等依赖 target 的工程中，对象 ID 会先出现在 `containerPortal` 等引用字段里。工程接入必须定位实际对象声明，将 `packageReferences` 写入 `PBXProject`，不能写入 Frameworks 构建阶段。依赖解析后只检查本次选中的工程或工作区内的锁文件，缺失或版本不符时在 Archive 前停止。CI 使用带分享扩展的纯 OC 样例，通过 `.xcodeproj` 和 `.xcworkspace` 分别解析真实 freeRASP 依赖并执行无签名 Archive；该检查不替代开发者签名和真机运行验证。
+
 ## 配置
 
 从 [示例配置](../../examples/shellsmith-ios.toml) 开始；只有需要保护项目自定义敏感字面量时才创建 [敏感字符串配置](../../examples/confidential.yml)。配置不得保存证书私钥、钥匙串密码或 Apple 账号令牌。
