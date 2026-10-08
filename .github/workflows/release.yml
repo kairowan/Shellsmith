@@ -24,10 +24,54 @@ env:
   XOP_PROTECTOR_REF: e408b87871ea18e197b189e787c73cc5ae3e2ee6
 
 jobs:
+  prepare:
+    name: 准备草稿 Release
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: 创建草稿
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="$REQUESTED_VERSION"
+          else
+            version="$(python3 -c 'import json; print(json.load(open("apps/shield-gui/package.json", encoding="utf-8"))["version"])')"
+            version="${version}-build.${{ github.event.workflow_run.run_number }}"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          tag="v${version}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$(git rev-parse HEAD)" \
+              --draft \
+              --title "$tag" \
+              --notes "Build in progress."
+          fi
+
   linux-tauri:
     name: Linux Tauri 发布包
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: prepare
     runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
 
     steps:
       - name: 检出代码
@@ -46,17 +90,6 @@ jobs:
 
       - name: 配置 Xop PVM2 源码路径
         run: echo "MOCIKA_XOP_ROOT=$GITHUB_WORKSPACE/XopProtector" >> "$GITHUB_ENV"
-
-      - name: 解析版本号
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
-          else
-            base_version="$(python3 -c 'import json; print(json.load(open("apps/shield-gui/package.json", encoding="utf-8"))["version"])')"
-            echo "VERSION=${base_version}-build.${{ github.event.workflow_run.run_number }}" >> "$GITHUB_ENV"
-          fi
 
       - name: 配置 Java
         uses: actions/setup-java@v5
@@ -199,21 +232,31 @@ jobs:
           print(archive)
           PY
 
-      - name: 上传 Linux Tauri 产物
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-tauri
-          path: |
-            dist/linux/**/*.AppImage
-            dist/linux/**/*.deb
-            dist/linux/checksums-sha256.txt
-            dist/android-runtime/**
-          if-no-files-found: error
+      - name: 上传 Linux 产物到草稿 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/normalize_release_checksums.py \
+            dist/linux/checksums-sha256.txt dist/android-runtime/checksums-sha256.txt
+          mv dist/linux/checksums-sha256.txt dist/linux/linux-tauri-checksums-sha256.txt
+          mv dist/android-runtime/checksums-sha256.txt dist/android-runtime/android-runtime-checksums-sha256.txt
+          files=(dist/linux/linux-tauri-checksums-sha256.txt dist/android-runtime/android-runtime-checksums-sha256.txt)
+          while IFS= read -r -d '' file; do files+=("$file"); done < <(
+            find dist/linux dist/android-runtime -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.zip' \) -print0
+          )
+          test "${#files[@]}" -gt 2
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
   macos-tauri:
     name: macOS Tauri 发布包
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: prepare
     runs-on: macos-15
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
 
     steps:
       - name: 检出代码
@@ -231,17 +274,6 @@ jobs:
 
       - name: 配置 Xop PVM2 源码路径
         run: echo "MOCIKA_XOP_ROOT=$GITHUB_WORKSPACE/XopProtector" >> "$GITHUB_ENV"
-
-      - name: 解析版本号
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "VERSION=${{ inputs.version }}" >> "$GITHUB_ENV"
-          else
-            base_version="$(python3 -c 'import json; print(json.load(open("apps/shield-gui/package.json", encoding="utf-8"))["version"])')"
-            echo "VERSION=${base_version}-build.${{ github.event.workflow_run.run_number }}" >> "$GITHUB_ENV"
-          fi
 
       - name: 配置 Java
         uses: actions/setup-java@v5
@@ -302,19 +334,29 @@ jobs:
       - name: 构建 macOS Tauri Universal 发布包
         run: SKIP_CLI_RELEASE=1 VERSION="$VERSION" ./scripts/release-macos.sh "$VERSION" universal
 
-      - name: 上传 macOS Tauri 产物
-        uses: actions/upload-artifact@v7
-        with:
-          name: macos-tauri
-          path: |
-            dist/macos/**/*.dmg
-            dist/macos/checksums-sha256.txt
-          if-no-files-found: error
+      - name: 上传 macOS 产物到草稿 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/normalize_release_checksums.py dist/macos/checksums-sha256.txt
+          mv dist/macos/checksums-sha256.txt dist/macos/macos-tauri-checksums-sha256.txt
+          files=(dist/macos/macos-tauri-checksums-sha256.txt)
+          while IFS= read -r -d '' file; do files+=("$file"); done < <(
+            find dist/macos -type f -name '*.dmg' -print0
+          )
+          test "${#files[@]}" -gt 1
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
   windows:
     name: Windows 发布包
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    needs: prepare
     runs-on: windows-2025
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
 
     steps:
       - name: 检出代码
@@ -334,16 +376,6 @@ jobs:
         shell: pwsh
         run: |
           "MOCIKA_XOP_ROOT=$env:GITHUB_WORKSPACE\XopProtector" >> $env:GITHUB_ENV
-
-      - name: 解析版本号
-        shell: pwsh
-        run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            "VERSION=${{ inputs.version }}" >> $env:GITHUB_ENV
-          } else {
-            $package = Get-Content "apps/shield-gui/package.json" -Raw | ConvertFrom-Json
-            "VERSION=$($package.version)-build.${{ github.event.workflow_run.run_number }}" >> $env:GITHUB_ENV
-          }
 
       - name: 配置 Java
         uses: actions/setup-java@v5
@@ -406,23 +438,33 @@ jobs:
           $env:SKIP_CLI_RELEASE = "1"
           .\scripts\release-windows.ps1 -Version $env:VERSION
 
-      - name: 上传 Windows 产物
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows
-          path: |
-            dist/windows/**/*.exe
-            dist/windows/checksums-sha256.txt
-          if-no-files-found: error
+      - name: 上传 Windows 产物到草稿 Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          python scripts/normalize_release_checksums.py dist/windows/checksums-sha256.txt
+          if ($LASTEXITCODE -ne 0) { throw "校验和规范化失败" }
+          Move-Item dist/windows/checksums-sha256.txt dist/windows/windows-checksums-sha256.txt
+          $files = @("dist/windows/windows-checksums-sha256.txt")
+          $files += @(Get-ChildItem dist/windows -Recurse -File -Filter *.exe | ForEach-Object FullName)
+          if ($files.Count -le 1) { throw "缺少 Windows 安装包" }
+          gh release upload $env:TAG @files --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) { throw "上传 Windows 安装包失败" }
 
   publish:
     name: 发布到 GitHub Releases
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     needs:
+      - prepare
       - linux-tauri
       - macos-tauri
       - windows
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
 
     steps:
       - name: 检出代码
@@ -431,34 +473,16 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
-      - name: 解析版本号
+      - name: 解析发布类型
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            TAG="v${{ inputs.version }}"
-            VERSION="${{ inputs.version }}"
-          else
-            VERSION="$(python3 -c 'import json; print(json.load(open("apps/shield-gui/package.json", encoding="utf-8"))["version"])')-build.${{ github.event.workflow_run.run_number }}"
-            TAG="v${VERSION}"
-          fi
-
           if [[ "$VERSION" == *-* ]]; then
             IS_PRERELEASE="true"
           else
             IS_PRERELEASE="false"
           fi
-
-          {
-            echo "TAG=$TAG"
-            echo "VERSION=$VERSION"
-            echo "IS_PRERELEASE=$IS_PRERELEASE"
-          } >> "$GITHUB_ENV"
-
-      - name: 下载所有产物
-        uses: actions/download-artifact@v7
-        with:
-          path: release-assets
+          echo "IS_PRERELEASE=$IS_PRERELEASE" >> "$GITHUB_ENV"
 
       - name: 生成 Release Notes
         shell: bash
@@ -532,43 +556,27 @@ jobs:
           printf '\n\n---\n\n' >> release-notes.md
           cat generated-release-notes-normalized.md >> release-notes.md
 
-      - name: 创建或更新 GitHub Release
+      - name: 验证产物并公开 GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          find release-assets -type f -name checksums-sha256.txt -print0 | while IFS= read -r -d '' checksum; do
-            artifact="$(basename "$(dirname "$checksum")")"
-            python3 scripts/normalize_release_checksums.py "$checksum"
-            mv "$checksum" "$(dirname "$checksum")/${artifact}-checksums-sha256.txt"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > release-assets.txt
+          for expected in macos-tauri linux-tauri windows android-runtime; do
+            grep -Fxq "${expected}-checksums-sha256.txt" release-assets.txt
           done
-          mapfile -t files < <(find release-assets -type f | sort)
-          printf '%s\n' "${files[@]}"
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$TAG" \
-              --notes-file release-notes.md
-            if [[ "$IS_PRERELEASE" == "true" ]]; then
-              gh release edit "$TAG" \
-                --repo "$GITHUB_REPOSITORY" \
-                --draft=false \
-                --prerelease
-            fi
+              --notes-file release-notes.md \
+              --draft=false \
+              --prerelease
           else
-            if [[ "$IS_PRERELEASE" == "true" ]]; then
-              gh release create "$TAG" "${files[@]}" \
-                --repo "$GITHUB_REPOSITORY" \
-                --prerelease \
-                --title "$TAG" \
-                --notes-file release-notes.md
-            else
-              gh release create "$TAG" "${files[@]}" \
-                --repo "$GITHUB_REPOSITORY" \
-                --draft \
-                --title "$TAG" \
-                --notes-file release-notes.md
-            fi
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --notes-file release-notes.md \
+              --draft=false
           fi
