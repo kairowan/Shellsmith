@@ -1,7 +1,4 @@
-use crate::{
-    ShellsmithIosConfig, FREERASP_IOS_VERSION, SWIFT_CONFIDENTIAL_PLUGIN_VERSION,
-    SWIFT_CONFIDENTIAL_VERSION,
-};
+use crate::{ShellsmithIosConfig, SWIFT_CONFIDENTIAL_PLUGIN_VERSION, SWIFT_CONFIDENTIAL_VERSION};
 
 pub(crate) const KNOWN_THREATS: &[&str] = &[
     "signature",
@@ -42,9 +39,7 @@ pub(crate) fn package_manifest(confidential: bool, rasp: bool) -> String {
         exclude.push("\"confidential.yml\"".to_string());
     }
     if rasp {
-        dependencies.push(format!(
-            ".package(url: \"https://github.com/talsec/Free-RASP-iOS.git\", exact: \"{FREERASP_IOS_VERSION}\")"
-        ));
+        dependencies.push(".package(path: \"../Dependencies/Free-RASP-iOS\")".to_string());
         target_dependencies
             .push(".product(name: \"TalsecRuntime\", package: \"Free-RASP-iOS\")".to_string());
     }
@@ -500,7 +495,8 @@ mod tests {
     fn package_versions_are_exact_and_equal() {
         let manifest = package_manifest(true, true);
         assert!(manifest.contains("exact: \"0.5.2\""));
-        assert!(manifest.contains("exact: \"7.1.4\""));
+        assert!(manifest.contains(".package(path: \"../Dependencies/Free-RASP-iOS\")"));
+        assert!(!manifest.contains("github.com/talsec"));
         assert!(manifest.contains(".plugin(name: \"Confidential\""));
     }
 

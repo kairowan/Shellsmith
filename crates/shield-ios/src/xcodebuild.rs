@@ -98,7 +98,7 @@ fn project_selector(project: &Path) -> Result<Vec<OsString>> {
     ])
 }
 
-fn run(
+pub(crate) fn run(
     program: &str,
     args: &[OsString],
     developer_dir: Option<&Path>,

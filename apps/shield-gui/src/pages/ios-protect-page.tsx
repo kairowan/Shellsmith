@@ -11,6 +11,7 @@ import {
   type IosCheck,
   type IosProjectInspection,
   type IosProtectionReport,
+  type IosSdkStatus,
   type TaskSnapshot,
 } from "@/lib/tauri";
 
@@ -37,6 +38,17 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
   const [running, setRunning] = useState(false);
   const [step, setStep] = useState("");
   const [error, setError] = useState("");
+  const [sdk, setSdk] = useState<IosSdkStatus | null>(null);
+  const [sdkError, setSdkError] = useState("");
+
+  useEffect(() => {
+    if (!active || running) return;
+    let disposed = false;
+    void api.iosSdkStatus().then((value) => {
+      if (!disposed) { setSdk(value); setSdkError(""); }
+    }).catch((reason) => { if (!disposed) setSdkError(String(reason)); });
+    return () => { disposed = true; };
+  }, [active, running]);
 
   useEffect(() => {
     const unlisten = onTauriEvent<TaskSnapshot>("task-state", (task) => {
@@ -83,6 +95,25 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
       notifyError(message);
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function prepareSdk(importZip: boolean) {
+    if (running) return;
+    const path = importZip ? await openFileDialog("freeRASP ZIP", ["zip"]) : null;
+    if (importZip && !path) return;
+    setRunning(true);
+    setStep("PrepareDependencies");
+    setError("");
+    try {
+      const result = await api.prepareIosSdk(crypto.randomUUID(), path);
+      setSdk(result);
+      if (result.ready) notifySuccess(t(locale, "iosSdkReady"));
+    } catch (reason) {
+      setError(String(reason));
+      notifyError(String(reason));
+    } finally {
+      setRunning(false);
     }
   }
 
@@ -178,6 +209,19 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
                 </SelectInput>
               </Field>
               {profile !== "compat" && <>
+                <div className="mt-4 rounded-xl border p-3">
+                  <h3 className="text-sm font-semibold">{t(locale, "iosSdkTitle")}</h3>
+                  <p role="status" className="mt-2 text-sm">{t(locale, sdk?.ready ? "iosSdkReady" : "iosSdkMissing")}</p>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{t(locale, "iosSdkHint")}</p>
+                  {(sdk?.diagnostic || sdkError) && <details className="mt-2 text-xs"><summary className="cursor-pointer">{t(locale, "iosSdkDiagnostic")}</summary><p className="mt-2 break-words">{sdkError || sdk?.diagnostic}</p></details>}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <AppButton size="sm" variant="secondary" disabled={running} onClick={() => void prepareSdk(false)}>{t(locale, "iosSdkPrepare")}</AppButton>
+                    <AppButton size="sm" variant="secondary" disabled={running} onClick={() => void prepareSdk(true)}>{t(locale, "iosSdkImport")}</AppButton>
+                    <AppButton size="sm" variant="secondary" onClick={() => void api.openUrl("https://github.com/talsec/Free-RASP-iOS/tree/v7.1.4")}>{t(locale, "iosSdkOfficial")}</AppButton>
+                  </div>
+                  <p className="mt-3 text-xs leading-5 text-muted-foreground">{t(locale, "iosSdkTerms")}</p>
+                  <button type="button" className="mt-1 text-xs text-primary underline" onClick={() => void api.openUrl("https://docs.talsec.app/freerasp/terms-of-service/fair-usage-policy-fup")}>{t(locale, "iosSdkPolicy")}</button>
+                </div>
                 <Field className="mt-4" label={t(locale, "iosConfidentialOptional")} hint={t(locale, "iosConfidentialOptionalHint")}><PathChooser value={confidentialConfig} placeholder={t(locale, "notSelectedOptional")} button={t(locale, "chooseFile")} disabled={running} onChoose={async () => { const value = await openFileDialog("YAML", ["yml", "yaml"]); if (value) setConfidentialConfig(value); }} /></Field>
                 <Field className="mt-4" label={t(locale, "iosWatcherMailOptional")} hint={t(locale, "iosWatcherMailOptionalHint")}><TextInput type="email" value={watcherMail} disabled={running} onChange={(event) => setWatcherMail(event.target.value)} placeholder="security@example.com" /></Field>
               </>}

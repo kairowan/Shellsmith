@@ -60,7 +60,6 @@ pub(crate) async fn protect_ios_project(
     cancel_handle: tauri::State<'_, IosCancelHandle>,
     task_manager: tauri::State<'_, TaskManager>,
 ) -> Result<shield_ios::IosProtectionReport, String> {
-    cancel_handle.0.store(false, Ordering::SeqCst);
     task_manager.begin(
         &window,
         request.task_id.clone(),
@@ -69,6 +68,7 @@ pub(crate) async fn protect_ios_project(
         request.output.clone(),
         "InspectProject",
     )?;
+    cancel_handle.0.store(false, Ordering::SeqCst);
     let options = request.into_options();
     let cancel = cancel_handle.0.clone();
     let manager = task_manager.inner().clone();
@@ -85,7 +85,8 @@ pub(crate) async fn protect_ios_project(
         .map_err(|error| format!("{error:#}"))
     })
     .await
-    .map_err(|error| format!("iOS 加固后台任务失败：{error}"))?;
+    .map_err(|error| format!("iOS 加固后台任务失败：{error}"))
+    .and_then(|result| result);
 
     let status = match &result {
         Ok(_) => TaskStatus::Succeeded,
@@ -99,6 +100,54 @@ pub(crate) async fn protect_ios_project(
 #[tauri::command]
 pub(crate) fn cancel_ios_protect(cancel: tauri::State<'_, IosCancelHandle>) {
     cancel.0.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+pub(crate) async fn ios_sdk_status() -> Result<shield_ios::IosSdkStatus, String> {
+    let cache = shield_ios::default_ios_cache_dir().map_err(|error| error.to_string())?;
+    tokio::task::spawn_blocking(move || shield_ios::ios_sdk_status(&cache))
+        .await
+        .map_err(|error| format!("读取 iOS SDK 缓存失败：{error}"))
+}
+
+#[tauri::command]
+pub(crate) async fn prepare_ios_sdk(
+    window: tauri::Window,
+    task_id: String,
+    import_zip: Option<String>,
+    cancel_handle: tauri::State<'_, IosCancelHandle>,
+    task_manager: tauri::State<'_, TaskManager>,
+) -> Result<shield_ios::IosSdkStatus, String> {
+    let cache = shield_ios::default_ios_cache_dir().map_err(|error| error.to_string())?;
+    // 与加固共用互斥和取消机制，准备过程中不能启动另一个 iOS 任务或覆盖安装更新。
+    task_manager.begin(
+        &window,
+        task_id.clone(),
+        TaskKind::IosProtect,
+        import_zip
+            .clone()
+            .unwrap_or_else(|| "freeRASP 官方源".into()),
+        cache.to_string_lossy().into_owned(),
+        "PrepareDependencies",
+    )?;
+    cancel_handle.0.store(false, Ordering::SeqCst);
+    let cancel = cancel_handle.0.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let import = import_zip.map(PathBuf::from);
+        shield_ios::prepare_ios_sdk(&cache, import.as_deref(), &cancel)
+            .map(|_| shield_ios::ios_sdk_status(&cache))
+            .map_err(|error| format!("{error:#}"))
+    })
+    .await
+    .map_err(|error| format!("iOS SDK 准备后台任务失败：{error}"))
+    .and_then(|result| result);
+    let status = match &result {
+        Ok(_) => TaskStatus::Succeeded,
+        Err(message) if message.contains("已取消") => TaskStatus::Cancelled,
+        Err(_) => TaskStatus::Failed,
+    };
+    let _ = task_manager.finish(&window, &task_id, status, result.as_ref().err().cloned());
+    result
 }
 
 impl IosProtectRequest {
@@ -149,6 +198,8 @@ impl IosProtectRequest {
                 export_method: self.export_method,
                 allow_provisioning_updates: self.allow_provisioning_updates,
                 dry_run: self.dry_run,
+                ios_cache_dir: None,
+                freerasp_zip: None,
             },
             task_id,
         )

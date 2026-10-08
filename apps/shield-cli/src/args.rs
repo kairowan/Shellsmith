@@ -143,6 +143,12 @@ pub(crate) struct ProtectIosArgs {
     /// 独立输出目录；必须不存在或为空，不能位于源码目录内。
     #[arg(short, long, value_name = "DIR")]
     pub output: PathBuf,
+    /// 导入官方 freeRASP v7.1.4 源码 ZIP；后续可直接复用本机缓存。
+    #[arg(long, value_name = "ZIP")]
+    pub freerasp_zip: Option<PathBuf>,
+    /// 覆盖 iOS SDK 缓存目录（默认与 macOS GUI 共用）。
+    #[arg(long, value_name = "DIR")]
+    pub ios_cache_dir: Option<PathBuf>,
     /// 可选的 Xcode ExportOptions.plist；未提供时生成自动签名配置。
     #[arg(long, value_name = "PLIST")]
     pub export_options: Option<PathBuf>,

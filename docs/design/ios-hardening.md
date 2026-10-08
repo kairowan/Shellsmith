@@ -32,11 +32,13 @@ Rust 核心位于 `crates/shield-ios`，CLI/Tauri GUI 调用同一接口。保�
   -> shellsmith-report.json
 ```
 
-生成的本地 Package 直接依赖上游仓库，Shellsmith 安装包不携带或改名 freeRASP 闭源二进制。启用 Swift Confidential 时，主包与插件使用相同精确版本；未启用时不接入该插件。Archive 前必须生成唯一且非空的 `Package.resolved`，报告记录其 SHA-256；生产构建不跳过已启用的 Swift Package 插件或宏校验。构建失败、取消或验证阻断只影响输出工作副本。
+freeRASP 首次从固定官方提交下载并校验，或由用户导入官方 v7.1.4 源码 ZIP；后续从本机缓存提取到工作副本 `.shellsmith/Dependencies/Free-RASP-iOS`，运行时包使用相对路径依赖，不再为 freeRASP 克隆 GitHub。Shellsmith 安装包不携带或改名 freeRASP 闭源二进制，只内置版本、提交和逐文件 SHA-256 清单。导入文件校验失败或任务取消不会覆盖已有缓存；损坏缓存明确阻断，可重新导入官方 ZIP 修复。
+
+启用 Swift Confidential 时，主包与插件仍使用相同精确远程版本，需要唯一且非空、版本匹配的 `Package.resolved`，报告记录其 SHA-256。只有本地 freeRASP 时不要求虚假的远程锁条目，改为在 Archive 前再次校验工作副本 SDK。生产构建不跳过已启用的 Swift Package 插件或宏校验。构建失败、取消或验证阻断只影响输出工作副本。
 
 纯 Objective-C UIKit 工程通过 `AppDelegate.m` 的 `application:didFinishLaunchingWithOptions:` 接入同一 Swift Package 的 Objective-C 启动桥，在已有回调的开头启动保护；其余回调逻辑和 `main.m` 保持不变。Swift Confidential 不保护 OC 字符串。无该启动回调或无法唯一确定目标时明确阻断，需人工适配。
 
-包含 Share Extension 等依赖 target 的工程中，对象 ID 会先出现在 `containerPortal` 等引用字段里。工程接入必须定位实际对象声明，将 `packageReferences` 写入 `PBXProject`，不能写入 Frameworks 构建阶段。依赖解析后只检查本次选中的工程或工作区内的锁文件，缺失或版本不符时在 Archive 前停止。CI 使用带分享扩展的纯 OC 样例，通过 `.xcodeproj` 和 `.xcworkspace` 分别解析真实 freeRASP 依赖并执行无签名 Archive；该检查不替代开发者签名和真机运行验证。
+包含 Share Extension 等依赖 target 的工程中，对象 ID 会先出现在 `containerPortal` 等引用字段里。工程接入必须定位实际对象声明，将 `packageReferences` 写入 `PBXProject`，不能写入 Frameworks 构建阶段。启用 Swift Confidential 后，依赖解析只检查本次选中的工程或工作区内的锁文件，缺失或版本不符时在 Archive 前停止。CI 用真实官方 SDK 验证导入、缓存复用和禁止网络条件下的 SwiftPM 解析，再用带分享扩展的纯 OC 样例，通过 `.xcodeproj` 和 `.xcworkspace` 分别执行无签名 Archive；该检查不替代开发者签名和真机运行验证。
 
 ## 配置
 
@@ -86,7 +88,15 @@ cargo run -p shield-cli -- protect-ios \
 - Swift Confidential 使用 Apache-2.0 及其运行时例外，发布时保留许可证和 NOTICE。
 - freeRASP 同时包含 MIT 开源部分和 Talsec 所有的闭源二进制，并受 freemium/公平使用政策约束。
 - `watcherMail` 会用于安全报告、产品更新和 Talsec Portal；产品接入前必须完成隐私披露和使用条款审查。
-- Shellsmith 不重新分发 freeRASP 二进制。客户工程通过精确版本的上游依赖解析取得它。
+- Shellsmith 安装包不重新分发 freeRASP 二进制；用户从官方源下载或自行导入，并按上游条款用于自己的应用。工作副本保留原始 `LICENSE.txt`、README、Privacy Manifest 和框架签名文件；本地缓存不改变许可、免费额度、隐私披露或 SDK 运行时通信要求。
+
+## 本机依赖准备
+
+GUI 的 iOS 保护方案提供“下载 / 检查缓存”“导入官方 ZIP”和官方来源链接。不必先选择工程或准备签名，就能提前准备依赖。首次直接开始 balanced/strict 加固时也会自动准备；compat 和 `--dry-run` 不下载 SDK。
+
+缓存位置：`~/Library/Caches/dev.mocika.shield-gui/ios-dependencies/`。GUI 和 CLI 共用，升级 Shellsmith 后只要要求版本相同即可继续使用；系统清理缓存后需再次下载或导入。CLI 支持 `--freerasp-zip /path/Free-RASP-iOS-7.1.4.zip` 和 `--ios-cache-dir /path/cache`。仅支持完整的官方源码 ZIP，不接受单独 framework、dSYM 包、修改版或其他版本；内置指纹不匹配时拒绝导入。
+
+“本地依赖”只覆盖 freeRASP。可选 Swift Confidential 的插件/间接依赖、用户工程自己的 Pods/SPM 包、Apple 签名服务仍可能需要联网，不承诺整个 iOS 工程离线构建。用户工程如果已自行声明远程 freeRASP，Shellsmith 不擅自删除或替换该声明，仍需用户处理该原有依赖。
 
 ## 当前验证限制
 

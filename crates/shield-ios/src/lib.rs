@@ -1,5 +1,6 @@
 mod archive_verify;
 mod confidential;
+mod dependency_cache;
 mod freerasp;
 mod project_inspect;
 mod project_patch;
@@ -14,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, Arc};
 
 pub use archive_verify::{verify_archive, ArchiveVerification};
+pub use dependency_cache::{default_ios_cache_dir, ios_sdk_status, prepare_ios_sdk, IosSdkStatus};
 pub use project_inspect::{inspect_ios_project, IosCheck, IosCheckSeverity, IosProjectInspection};
 
 pub const SWIFT_CONFIDENTIAL_VERSION: &str = "0.5.2";
@@ -224,6 +226,8 @@ pub struct ProtectIosOptions {
     pub export_method: String,
     pub allow_provisioning_updates: bool,
     pub dry_run: bool,
+    pub ios_cache_dir: Option<PathBuf>,
+    pub freerasp_zip: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -318,6 +322,24 @@ where
     }
 
     project_inspect::validate_output_location(&inspection.source_root, &options.output_dir)?;
+    let sdk = if options.config.protection.profile.uses_rasp() {
+        progress(
+            &on_progress,
+            "PrepareDependencies",
+            "正在校验 freeRASP 本机缓存；首次使用需要官方下载或导入 ZIP",
+        );
+        let cache_dir = match &options.ios_cache_dir {
+            Some(path) => path.clone(),
+            None => default_ios_cache_dir()?,
+        };
+        Some(prepare_ios_sdk(
+            &cache_dir,
+            options.freerasp_zip.as_deref(),
+            &cancel,
+        )?)
+    } else {
+        None
+    };
     progress(
         &on_progress,
         "CopyProject",
@@ -335,6 +357,9 @@ where
         .strip_prefix(&inspection.source_root)
         .context("工程路径不在源码根目录内")?;
     let working_project = working_root.join(relative_project);
+    if let Some(sdk) = sdk {
+        dependency_cache::install_sdk(&sdk, &working_root, &cancel)?;
+    }
 
     if options.config.confidential_enabled() || options.config.protection.profile.uses_rasp() {
         progress(
@@ -372,16 +397,17 @@ where
         developer_dir,
         &cancel,
     )?;
-    if options.config.confidential_enabled() || options.config.protection.profile.uses_rasp() {
-        let package_check = verify_package_lock(
-            &working_project,
-            options.config.confidential_enabled(),
-            options.config.protection.profile.uses_rasp(),
-        )?;
+    if options.config.confidential_enabled() {
+        let package_check =
+            verify_package_lock(&working_project, options.config.confidential_enabled())?;
         if package_check.severity == IosCheckSeverity::Blocked {
             anyhow::bail!("Swift Package 依赖检查失败：{}", package_check.message);
         }
         checks.push(package_check);
+    }
+    if options.config.protection.profile.uses_rasp() {
+        dependency_cache::verify_installed_sdk(&working_root)?;
+        checks.push(IosCheck::ready("freerasp_local_sdk", format!("freeRASP {FREERASP_IOS_VERSION} 本地 SDK 已逐文件通过内置 SHA-256 校验；无需远程 freeRASP 锁条目")));
     }
 
     let archive = options.output_dir.join("Shellsmith.xcarchive");
@@ -466,11 +492,7 @@ fn progress<F: Fn(IosProgressEvent)>(callback: &F, step: &str, message: &str) {
     });
 }
 
-fn verify_package_lock(
-    root: &Path,
-    require_confidential: bool,
-    require_rasp: bool,
-) -> Result<IosCheck> {
+fn verify_package_lock(root: &Path, require_confidential: bool) -> Result<IosCheck> {
     let mut matches = Vec::new();
     collect_package_locks(root, 0, &mut matches)?;
     let preferred = matches
@@ -539,13 +561,6 @@ fn verify_package_lock(
                 return Ok(IosCheck::blocked(
                     "swift_package_lock",
                     "Package.resolved 未锁定 Swift Confidential 主包和插件的要求版本",
-                    None,
-                ));
-            }
-            if require_rasp && !has_version("free-rasp-ios", FREERASP_IOS_VERSION) {
-                return Ok(IosCheck::blocked(
-                    "swift_package_lock",
-                    "Package.resolved 未锁定 freeRASP iOS 的要求版本",
                     None,
                 ));
             }
@@ -759,9 +774,13 @@ profile = "compat"
     fn package_lock_check_requires_one_non_empty_lock() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("Package.resolved"), b"{\"pins\":[]}").unwrap();
-        let check = verify_package_lock(temp.path(), false, false).unwrap();
+        let check = verify_package_lock(temp.path(), false).unwrap();
         assert_eq!(check.code, "swift_package_lock");
         assert_eq!(check.severity, IosCheckSeverity::Ready);
+        assert_eq!(
+            verify_package_lock(temp.path(), true).unwrap().severity,
+            IosCheckSeverity::Blocked
+        );
 
         fs::write(temp.path().join("nested.lock"), b"not a package lock").unwrap();
         fs::create_dir_all(temp.path().join("Nested")).unwrap();
@@ -770,7 +789,7 @@ profile = "compat"
             b"{\"pins\":[]}",
         )
         .unwrap();
-        let duplicate = verify_package_lock(temp.path(), false, false).unwrap();
+        let duplicate = verify_package_lock(temp.path(), false).unwrap();
         assert_eq!(duplicate.severity, IosCheckSeverity::Blocked);
 
         fs::remove_file(temp.path().join("Nested/Package.resolved")).unwrap();
@@ -778,12 +797,11 @@ profile = "compat"
             temp.path().join("Package.resolved"),
             br#"{"pins":[
                 {"identity":"swift-confidential","state":{"version":"0.5.2"}},
-                {"identity":"swift-confidential-plugin","state":{"version":"0.5.2"}},
-                {"identity":"free-rasp-ios","state":{"version":"7.1.4"}}
+                {"identity":"swift-confidential-plugin","state":{"version":"0.5.2"}}
             ]}"#,
         )
         .unwrap();
-        let versions = verify_package_lock(temp.path(), true, true).unwrap();
+        let versions = verify_package_lock(temp.path(), true).unwrap();
         assert_eq!(versions.severity, IosCheckSeverity::Ready);
     }
 }

@@ -131,10 +131,18 @@ jobs:
           cargo clippy -p shield-ios --all-targets -- -D warnings
           cargo test -p shield-ios
 
+      - name: 验证官方 SDK 导入与断网解析
+        run: |
+          curl --disable --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 180 --retry 2 \
+            https://codeload.github.com/talsec/Free-RASP-iOS/zip/958d7b1933e28fc33f3b7a2725fc174d98c0939f \
+            --output "$RUNNER_TEMP/freerasp.zip"
+          SHELLSMITH_TEST_FREERASP_ZIP="$RUNNER_TEMP/freerasp.zip" \
+            cargo test -p shield-ios official_sdk_import_reuse_and_offline_resolve -- --ignored --nocapture
+
       - name: 归档带扩展的 Objective-C 工程与工作区
         env:
           SHELLSMITH_TEST_XCODE_ARCHIVE: "1"
-        run: cargo test -p shield-ios patches_local_package_into_application_target -- --nocapture
+        run: SHELLSMITH_TEST_FREERASP_ZIP="$RUNNER_TEMP/freerasp.zip" cargo test -p shield-ios patches_local_package_into_application_target -- --nocapture
 
   full-quality:
     name: 完整代码质量检查
