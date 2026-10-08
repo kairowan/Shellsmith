@@ -77,7 +77,18 @@ Pull Request 合并前必须通过以下 CI 检查：
 |----------------|----------|
 | **Patch** | 顶部小提示条，可一键关闭 |
 | **Minor** | 顶部提示条，持续显示直到用户手动关闭 |
-| **Major** | 启动时弹窗，突出"重大版本更新"，引导用户前往 Release 页查看变更说明 |
+| **Major** | 启动时弹窗，展示新版本说明并由用户确认安装 |
+
+### 应用内更新发布约束
+
+- 自 v1.4.5 起复用 [Tauri 官方更新器](https://v2.tauri.app/plugin/updater/)，固定读取 `https://github.com/kairowan/Shellsmith/releases/latest/download/latest.json`，不需要单独后台。
+- 首次发布前生成专用更新签名密钥，把私钥设为 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY`，公钥放 `tauri.conf.json`。私钥必须另行安全备份，不能提交仓库或放进安装包；丢失后旧客户端无法信任新密钥。当前私钥无口令，CI 设置空的 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
+- 发布脚本要求提供该环境变量（可为密钥文件路径），Tauri CLI 使用 2.11.5。普通开发构建无需私钥；仅做本地打包测试时可传 `--config '{"bundle":{"createUpdaterArtifacts":false}}'`，不得用这种构建覆盖正式更新产物。
+- macOS 在最终应用签名后重新生成 `.app.tar.gz` 并签名；Windows 上传 NSIS `.exe` 和 `.sig`；Linux 上传 AppImage 和 `.sig`。macOS universal 包同时服务两种架构。
+- 工作流同步实际打包版本；所有产物上传完成后执行 `scripts/generate_update_manifest.py` 验证文件、地址和签名版本，再上传清单并公开 Release。客户端仍会执行密码学验签，不能用 SHA-256 替代。
+- `requireSignedVersion` 必须保留为 `true`，阻止清单把旧包标成新版本。草稿和预发布不更新稳定通道，已公开的版本不得覆盖，失败只重跑原草稿或提升版本号。
+- 更新签名与 Apple Developer ID / 公证、Windows Authenticode 是不同机制；当前 CI 的 macOS adhoc 模式并不等于 Apple 公证。
+- 回归入口：`cargo test -p mocika-shield`（含真实签名、篡改及伪造版本测试）、`python3 -m unittest discover -s scripts/tests -v`（含三平台清单完整性测试）。
 
 ---
 
@@ -197,9 +208,9 @@ make build-stub  →  make build-cli / make build-gui / make release / make rele
 | 工作流 | 文件 | 触发 | 内容 |
 |--------|------|------|------|
 | CI | `.github/workflows/ci.yml` | push / pull request / 手动触发 | 普通提交与 PR 执行基础快速检查；手动触发时执行完整代码质量、Android 壳、Linux Tauri、Windows Android 4.4 资源及发布前检查 |
-| Release | `.github/workflows/release.yml` | tag `v*.*.*` / 手动触发 | 并行构建 Linux Tauri、macOS Tauri、Windows GUI 产物，汇总上传到 GitHub Release |
+| Release | `.github/workflows/release.yml` | main 的 CI 成功 / 手动触发 | 并行构建三平台，先上传草稿，再校验并公开 GitHub Release |
 
-> GitHub Release 面向普通开源用户，只上传 GUI 安装包与校验和；CLI 包仍可通过本地发布脚本生成，但不会由 CI 上传到 Release。
+> GitHub Release 上传 GUI 安装包、签名更新包、更新清单、校验和与 Android 运行时资源；CLI 包仍可通过本地发布脚本生成。
 
 Release Notes 相关文件：
 
@@ -212,32 +223,29 @@ Release Notes 相关文件：
 ### 自动发布流程
 
 ```bash
-# 1. 更新版本号并提交
+# 1. 在临时分支更新版本号，经 PR 和 CI 验证后合并 main
 make bump-version V=x.y.z
-git add .
-git commit -m "chore: 发布 x.y.z"
 
-# 2. 打 tag 并推送
-git tag vx.y.z
-git push origin main vx.y.z
+# 2. 从已验证的 main 触发正式版本发布
+gh workflow run release.yml --ref main -f version=x.y.z
 ```
 
-推送 tag 后，`Release` workflow 会自动：
+`Release` workflow 会自动：
 
-1. 从 tag 提取版本号
-2. 构建各平台 GUI 产物
-3. 上传 workflow artifacts
-4. 根据版本号创建或更新对应的 GitHub Release
-5. 上传 GUI 安装包和校验和文件
+1. 手动触发使用输入版本；main 的 CI 成功触发时生成 `x.y.z-build.N` 预发布版本
+2. 创建草稿 Release，固定当前构建提交；构建时同步版本号
+3. 三个平台并行构建，直接上传草稿，不依赖 Actions artifact 存储额度
+4. 校验更新包、签名、版本与校验和文件，生成 `latest.json`
+5. 全部成功后公开 Release 并创建对应 tag；稳定版设为 latest，预发布版不进入稳定更新通道
 
 各平台发布脚本生成的校验和保留本地 `dist` 子目录，便于维护者直接校验本地产物。Release 汇总任务上传前会将记录规范化为扁平文件名，并拒绝无效记录或重复文件名，确保下载校验和文件后可在安装包所在目录直接执行校验。
 
 发布可见性规则：
 
-- **稳定版本**（如 `v1.2.0`）：自动创建为 **Draft**
-- **预发布版本**（如 `v1.2.0-rc.1`、`v1.2.0-beta.1`、`v1.2.0-alpha.1`）：自动创建为 **Pre-release**
+- **稳定版本**（如 `v1.2.0`）：先创建 **Draft**，全部检查通过后公开并设为 latest
+- **预发布版本**（如 `v1.2.0-rc.1`、`v1.2.0-build.10`）：先创建 **Draft**，全部检查通过后公开为 **Pre-release**
 
-稳定版本继续保留人工验收窗口；预发布版本直接公开为候选版本，避免每次手动从 Draft 改为 Pre-release。
+任一构建或检查失败时保留草稿，不向客户端宣告可更新。
 
 Release Notes 生成规则：
 
@@ -247,7 +255,7 @@ Release Notes 生成规则：
 - Alpha、Beta、RC 和最终正式版均汇总相对上一正式版本的完整版本周期变更，不以相邻预发布标签作为比较基线
 - 合并自动变更列表前移除 GitHub 自带的 `What's Changed` 标题，避免与固定中英文章节重复；分类标题和 `Full Changelog` 保持不变
 - 最终将两部分合并后写入 Release
-- 如果重新运行同一个 tag 的发布任务，产物与 Release Notes 会一并更新
+- 只允许重跑未公开的草稿；已公开 tag/Release 不覆盖，修订须使用更高版本号
 
 所有稳定版和预发布版 Release Notes 固定保留以下章节，顺序保持一致：
 
@@ -259,8 +267,7 @@ Release Notes 末尾同时保留 GitHub 生成的 `Full Changelog` 比较链接�
 
 ### 手动触发发布
 
-在 GitHub Actions 页面选择 `Release` workflow，输入版本号 `x.y.z` 后运行。手动触发不会自动创建 git tag；正式发布仍建议使用 tag 触发。
-如果输入的是稳定版本号，会创建或更新 `vx.y.z` Draft Release；如果输入的是带预发布后缀的版本号（如 `1.2.0-rc.1`），会直接创建或更新为 Pre-release。
+在 GitHub Actions 页面选择 `Release` workflow、已验证的 main 和版本号 `x.y.z` 后运行。构建成功会公开 Release 并创建对应 tag，不需要另行推送 tag。仅推送 tag 不会触发当前工作流。输入预发布后缀时，最终公开为 Pre-release。
 
 ---
 

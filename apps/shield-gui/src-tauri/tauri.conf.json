@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Shellsmith",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "identifier": "dev.mocika.shield-gui",
   "build": {
     "beforeDevCommand": "npm run dev -- --host 127.0.0.1",
@@ -28,6 +28,7 @@
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": true,
     "active": true,
     "icon": [
       "icons/png/32x32.png",
@@ -57,6 +58,14 @@
     },
     "macOS": {
       "minimumSystemVersion": "10.13"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGQjZGREMxMzUwNzJFMjAKUldRZ0xnYzF3ZjIyL3dvN1BwMmdrSGdsVFViRDRIYlB2U29NRkUxd0Ryb21LRkFaaHdFRGNZMGkK",
+      "endpoints": ["https://github.com/kairowan/Shellsmith/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": { "installMode": "passive" }
     }
   }
 }

@@ -12,6 +12,7 @@ pub(crate) enum TaskKind {
     Protect,
     IosProtect,
     Sign,
+    Update,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -53,6 +54,17 @@ pub(crate) struct TaskSnapshot {
 pub(crate) struct TaskManager(Arc<Mutex<BTreeMap<String, TaskSnapshot>>>);
 
 impl TaskManager {
+    pub(crate) fn updating(&self) -> bool {
+        self.0
+            .lock()
+            .map(|tasks| {
+                tasks
+                    .values()
+                    .any(|task| task.kind == TaskKind::Update && task.status == TaskStatus::Running)
+            })
+            .unwrap_or(true)
+    }
+
     pub(crate) fn begin(
         &self,
         window: &Window,
@@ -68,13 +80,11 @@ impl TaskManager {
         }
         if tasks
             .values()
-            .any(|task| task.kind == kind && task.status == TaskStatus::Running)
+            .any(|task| tasks_conflict(task.kind, task.status, kind))
         {
-            return Err(match kind {
-                TaskKind::Protect => "已有加固任务正在执行".to_string(),
-                TaskKind::IosProtect => "已有 iOS 加固任务正在执行".to_string(),
-                TaskKind::Sign => "已有签名任务正在执行".to_string(),
-            });
+            return Err(
+                "已有冲突任务正在执行；更新与加固、签名不能同时进行，请等待任务结束".into(),
+            );
         }
         let now = now_ms();
         let snapshot = TaskSnapshot {
@@ -98,7 +108,9 @@ impl TaskManager {
         };
         tasks.insert(task_id, snapshot.clone());
         drop(tasks);
-        emit_snapshot(window, &snapshot)
+        // 状态已登记，界面事件发送失败不能留下永远运行的任务。
+        let _ = emit_snapshot(window, &snapshot);
+        Ok(())
     }
 
     pub(crate) fn progress(
@@ -193,6 +205,11 @@ impl TaskManager {
     }
 }
 
+fn tasks_conflict(active: TaskKind, status: TaskStatus, requested: TaskKind) -> bool {
+    status == TaskStatus::Running
+        && (active == requested || active == TaskKind::Update || requested == TaskKind::Update)
+}
+
 fn transition_terminal(current: &mut TaskStatus, next: TaskStatus) -> bool {
     if *current != TaskStatus::Running || next == TaskStatus::Running {
         return false;
@@ -217,6 +234,39 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{TaskKind, TaskStatus};
+    #[test]
+    fn 更新与所有业务任务双向互斥但终态不阻塞() {
+        for kind in [
+            TaskKind::Protect,
+            TaskKind::IosProtect,
+            TaskKind::Sign,
+            TaskKind::Update,
+        ] {
+            assert!(super::tasks_conflict(
+                kind,
+                TaskStatus::Running,
+                TaskKind::Update
+            ));
+            assert!(super::tasks_conflict(
+                TaskKind::Update,
+                TaskStatus::Running,
+                kind
+            ));
+            for status in [
+                TaskStatus::Succeeded,
+                TaskStatus::Failed,
+                TaskStatus::Cancelled,
+            ] {
+                assert!(!super::tasks_conflict(kind, status, TaskKind::Update));
+            }
+        }
+        assert!(!super::tasks_conflict(
+            TaskKind::Protect,
+            TaskStatus::Running,
+            TaskKind::Sign
+        ));
+    }
+
     #[test]
     fn 任务终态只接受一次() {
         let mut status = TaskStatus::Running;

@@ -44,8 +44,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_VERSION: ${{ inputs.version }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "缺少更新签名密钥"; exit 1; }
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             version="$REQUESTED_VERSION"
           else
@@ -56,7 +58,9 @@ jobs:
           tag="v${version}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' > release-draft.txt 2>/dev/null; then
+            test "$(cat release-draft.txt)" = true || { echo "禁止覆盖已公开的 Release，请提升版本号"; exit 1; }
+          else
             gh release create "$tag" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$(git rev-parse HEAD)" \
@@ -170,16 +174,26 @@ jobs:
             i686-linux-android \
             x86_64-linux-android
           cargo install cargo-ndk --locked
-          cargo install tauri-cli --locked
+          cargo install tauri-cli --version 2.11.5 --locked
           cargo install cargo-deb --locked
           rustup toolchain install 1.77.2 --profile minimal --target armv7-linux-androideabi
+
+      - name: 同步发布版本号
+        shell: bash
+        run: bash scripts/bump-version.sh "$VERSION"
 
       - name: 安装 GUI 前端依赖
         working-directory: apps/shield-gui
         run: npm ci
 
       - name: 构建 Linux Tauri 发布包
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: SKIP_CLI_RELEASE=1 VERSION="$VERSION" ./scripts/release-linux.sh "$VERSION"
+
+      - name: 验证更新验签与 GUI 回归
+        run: cargo test -p mocika-shield
 
       - name: 打包 Android 加固运行时资源
         shell: bash
@@ -245,7 +259,7 @@ jobs:
           mv dist/android-runtime/checksums-sha256.txt dist/android-runtime/android-runtime-checksums-sha256.txt
           files=(dist/linux/linux-tauri-checksums-sha256.txt dist/android-runtime/android-runtime-checksums-sha256.txt)
           while IFS= read -r -d '' file; do files+=("$file"); done < <(
-            find dist/linux dist/android-runtime -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.zip' \) -print0
+            find dist/linux dist/android-runtime -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.zip' -o -name '*.sig' \) -print0
           )
           test "${#files[@]}" -gt 2
           gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
@@ -324,14 +338,21 @@ jobs:
             i686-linux-android \
             x86_64-linux-android
           cargo install cargo-ndk --locked
-          cargo install tauri-cli --locked
+          cargo install tauri-cli --version 2.11.5 --locked
           rustup toolchain install 1.77.2 --profile minimal --target armv7-linux-androideabi
+
+      - name: 同步发布版本号
+        shell: bash
+        run: bash scripts/bump-version.sh "$VERSION"
 
       - name: 安装 GUI 前端依赖
         working-directory: apps/shield-gui
         run: npm ci
 
       - name: 构建 macOS Tauri Universal 发布包
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: SKIP_CLI_RELEASE=1 VERSION="$VERSION" ./scripts/release-macos.sh "$VERSION" universal
 
       - name: 上传 macOS 产物到草稿 Release
@@ -345,7 +366,7 @@ jobs:
           mv dist/macos/checksums-sha256.txt dist/macos/macos-tauri-checksums-sha256.txt
           files=(dist/macos/macos-tauri-checksums-sha256.txt)
           while IFS= read -r -d '' file; do files+=("$file"); done < <(
-            find dist/macos -type f -name '*.dmg' -print0
+            find dist/macos -type f \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.sig' \) -print0
           )
           test "${#files[@]}" -gt 1
           gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
@@ -428,11 +449,18 @@ jobs:
         shell: pwsh
         run: rustup toolchain install 1.77.2 --profile minimal --target armv7-linux-androideabi
 
+      - name: 同步发布版本号
+        shell: bash
+        run: bash scripts/bump-version.sh "$VERSION"
+
       - name: 安装 GUI 前端依赖
         working-directory: apps/shield-gui
         run: npm ci
 
       - name: 构建 Windows 发布包
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         shell: pwsh
         run: |
           $env:SKIP_CLI_RELEASE = "1"
@@ -448,7 +476,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "校验和规范化失败" }
           Move-Item dist/windows/checksums-sha256.txt dist/windows/windows-checksums-sha256.txt
           $files = @("dist/windows/windows-checksums-sha256.txt")
-          $files += @(Get-ChildItem dist/windows -Recurse -File -Filter *.exe | ForEach-Object FullName)
+          $files += @(Get-ChildItem dist/windows -Recurse -File -Include *.exe,*.sig | ForEach-Object FullName)
           if ($files.Count -le 1) { throw "缺少 Windows 安装包" }
           gh release upload $env:TAG @files --repo $env:GITHUB_REPOSITORY --clobber
           if ($LASTEXITCODE -ne 0) { throw "上传 Windows 安装包失败" }
@@ -562,10 +590,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > release-assets.txt
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets > release-assets.json
+          python3 -c 'import json; print("\n".join(a["name"] for a in json.load(open("release-assets.json"))["assets"]))' > release-assets.txt
           for expected in macos-tauri linux-tauri windows android-runtime; do
             grep -Fxq "${expected}-checksums-sha256.txt" release-assets.txt
           done
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sig' --dir update-signatures
+          python3 scripts/generate_update_manifest.py "$VERSION" release-assets.json update-signatures release-notes.md latest.json
+          gh release upload "$TAG" latest.json --repo "$GITHUB_REPOSITORY" --clobber
           if [[ "$IS_PRERELEASE" == "true" ]]; then
             gh release edit "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
@@ -578,5 +610,5 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --title "$TAG" \
               --notes-file release-notes.md \
-              --draft=false
+              --draft=false --latest
           fi

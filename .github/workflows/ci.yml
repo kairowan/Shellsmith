@@ -263,7 +263,10 @@ jobs:
 
       - name: 检查 Linux Tauri bundle
         working-directory: apps/shield-gui
-        run: cargo tauri build --bundles appimage,deb --debug
+        run: cargo tauri build --bundles appimage,deb --debug --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: 验证 GUI 更新安全与业务回归
+        run: cargo test -p mocika-shield
 
   stub:
     name: Android 壳构建

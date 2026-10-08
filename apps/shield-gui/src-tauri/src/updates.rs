@@ -1,12 +1,24 @@
-use crate::app_config::AppConfigState;
+use crate::task_manager::{TaskKind, TaskManager, TaskStatus};
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
+use tauri::{ipc::Channel, Manager};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct UpdateCheckResult {
     pub has_update: bool,
     pub latest_version: Option<String>,
     pub release_url: Option<String>,
     pub update_level: Option<String>,
+    pub notes: Option<String>,
+    pub can_install: bool,
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct UpdateProgress {
+    phase: &'static str,
+    downloaded: u64,
+    total: Option<u64>,
 }
 
 pub(crate) fn compare_semver(
@@ -14,169 +26,310 @@ pub(crate) fn compare_semver(
     latest: &str,
     release_url: Option<String>,
 ) -> UpdateCheckResult {
-    let no_update = || UpdateCheckResult {
-        has_update: false,
-        latest_version: None,
-        release_url: None,
-        update_level: None,
+    let (Ok(current), Ok(version)) = (
+        semver::Version::parse(current),
+        semver::Version::parse(latest),
+    ) else {
+        return UpdateCheckResult::default();
     };
-
-    let current = match semver::Version::parse(current) {
-        Ok(v) => v,
-        Err(_) => return no_update(),
-    };
-    let latest_version = match semver::Version::parse(latest) {
-        Ok(v) => v,
-        Err(_) => return no_update(),
-    };
-
-    if latest_version <= current {
-        return no_update();
+    if version <= current {
+        return UpdateCheckResult::default();
     }
-
-    let level = if latest_version.major > current.major {
+    let level = if version.major > current.major {
         "major"
-    } else if latest_version.minor > current.minor {
+    } else if version.minor > current.minor {
         "minor"
     } else {
         "patch"
     };
-
     UpdateCheckResult {
         has_update: true,
         latest_version: Some(latest.to_string()),
         release_url,
         update_level: Some(level.to_string()),
+        ..Default::default()
     }
 }
 
-fn get_cached_update(state: &AppConfigState) -> Option<UpdateCheckResult> {
-    let config = state.read().ok()?;
-    let last_check = config.update_cache.last_check?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_secs() as i64;
-    if now - last_check > 86400 {
-        return None;
+fn can_install(app: &tauri::AppHandle) -> bool {
+    if cfg!(debug_assertions) {
+        return false;
     }
-    let latest_tag = config.update_cache.latest_tag?;
-    let release_url = config.update_cache.release_url;
-    Some(compare_semver(
-        env!("CARGO_PKG_VERSION"),
-        &latest_tag,
-        release_url,
-    ))
+    #[cfg(target_os = "linux")]
+    return app.env().appimage.is_some();
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        #[cfg(target_os = "macos")]
+        return std::env::current_exe().is_ok_and(|path| {
+            path.parent()
+                .is_some_and(|parent| parent.ends_with("Contents/MacOS"))
+                && !path.starts_with("/Volumes")
+                && !path
+                    .components()
+                    .any(|part| part.as_os_str() == "AppTranslocation")
+        });
+        #[cfg(not(target_os = "macos"))]
+        true
+    }
 }
 
-fn save_update_to_cache(state: &AppConfigState, latest_tag: &str, release_url: Option<&str>) {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    let _ = state.mutate(|config| {
-        config.update_cache.last_check = Some(now);
-        config.update_cache.latest_tag = if latest_tag.is_empty() {
-            None
-        } else {
-            Some(latest_tag.to_string())
-        };
-        config.update_cache.release_url = release_url.map(|value| value.to_string());
-    });
+async fn available_update(app: &tauri::AppHandle) -> Result<Option<Update>, String> {
+    app.updater_builder()
+        .timeout(Duration::from_secs(20))
+        .version_comparator(|current, release| {
+            release.version.pre.is_empty() && release.version > current
+        })
+        .build()
+        .map_err(|error| format!("初始化更新器失败：{error}"))?
+        .check()
+        .await
+        .map_err(|error| format!("检查更新失败，请检查网络或前往 Release 页面：{error}"))
 }
 
-pub(crate) async fn check_update_impl(
-    state: &AppConfigState,
-    force: bool,
-) -> Result<UpdateCheckResult, String> {
-    if !force {
-        if let Some(cached) = get_cached_update(state) {
-            return Ok(cached);
+pub(crate) async fn check_update_impl(app: &tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+    // ponytail: 每次检查直接读取稳定版清单，不缓存一天，也不为更新另建业务后台。
+    let Some(update) = available_update(app).await? else {
+        return Ok(UpdateCheckResult::default());
+    };
+    let mut result = compare_semver(
+        &update.current_version,
+        &update.version,
+        Some(format!(
+            "https://github.com/kairowan/Shellsmith/releases/tag/v{}",
+            update.version
+        )),
+    );
+    result.notes = update.body;
+    result.can_install = can_install(app);
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) async fn install_update(
+    window: tauri::Window,
+    tasks: tauri::State<'_, TaskManager>,
+    version: String,
+    on_progress: Channel<UpdateProgress>,
+) -> Result<(), String> {
+    let app = window.app_handle().clone();
+    if !can_install(&app) {
+        return Err("当前运行方式不支持覆盖更新。macOS 请先把应用放到「应用程序」再运行；Linux 请使用 AppImage，deb 请从 Release 页面下载安装。".into());
+    }
+    let task_id = uuid::Uuid::new_v4().to_string();
+    tasks.begin(
+        &window,
+        task_id.clone(),
+        TaskKind::Update,
+        String::new(),
+        String::new(),
+        "Update",
+    )?;
+    let result = download_and_install(&app, &version, &on_progress).await;
+    match result {
+        Ok(()) => {
+            // 安装后到退出前仍保持互斥，避免重启间隙接入新的加固任务。
+            app.restart();
+        }
+        Err(error) => {
+            let _ = tasks.finish(&window, &task_id, TaskStatus::Failed, Some(error.clone()));
+            Err(error)
         }
     }
-
-    let current = env!("CARGO_PKG_VERSION");
-    let user_agent = format!("mocika-shield/{}", current);
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let response = client
-        .get("https://api.github.com/repos/kairowan/Shellsmith/releases/latest")
-        .header("User-Agent", user_agent)
-        .header("Accept", "application/vnd.github.v3+json")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if response.status().as_u16() == 404 {
-        save_update_to_cache(state, "", None);
-        return Ok(UpdateCheckResult {
-            has_update: false,
-            latest_version: None,
-            release_url: None,
-            update_level: None,
-        });
-    }
-
-    if !response.status().is_success() {
-        // GitHub API 的匿名额度较低。额度耗尽时，使用 releases/latest 的重定向结果
-        // 获取版本号，不依赖 API 配额。
-        return check_update_from_release_redirect(&client, state, current).await;
-    }
-
-    let json: serde_json::Value = response.json().await.map_err(|e| e.to_string())?;
-    let tag = json["tag_name"].as_str().unwrap_or("");
-    let latest = tag.trim_start_matches(['v', 'V']);
-    let release_url = json["html_url"].as_str();
-
-    save_update_to_cache(state, latest, release_url);
-    Ok(compare_semver(
-        current,
-        latest,
-        release_url.map(|s| s.to_string()),
-    ))
 }
 
-async fn check_update_from_release_redirect(
-    client: &reqwest::Client,
-    state: &AppConfigState,
-    current: &str,
-) -> Result<UpdateCheckResult, String> {
-    let response = client
-        .get("https://github.com/kairowan/Shellsmith/releases/latest")
-        .header("User-Agent", format!("mocika-shield/{current}"))
-        .send()
+async fn download_and_install(
+    app: &tauri::AppHandle,
+    expected_version: &str,
+    progress: &Channel<UpdateProgress>,
+) -> Result<(), String> {
+    let mut update = available_update(app)
+        .await?
+        .ok_or("没有可安装的新版本，请重新检查更新")?;
+    if update.version != expected_version {
+        return Err("可用版本已经变化，请重新检查并确认更新".into());
+    }
+    // 检查清单限时 20 秒；完整安装包允许较慢网络，下载失败不会调用安装。
+    update.timeout = Some(Duration::from_secs(1800));
+    let mut downloaded = 0;
+    let mut last_sent = Instant::now();
+    let bytes = update
+        .download(
+            |chunk, total| {
+                downloaded += chunk as u64;
+                if last_sent.elapsed() >= Duration::from_millis(150) || total == Some(downloaded) {
+                    let _ = progress.send(UpdateProgress {
+                        phase: "downloading",
+                        downloaded,
+                        total,
+                    });
+                    last_sent = Instant::now();
+                }
+            },
+            || {
+                let _ = progress.send(UpdateProgress {
+                    phase: "verifying",
+                    downloaded: 0,
+                    total: None,
+                });
+            },
+        )
         .await
-        .map_err(|e| format!("无法访问 GitHub Releases: {e}"))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "GitHub Releases 返回错误状态码: {}",
-            response.status()
-        ));
-    }
-
-    let release_url = response.url().to_string();
-    let tag = release_url
-        .rsplit("/tag/")
-        .next()
-        .filter(|value| !value.is_empty() && *value != release_url)
-        .unwrap_or("");
-    let latest = tag.trim_start_matches(['v', 'V']);
-    if latest.is_empty() {
-        return Err("GitHub Releases 未返回有效版本号".to_string());
-    }
-
-    save_update_to_cache(state, latest, Some(&release_url));
-    Ok(compare_semver(current, latest, Some(release_url.clone())))
+        .map_err(|error| format!("下载或签名校验失败，未执行安装：{error}"))?;
+    // download 已完成包签名和签名版本校验，不能跳过或降级为仅校验 SHA-256。
+    let _ = progress.send(UpdateProgress {
+        phase: "installing",
+        downloaded: 0,
+        total: None,
+    });
+    tokio::task::spawn_blocking(move || update.install(bytes))
+        .await
+        .map_err(|error| format!("更新安装任务失败：{error}"))?
+        .map_err(|error| format!("安装更新失败，请从 Release 页面手动安装：{error}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "需要真实 Release 与网络，只下载验签，不安装"]
+    fn 已发布三平台更新包通过内置公钥验签() {
+        use tauri::test::{mock_builder, mock_context, noop_assets};
+        let mut context = mock_context(noop_assets());
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        context
+            .config_mut()
+            .plugins
+            .0
+            .insert("updater".into(), config["plugins"]["updater"].clone());
+        let app = mock_builder()
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .build(context)
+            .unwrap();
+        tauri::async_runtime::block_on(async {
+            for target in [
+                "darwin-aarch64",
+                "darwin-x86_64",
+                "windows-x86_64",
+                "linux-x86_64",
+            ] {
+                let update = app
+                    .updater_builder()
+                    .target(target)
+                    .timeout(Duration::from_secs(600))
+                    .build()
+                    .unwrap()
+                    .check()
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(update.version, env!("CARGO_PKG_VERSION"));
+                let bytes = update.download(|_, _| {}, || {}).await.unwrap();
+                assert!(!bytes.is_empty());
+                println!(
+                    "{target} {}：{} 字节，验签通过，未执行安装",
+                    update.version,
+                    bytes.len()
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn 官方更新器接受合法签名且拒绝篡改包和伪造版本() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+        use tauri::test::{mock_builder, mock_context, noop_assets};
+
+        // 独立测试密钥的公钥及签名；没有提交私钥，也不使用生产签名密钥。
+        const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM2ODY0QjRGNEY5ODc2QzIKUldUQ2RwaFBUMHVHTml6eHpDWktJYTJReC9rRFhCdSsvTFZoT3NBRGNsdmdCZWJaVnZpazlURnQK";
+        const SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUQ2RwaFBUMHVHTnFsSEhNNDkyOGVnZkJ0RmQ4Yk1GTDU3WllRWmUxNG01QkttK2hmWll1cjliMXI2SU55NnU4U2NVdy83a1lHZ1VmVXNyY2JPeVp6cExMM0tqRnlFbWdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDQzNzc1CWZpbGU6cGF5bG9hZAl2ZXJzaW9uOjEuNC41CkxvczFZMkd2REVyUzJEWnpQbHFOa3NwV2N3b1J4Q1p5K3NlWEoyVDVYMzFnL25PanZMWGZrRDZYRzY2bXJmRzJFMm1IVTN6Rjd6Y21JZkNjTktBcUNBPT0K";
+        const PAYLOAD: &str = "Shellsmith 更新验签测试\n";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for mut stream in listener.incoming().take(6).map(Result::unwrap) {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = BufReader::new(&mut stream);
+                let mut request = String::new();
+                reader.read_line(&mut request).unwrap();
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    if header == "\r\n" || header.is_empty() {
+                        break;
+                    }
+                }
+                let route = request.split_whitespace().nth(1).unwrap();
+                let body = if route.ends_with("/manifest") {
+                    let scenario = route.split('/').nth(1).unwrap();
+                    serde_json::json!({
+                        "version": if scenario == "spoof" { "9.0.0" } else { "1.4.5" },
+                        "platforms": {"test": {
+                            "url": format!("http://{address}/{scenario}/payload"),
+                            "signature": SIGNATURE
+                        }}
+                    })
+                    .to_string()
+                } else if route.contains("tampered") {
+                    "被修改的内容".into()
+                } else {
+                    PAYLOAD.into()
+                };
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let mut context = mock_context(noop_assets());
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["plugins"]["updater"]["requireSignedVersion"], true);
+        let mut updater_config = config["plugins"]["updater"].clone();
+        updater_config["pubkey"] = PUBLIC_KEY.into();
+        updater_config["dangerousInsecureTransportProtocol"] = true.into();
+        context
+            .config_mut()
+            .plugins
+            .0
+            .insert("updater".into(), updater_config);
+        let app = mock_builder()
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .build(context)
+            .unwrap();
+        tauri::async_runtime::block_on(async {
+            for scenario in ["good", "tampered", "spoof"] {
+                let update = app
+                    .updater_builder()
+                    .target("test")
+                    .no_proxy()
+                    .timeout(Duration::from_secs(5))
+                    .endpoints(vec![format!("http://{address}/{scenario}/manifest")
+                        .parse()
+                        .unwrap()])
+                    .unwrap()
+                    .build()
+                    .unwrap()
+                    .check()
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let result = update.download(|_, _| {}, || {}).await;
+                match scenario {
+                    "good" => assert_eq!(result.unwrap(), PAYLOAD.as_bytes()),
+                    "spoof" => assert!(matches!(
+                        result,
+                        Err(tauri_plugin_updater::Error::SignedVersionMismatch { .. })
+                    )),
+                    _ => assert!(result.is_err()),
+                }
+            }
+        });
+        server.join().unwrap();
+    }
 
     #[test]
     fn patch_update_detected() {

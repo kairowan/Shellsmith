@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -151,6 +151,14 @@ export type UpdateCheckResult = {
   latest_version?: string | null;
   release_url?: string | null;
   update_level?: "patch" | "minor" | "major" | string | null;
+  notes?: string | null;
+  can_install: boolean;
+};
+
+export type UpdateProgress = {
+  phase: "checking" | "downloading" | "verifying" | "installing";
+  downloaded: number;
+  total: number | null;
 };
 
 export type AppInfo = {
@@ -202,7 +210,7 @@ export type AabProtectRequest = {
   xopTrueVmpPrefixes: string[];
 };
 
-export type TaskKind = "protect" | "ios_protect" | "sign";
+export type TaskKind = "protect" | "ios_protect" | "sign" | "update";
 export type TaskStatus = "running" | "succeeded" | "failed" | "cancelled";
 
 export type TaskLog = {
@@ -374,7 +382,12 @@ export const api = {
 	    apkPath: string;
 	    certificateId: string;
 	  }) => invoke<CertCompareResult>("compare_cert_fingerprints", args),
-  checkUpdate: (force: boolean) => invoke<UpdateCheckResult>("check_update", { force }),
+  checkUpdate: () => invoke<UpdateCheckResult>("check_update"),
+  installUpdate: (version: string, onProgress: (progress: UpdateProgress) => void) => {
+    const channel = new Channel<UpdateProgress>();
+    channel.onmessage = onProgress;
+    return invoke<void>("install_update", { version, onProgress: channel });
+  },
   syncTelemetry: () => invoke<void>("sync_telemetry"),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   dismissUpdate: (version: string) => invoke<void>("dismiss_update", { version }),

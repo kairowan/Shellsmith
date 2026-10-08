@@ -92,7 +92,7 @@ function Check-Env {
                 ((cargo tauri --version 2>$null) -and $LASTEXITCODE -eq 0)
     if (-not $hasTauri) {
         Warn "未安装 tauri-cli，正在安装（需要网络，请稍候）..."
-        Run "cargo" @("install", "tauri-cli")
+        Run "cargo" @("install", "tauri-cli", "--version", "2.11.5", "--locked")
     }
 
     # Node/npm（Tauri React 前端构建需要）
@@ -188,6 +188,7 @@ function Build-Cli {
 
 # ========== 构建 GUI（Tauri NSIS bundle）==========
 function Build-Gui {
+    if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { Err "发布需要设置 TAURI_SIGNING_PRIVATE_KEY" }
     Info "构建 GUI（cargo tauri build --bundles nsis）..."
     Push-Location (Join-Path $Root "apps\shield-gui")
     try {
@@ -298,6 +299,7 @@ function Collect-Gui {
     if ($exe) {
         $targetName = "Shellsmith_${Version}_windows_x64_setup.exe"
         Copy-Item $exe.FullName "$DistDir\gui-nsis\$targetName"
+        Copy-Item "$($exe.FullName).sig" "$DistDir\gui-nsis\$targetName.sig"
         Success "NSIS 安装包 → $targetName"
     } else {
         Warn "NSIS 安装包未找到，请确保已安装 NSIS 并配置 PATH"
