@@ -44,6 +44,22 @@ wrangler deploy
 
 如需配置只读 GitHub 令牌，使用 `wrangler secret put GITHUB_TOKEN`，不得把令牌写入 `wrangler.toml` 或前端代码。
 
+## 问题反馈接口
+
+软件内「问题反馈」（设置页）把用户填写的正文提交到同一个 Worker 的 `POST /reports/feedback`，由服务端用 `GITHUB_TOKEN` 直接创建公开 issue。正文由客户端生成，服务端只做字段校验、补标题前缀与标签、幂等补隐藏标记 `<!-- shellsmith-feedback:v1 -->`，不重新渲染模板。
+
+首次启用需要两步：
+
+```bash
+cd tools/stats-worker
+wrangler d1 execute mocika-shield-analytics --remote --file migrations/0005_feedback_throttle.sql
+wrangler deploy
+```
+
+**`GITHUB_TOKEN` 必须同时具备创建 issue 的权限。** 趋势汇总只需要公开读取，可以继续用只读令牌；创建 issue 需要该令牌对 `kairowan/Shellsmith` 拥有 `issues: write`（经典 PAT 的 `repo`/`public_repo`，或细粒度令牌的 Issues 写权限）。权限不足时 GitHub 返回 403，客户端会看到「反馈服务暂时不可用」并自动回退到浏览器预填页面，不会误报成功。
+
+限流是 best-effort：指纹为 `sha256(CF-Connecting-IP)`，不落库原始 IP，同指纹 10 分钟 1 次、一天 20 次。迁移未应用或 D1 异常时限流失效但不阻断提交，因此建议迁移与部署同时完成。日志只记录状态码与 GitHub 错误标题，不记录令牌与反馈正文。
+
 ## 维护统计口径
 
 Beta.5 的[用户确认错误报告](../design/failure-diagnostics.md)独立于匿名统计：每份报告经用户确认才发送，预览全部待发送字段；不带匿名 UUID，不上传原始日志。错误发生时冻结版本，D1 私有表保存；没有公开读取接口，不进入维护历史或 Release 附件。用户拒绝或关闭窗口不发送，确认后的发送不自动重试。2026-09-16 已部署并启用接口，Beta.5 已发布，详见[线上执行记录](failure-diagnostics.md)。

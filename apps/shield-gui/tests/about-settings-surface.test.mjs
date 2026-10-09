@@ -58,3 +58,10 @@ test("设置页保留外观与语言设置", () => {
   assert.match(settingsHtml, /语言/);
   assert.match(settingsHtml, /中文/);
 });
+
+test("设置页提供问题反馈入口且不预展开表单", () => {
+  assert.match(settingsHtml, /问题反馈/);
+  assert.match(settingsHtml, /提交问题反馈/);
+  // 未打开时不渲染表单字段，避免在设置页内出现隐藏的输入控件。
+  assert.doesNotMatch(settingsHtml, /一句话标题|复现步骤|反馈类型/);
+});

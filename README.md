@@ -113,17 +113,18 @@ iOS 流水线只改工作副本：接入精确版本的上游 Swift Package，�
 
 ## 隐私说明
 
-APK、证书、密钥库和签名密码只在本机处理，不上传业务文件。桌面工具有三个独立数据通道：
+APK、证书、密钥库和签名密码只在本机处理，不上传业务文件。桌面工具有以下独立数据通道：
 
 iOS balanced/strict 会让目标应用直接集成 freeRASP；其 `watcherMail`、安全事件和网络行为受 Talsec 条款与隐私政策约束，发布前需由应用方完成披露。Shellsmith 不托管 freeRASP 二进制。
 
 | 通道 | 数据与控制方式 |
 |---|---|
-| 匿名使用统计 | 默认启用，记录随机安装标识、工具版本、启动和任务计数及固定失败类别；可在设置中关闭，不包含包名或原始日志 |
-| 安全错误报告 | 每份报告先预览、再确认发送；不上传原始日志、APK、路径、包名、证书或密码，不受匿名统计开关控制 |
+| 安全错误报告 | 每份报告先预览、再确认发送；不上传原始日志、APK、路径、包名、证书或密码，独立于其他数据通道 |
 | 应用使用分享 | 加固/签名页控制，新包名默认选中，同包名取消后跨页及重启保持；成功时发送应用名称、包名、版本码、工具版本、操作、流程、成功日期及协议/去重信息，不带设备标识 |
 
-应用分享独立于匿名统计，仅维护者可见，明细保留 180 天；取消停止同包名后续分享，不删除已接收记录。**加固后的 APK 不包含这些统计或分享上报。** 数据范围、保留与删除说明见[数据与隐私说明](docs/ops/telemetry.md)。
+应用分享仅维护者可见，明细保留 180 天；取消停止同包名后续分享，不删除已接收记录。**加固后的 APK 不包含这些分享上报。** 数据范围、保留与删除说明见[数据与隐私说明](docs/ops/telemetry.md)。
+
+软件内“问题反馈”不会自动上报：只有在设置页主动填写表单、预览并确认提交后，反馈正文（Bug 反馈还会附带版本、系统、Java 与工具状态等诊断信息）才会发送到 GitHub 公开 issue；服务端不可用时，软件会提供在浏览器打开预填 issue 页面的入口。
 
 ## 文档与开发者入口
 
@@ -140,9 +141,54 @@ CLI 仅供源码构建和自动化使用，Release 不单独提供 CLI 包。构
 
 ## 反馈与交流
 
-- 使用问题请先阅读[反馈指南](docs/process/support.md)，再提交 [GitHub Issue](https://github.com/kairowan/Shellsmith/issues)；“关于”页可复制诊断信息。
+- 使用问题请先阅读[反馈指南](docs/process/support.md)，再提交 [GitHub Issue](https://github.com/kairowan/Shellsmith/issues)；也可直接在设置页的“问题反馈”区块提交，Bug 反馈的诊断信息会自动附带，发送前可预览。
 - 功能建议请使用[需求表单](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml)，已有相同需求可在原 issue 点赞。
 - 安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不公开可利用细节、业务 APK、证书或密码。
+
+## 致谢
+
+Shellsmith 依赖大量开源项目。以下是直接影响本工具能力、被分发进发布产物或构成构建链路的主要项目。加固与签名只在本机调用这些工具，不修改其源码；传递依赖的完整版本与许可证可从 `Cargo.lock`、`apps/shield-gui/package-lock.json` 与 `shield-stub/gradle/libs.versions.toml` 复现。
+
+### 桌面框架与界面
+
+| 项目 | 许可证 | 用途 |
+|---|---|---|
+| [Tauri](https://tauri.app/) · [tauri-plugin-updater](https://github.com/tauri-apps/plugins-workspace) · [tauri-plugin-dialog](https://github.com/tauri-apps/plugins-workspace) | Apache-2.0 OR MIT | 桌面应用框架、应用内更新与签名校验、文件选择 |
+| [React](https://react.dev/) · [Vite](https://vitejs.dev/) · [Tailwind CSS](https://tailwindcss.com/) | MIT | 界面视图层与前端构建 |
+| [TypeScript](https://www.typescriptlang.org/) | Apache-2.0 | 前端类型系统 |
+| [shadcn/ui](https://ui.shadcn.com/) · [Radix UI](https://www.radix-ui.com/) | MIT | 组件与无障碍交互 |
+| [Lucide](https://lucide.dev/) · [Sonner](https://sonner.emilkowal.ski/) | ISC / MIT | 图标与通知提示 |
+| [react-markdown](https://github.com/remarkjs/react-markdown) · [remark-gfm](https://github.com/remarkjs/remark-gfm) | MIT | 更新说明的安全渲染 |
+
+### Rust 能力库
+
+| 项目 | 许可证 | 用途 |
+|---|---|---|
+| [RustCrypto](https://github.com/RustCrypto)：`chacha20poly1305`、`hkdf`、`sha2`、`sha1` | Apache-2.0 OR MIT | DEX 加解密、密钥派生与证书指纹 |
+| [zstd](https://github.com/gyscos/zstd-rs) | MIT | 加固产物压缩 |
+| [zip](https://github.com/zip-rs/zip2) | MIT | APK、AAB 与 IPA 的打包解析 |
+| [serde](https://serde.rs/) · [clap](https://github.com/clap-rs/clap) · [semver](https://github.com/dtolnay/semver) · [toml](https://github.com/toml-rs/toml) · [uuid](https://github.com/uuid-rs/uuid) | MIT OR Apache-2.0 | 序列化、命令行、版本比较与任务标识 |
+| [tokio](https://tokio.rs/) · [reqwest](https://github.com/seanmonstar/reqwest) | MIT / MIT OR Apache-2.0 | 异步运行时与上游 SDK 下载 |
+| [rusqlite](https://github.com/rusqlite/rusqlite) | MIT | 本机证书数据库 |
+| [anyhow](https://github.com/dtolnay/anyhow) · [thiserror](https://github.com/dtolnay/thiserror) · [log](https://github.com/rust-lang/log) · [tempfile](https://github.com/Stebalien/tempfile) · [directories](https://github.com/dirs-dev/directories-rs) · [dunce](https://gitlab.com/kornelski/dunce) · [which](https://github.com/harryfei/which-rs) · [walkdir](https://github.com/BurntSushi/walkdir) · [rand](https://github.com/rust-random/rand) | MIT OR Apache-2.0 等 | 错误处理、日志、路径与文件处理 |
+| [colored](https://github.com/colored-rs/colored) | MPL-2.0 | CLI 彩色输出 |
+| [jni](https://github.com/jni-rs/jni-rs) · [cc](https://github.com/rust-lang/cc-rs) | MIT OR Apache-2.0 | Android 壳的 JNI 绑定与 Native 编译 |
+
+### 加固、签名与运行时组件
+
+| 项目 | 许可证 | 用途 |
+|---|---|---|
+| [Apktool](https://apktool.org/) 3.0.1 | Apache-2.0 | APK 反编译与重打包，随发布包分发 |
+| [apksigner](https://developer.android.com/tools/apksigner)（Android SDK Build-Tools） | Apache-2.0 | APK 签名与签名校验，随发布包分发 |
+| [bundletool](https://github.com/google/bundletool) · [aapt2](https://developer.android.com/tools) | Apache-2.0 | AAB 模块处理与资源编译 |
+| [XopProtector](https://github.com/xopJack/XopProtector) | Apache-2.0 | PVM2 与 True-VMP 代码保护；许可证与声明见 `tools/licenses/` |
+| [freeRASP](https://github.com/talsec/Free-RASP-iOS) 7.1.4 | MIT，另受 Talsec 公平使用政策约束 | iOS 运行时威胁检测；由用户本机解析，发布包不重新分发二进制 |
+| [Swift Confidential](https://github.com/securevale/swift-confidential) 0.5.2 | Apache-2.0 | Swift 敏感字面量保护（可选） |
+
+构建链路另使用 [Tauri CLI](https://github.com/tauri-apps/tauri)、[cargo-ndk](https://github.com/bbqsrc/cargo-ndk)、[Android Gradle Plugin](https://developer.android.com/build)、[Android NDK](https://developer.android.com/ndk)、[JUnit 4](https://junit.org/junit4/)、[AndroidX Test](https://developer.android.com/training/testing)、[ESLint](https://eslint.org/)、[PostCSS](https://postcss.org/) 与 [Autoprefixer](https://github.com/postcss/autoprefixer)。
+
+如果这里署名有误、许可证标注不准或遗漏了应当致谢的项目，欢迎提交 issue 或 PR，我们会尽快更正。
+
 ## 许可证
 
 采用 **MIT OR Apache-2.0** 双协议，可选择其中任意一种：[MIT](LICENSE-MIT) · [Apache-2.0](LICENSE-APACHE)。

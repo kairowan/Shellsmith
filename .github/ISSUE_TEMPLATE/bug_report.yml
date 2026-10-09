@@ -36,7 +36,7 @@ body:
     id: java
     attributes:
       label: Java / JDK 状态
-      description: 可在关于页查看；签名、Alias 识别和加固需要完整 JDK 8+。
+      description: 签名、Alias 识别和加固需要完整 JDK 8+（含 keytool）；Java 不满足要求时，加固或签名页会直接给出阻断提示，也可运行 java -version 自行确认。
       placeholder: "例如：Java 8u452，keytool 可用"
     validations:
       required: false
@@ -47,6 +47,7 @@ body:
       label: 问题模块
       options:
         - 加固
+        - iOS 加固
         - 签名
         - 证书管理
         - Java 环境检测
@@ -89,7 +90,7 @@ body:
     id: diagnostic
     attributes:
       label: 诊断信息
-      description: 请在关于页点击“复制诊断信息”，然后粘贴到这里。诊断信息不会包含 APK 路径、证书路径、密码或完整用户目录。
+      description: 如果通过软件内问题反馈（设置 → 问题反馈）提交，诊断信息会自动附加，无需手动填写；手动提交 issue 时请自行填写版本、操作系统与 Java 状态。诊断信息不会包含 APK 路径、证书路径、密码或完整用户目录。
       render: text
     validations:
       required: false

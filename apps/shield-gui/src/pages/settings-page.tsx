@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { PillSegment, SettingsFieldRow, SettingsGroup, StatusMessage } from "@/components/app/common";
+import { MessageSquarePlus } from "lucide-react";
+import { AppButton, PillSegment, SettingsFieldRow, SettingsGroup, StatusMessage } from "@/components/app/common";
+import { FeedbackDialog } from "@/components/app/feedback-dialog";
 import { t, type Locale } from "@/lib/i18n";
 import { notifyError } from "@/lib/notify";
 import { api, type ThemeMode } from "@/lib/tauri";
@@ -23,6 +25,7 @@ export function SettingsPage({
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<"idle" | "saved" | "failed">("idle");
   const [error, setError] = useState("");
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -108,6 +111,15 @@ export function SettingsPage({
             </div>
           </SettingsFieldRow>
         </SettingsGroup>
+        <SettingsGroup title={t(locale, "feedbackTitle")}>
+          <div className="space-y-3 px-6 py-5">
+            <p className="text-sm leading-6 text-muted-foreground">{t(locale, "feedbackEntryHint")}</p>
+            <AppButton onClick={() => setFeedbackOpen(true)}>
+              <MessageSquarePlus className="h-4 w-4" />
+              {t(locale, "feedbackEntry")}
+            </AppButton>
+          </div>
+        </SettingsGroup>
         {status === "saved" && (
           <StatusMessage kind="success">
             {saving ? t(locale, "saving") : t(locale, "saved")}
@@ -115,6 +127,7 @@ export function SettingsPage({
         )}
         {status === "failed" && error && <StatusMessage kind="error">{error}</StatusMessage>}
       </div>
+      <FeedbackDialog locale={locale} open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </section>
   );
 }
