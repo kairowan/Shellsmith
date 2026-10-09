@@ -142,7 +142,7 @@ CLI 仅供源码构建和自动化使用，Release 不单独提供 CLI 包。构
 ## 反馈与交流
 
 - 使用问题请先阅读[反馈指南](docs/process/support.md)，再提交 [GitHub Issue](https://github.com/kairowan/Shellsmith/issues)；也可直接在设置页的“问题反馈”区块提交，Bug 反馈的诊断信息会自动附带，发送前可预览。
-- 功能建议请使用[需求表单](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml)，已有相同需求可在原 issue 点赞。
+- 功能建议可在设置页的“问题反馈”中选择“需求建议”提交，也可使用[需求表单](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml)；已有相同需求可在原 issue 点赞。
 - 安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不公开可利用细节、业务 APK、证书或密码。
 
 ## 致谢

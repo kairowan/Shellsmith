@@ -142,7 +142,7 @@ Detailed guides are currently primarily in Chinese. The CLI is source-built; Rel
 ## Feedback and Community
 
 - Read the [support guide](docs/process/support.md), then open a [GitHub issue](https://github.com/kairowan/Shellsmith/issues); you can also submit directly from the **Problem feedback** section on the Settings page, where diagnostics are attached automatically for bug reports and can be previewed before sending.
-- Use the [feature request form](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml), or upvote an existing matching request.
+- For feature requests, choose **Feature request** in the **Problem feedback** section on the Settings page, or use the [feature request form](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml); upvote an existing matching request instead of filing a duplicate.
 - Report vulnerabilities privately following [SECURITY.md](SECURITY.md). Do not publish exploits, business APKs, certificates, or passwords.
 
 ## Acknowledgements
