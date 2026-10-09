@@ -144,6 +144,7 @@ pub fn inspect_ios_project(path: &Path, scheme: Option<&str>) -> Result<IosProje
             Some("https://developer.apple.com/xcode/"),
         )
     }];
+    checks.extend(cocoapods_checks(&project_path));
 
     let (schemes, targets) = if xcode.available {
         inspect_with_xcode(
@@ -227,12 +228,14 @@ pub(crate) fn validate_protection_target(
     expected_team_id: &str,
     expected_bundle_ids: &[String],
 ) -> Result<()> {
-    if inspection
+    let blockers = inspection
         .checks
         .iter()
-        .any(|check| check.severity == IosCheckSeverity::Blocked && check.code != "xcode")
-    {
-        anyhow::bail!("iOS 工程预检存在阻断项，请先查看检查报告");
+        .filter(|check| check.severity == IosCheckSeverity::Blocked && check.code != "xcode")
+        .map(|check| check.message.as_str())
+        .collect::<Vec<_>>();
+    if !blockers.is_empty() {
+        anyhow::bail!("iOS 工程预检未通过：{}", blockers.join("；"));
     }
     if !inspection.xcode.available {
         return Ok(());
@@ -267,6 +270,60 @@ pub(crate) fn validate_protection_target(
         );
     }
     Ok(())
+}
+
+fn cocoapods_checks(project: &Path) -> Vec<IosCheck> {
+    let Some(parent) = project.parent() else {
+        return Vec::new();
+    };
+    let internal_workspace = parent.extension().is_some_and(|value| value == "xcodeproj");
+    let root = if internal_workspace {
+        parent.parent().unwrap_or(parent)
+    } else {
+        parent
+    };
+    let project_dir = if internal_workspace { parent } else { project };
+    let pbx = fs::read_to_string(project_dir.join("project.pbxproj")).unwrap_or_default();
+    // ponytail: 只预检入口同级的标准 Pods 布局；自定义沙盒需按 Xcode 构建设置扩展，不猜测工作区。
+    let uses_pods = root.join("Podfile").is_file()
+        || root.join("podfile").is_file()
+        || root.join("Podfile.lock").is_file()
+        || pbx.contains("PODS_ROOT")
+        || pbx.contains("[CP] Check Pods Manifest.lock");
+    if !uses_pods {
+        return Vec::new();
+    }
+    let mut checks = Vec::new();
+    if project
+        .extension()
+        .is_some_and(|value| value == "xcodeproj")
+        || internal_workspace
+    {
+        checks.push(IosCheck::blocked(
+            "cocoapods_workspace",
+            "检测到 CocoaPods：请选择 pod install 生成的顶层 .xcworkspace，不能使用 .xcodeproj 或其内部 project.xcworkspace；否则 Pods 模块和预编译头依赖可能缺失",
+            None,
+        ));
+    }
+    let lock = fs::read(root.join("Podfile.lock"));
+    let manifest = fs::read(root.join("Pods/Manifest.lock"));
+    checks.push(match (lock, manifest, root.join("Pods/Pods.xcodeproj/project.pbxproj").is_file()) {
+        (Ok(lock), Ok(manifest), true) if !lock.is_empty() && lock == manifest => IosCheck::ready(
+            "cocoapods_dependencies",
+            "已找到 Pods 工程，Podfile.lock 与 Pods/Manifest.lock 一致；依赖将随工作副本保留",
+        ),
+        (Ok(lock), Ok(manifest), true) if !lock.is_empty() && !manifest.is_empty() => IosCheck::blocked(
+            "cocoapods_dependencies",
+            "Podfile.lock 与 Pods/Manifest.lock 不一致：请先执行 pod install 同步依赖，再重新检查；不要使用 pod update 升级依赖",
+            None,
+        ),
+        _ => IosCheck::blocked(
+            "cocoapods_dependencies",
+            format!("未找到完整的标准 CocoaPods 依赖：请在 {} 执行 pod install（使用 Gemfile 的工程执行 bundle exec pod install），再选择生成的 .xcworkspace；Shellsmith 不会自动安装或升级业务依赖", root.display()),
+            None,
+        ),
+    });
+    checks
 }
 
 pub(crate) fn known_issue_checks(
@@ -479,7 +536,10 @@ fn inspect_with_xcode(
         .output()
         .context("启动 xcodebuild -list 失败")?;
     if !list.status.success() {
-        anyhow::bail!(clean_command_error(&list.stderr));
+        anyhow::bail!(crate::xcodebuild::command_diagnostic(
+            &list.stdout,
+            &list.stderr
+        ));
     }
     let list_json: Value =
         serde_json::from_slice(&list.stdout).context("解析 xcodebuild -list JSON 失败")?;
@@ -504,7 +564,10 @@ fn inspect_with_xcode(
         .output()
         .context("启动 xcodebuild -showBuildSettings 失败")?;
     if !settings.status.success() {
-        anyhow::bail!(clean_command_error(&settings.stderr));
+        anyhow::bail!(crate::xcodebuild::command_diagnostic(
+            &settings.stdout,
+            &settings.stderr
+        ));
     }
     let values: Value = serde_json::from_slice(&settings.stdout)
         .context("解析 xcodebuild -showBuildSettings JSON 失败")?;
@@ -660,13 +723,7 @@ fn string_array(value: Option<&Value>) -> Vec<String> {
 }
 
 fn clean_command_error(stderr: &[u8]) -> String {
-    let text = String::from_utf8_lossy(stderr);
-    text.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .take(6)
-        .collect::<Vec<_>>()
-        .join("；")
+    crate::xcodebuild::command_diagnostic(&[], stderr)
 }
 
 fn normalize_absolute(path: &Path) -> Result<PathBuf> {
@@ -691,6 +748,73 @@ fn normalize_absolute(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 原生工程不需要_cocoapods() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("Demo.xcodeproj");
+        fs::create_dir(&project).unwrap();
+        fs::write(project.join("project.pbxproj"), "PRODUCT_NAME = Demo;").unwrap();
+        assert!(cocoapods_checks(&project).is_empty());
+    }
+
+    #[test]
+    fn pods_工程必须使用顶层工作区并校验锁文件() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("Demo.xcodeproj");
+        let workspace = temp.path().join("Demo.xcworkspace");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(&workspace).unwrap();
+        fs::write(temp.path().join("podfile"), "platform :ios, '13.0'").unwrap();
+        let missing = cocoapods_checks(&project);
+        assert!(missing
+            .iter()
+            .any(|check| check.code == "cocoapods_workspace"
+                && check.severity == IosCheckSeverity::Blocked));
+        assert!(missing
+            .iter()
+            .any(|check| check.code == "cocoapods_dependencies"
+                && check.message.contains("pod install")));
+
+        fs::create_dir_all(temp.path().join("Pods/Pods.xcodeproj")).unwrap();
+        fs::write(
+            temp.path().join("Pods/Pods.xcodeproj/project.pbxproj"),
+            "Pods",
+        )
+        .unwrap();
+        fs::write(temp.path().join("Podfile.lock"), "PODS: []\n").unwrap();
+        fs::write(temp.path().join("Pods/Manifest.lock"), "PODS: []\n").unwrap();
+        assert!(cocoapods_checks(&workspace)
+            .iter()
+            .all(|check| check.severity == IosCheckSeverity::Ready));
+        assert!(cocoapods_checks(&project.join("project.xcworkspace"))
+            .iter()
+            .any(|check| check.code == "cocoapods_workspace"));
+
+        fs::write(temp.path().join("Pods/Manifest.lock"), "PODS: [不同版本]\n").unwrap();
+        assert!(cocoapods_checks(&workspace)
+            .iter()
+            .any(|check| check.message.contains("不一致")
+                && check.severity == IosCheckSeverity::Blocked));
+    }
+
+    #[test]
+    fn 缺失_podfile_时仍识别工程中的_pods_接入() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path().join("Demo.xcodeproj");
+        fs::create_dir(&project).unwrap();
+        fs::write(
+            project.join("project.pbxproj"),
+            "shellScript = \"${PODS_ROOT}/检查脚本\";",
+        )
+        .unwrap();
+        assert!(cocoapods_checks(&project)
+            .iter()
+            .any(|check| check.code == "cocoapods_workspace"));
+        assert!(cocoapods_checks(&project.join("project.xcworkspace"))
+            .iter()
+            .any(|check| check.code == "cocoapods_workspace"));
+    }
 
     #[test]
     fn static_inspection_finds_shared_scheme_and_settings() {

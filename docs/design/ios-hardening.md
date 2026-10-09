@@ -40,6 +40,14 @@ freeRASP 首次从固定官方提交下载并校验，或由用户导入官方 v
 
 包含 Share Extension 等依赖 target 的工程中，对象 ID 会先出现在 `containerPortal` 等引用字段里。工程接入必须定位实际对象声明，将 `packageReferences` 写入 `PBXProject`，不能写入 Frameworks 构建阶段。启用 Swift Confidential 后，依赖解析只检查本次选中的工程或工作区内的锁文件，缺失或版本不符时在 Archive 前停止。CI 用真实官方 SDK 验证导入、缓存复用和禁止网络条件下的 SwiftPM 解析，再用带分享扩展的纯 OC 样例，通过 `.xcodeproj` 和 `.xcworkspace` 分别执行无签名 Archive；该检查不替代开发者签名和真机运行验证。
 
+### CocoaPods 工程与构建失败排查
+
+使用 CocoaPods 的工程必须选择 `pod install` 生成的顶层 `.xcworkspace`，不能选择 `.xcodeproj` 或其中的 `project.xcworkspace`。标准同级目录布局会预检 `Pods/Pods.xcodeproj/project.pbxproj`、`Podfile.lock` 和 `Pods/Manifest.lock`，缺失或锁文件不一致时提前阻断。请先在源码目录执行 `pod install`（使用 Gemfile 的工程执行 `bundle exec pod install`），不要用 `pod update` 随意升级业务依赖。Shellsmith 保留工作副本中的 Pods，不自动执行 CocoaPods 安装脚本，也不改动业务头文件或关闭编译诊断。
+
+Xcode 命令失败时，摘要优先显示 stdout/stderr 中真正的 `error:`、`fatal:` 和链接错误。Swift Package 解析失败的完整日志保存在工作副本中入口旁的 `<工程名>.resolve.log`；Archive 失败保存在输出根目录 `Shellsmith.archive.log`；导出失败保存在输出根目录 `export.export.log`。日志包含原始双流输出，仅写入本机，macOS 权限为 `0600`，不覆盖已有日志；分享前请脱敏。
+
+`ScanDependencies ... Prefix.pch` 只说明预编译头的依赖扫描失败，需要查看其附近具体的 `fatal error`（例如头文件或模块不存在）。资源重名、重复 storyboard 以及业务源码自行发出的 `#warning` 不等于这次构建失败的根因，不能通过隐藏这些警告来认定修复成功。
+
 ## 配置
 
 从 [示例配置](../../examples/shellsmith-ios.toml) 开始；只有需要保护项目自定义敏感字面量时才创建 [敏感字符串配置](../../examples/confidential.yml)。配置不得保存证书私钥、钥匙串密码或 Apple 账号令牌。
