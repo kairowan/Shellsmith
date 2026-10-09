@@ -1,8 +1,7 @@
-import { ClipboardList, Download, Loader2, RotateCcw } from "lucide-react";
+import { Download, Loader2, RotateCcw } from "lucide-react";
 import { appIconUrl, appName } from "@/components/app/branding";
 import { AppButton, SummaryRow } from "@/components/app/common";
 import { t, type Locale } from "@/lib/i18n";
-import type { BuildInfo } from "@/lib/tauri";
 
 type AppInfo = {
   version: string;
@@ -12,23 +11,17 @@ type AppInfo = {
 export function AboutInfoCard({
   locale,
   appInfo,
-  buildInfo,
   checking,
   message,
   onCheckUpdate,
-  copyingDiagnostic,
-  onCopyDiagnosticInfo,
   runtimeInfoRefreshing,
   onRefreshRuntimeInfo,
 }: {
   locale: Locale;
   appInfo: AppInfo;
-  buildInfo: BuildInfo | null;
   checking: boolean;
   message: string;
   onCheckUpdate: () => void;
-  copyingDiagnostic: boolean;
-  onCopyDiagnosticInfo: () => void;
   runtimeInfoRefreshing: boolean;
   onRefreshRuntimeInfo: () => void;
 }) {
@@ -38,18 +31,6 @@ export function AboutInfoCard({
       <h1 className="mt-5 text-[30px] font-semibold tracking-tight">{appName}</h1>
       <div className="mt-2 rounded-full border border-border/70 bg-muted/45 px-3 py-1 text-xs font-semibold text-muted-foreground">
         v{appInfo.version}
-      </div>
-
-      <div className="mt-6 flex flex-wrap justify-center gap-2">
-        <span className="rounded-full border border-border/70 bg-muted/35 px-3 py-1.5 font-mono text-xs text-muted-foreground">
-          {t(locale, "java")} {buildInfo?.java_version ?? t(locale, "unknown")}
-        </span>
-        <span className="rounded-full border border-border/70 bg-muted/35 px-3 py-1.5 font-mono text-xs text-muted-foreground">
-          apktool {buildInfo?.apktool_version ?? t(locale, "unknown")}
-        </span>
-        <span className="rounded-full border border-border/70 bg-muted/35 px-3 py-1.5 font-mono text-xs text-muted-foreground">
-          apksigner {buildInfo?.apksigner_version ?? t(locale, "unknown")}
-        </span>
       </div>
 
       <div className="mt-8 w-full max-w-[460px] border-y border-border/60 py-2 text-left">
@@ -69,10 +50,6 @@ export function AboutInfoCard({
           <AppButton variant="secondary" onClick={onCheckUpdate} disabled={checking}>
             {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {checking ? t(locale, "checkingUpdate") : t(locale, "checkUpdate")}
-          </AppButton>
-          <AppButton variant="secondary" onClick={onCopyDiagnosticInfo} disabled={copyingDiagnostic}>
-            {copyingDiagnostic ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardList className="h-4 w-4" />}
-            {copyingDiagnostic ? t(locale, "copyingDiagnosticInfo") : t(locale, "copyDiagnosticInfo")}
           </AppButton>
         </div>
         {message && <p className="text-sm text-muted-foreground">{message}</p>}

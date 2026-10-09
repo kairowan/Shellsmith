@@ -62,7 +62,7 @@ export function useAppConfigState() {
 
 export function useAutoUpdateNotice() {
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
-  const [majorDialogOpen, setMajorDialogOpen] = useState(false);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -73,12 +73,10 @@ export function useAutoUpdateNotice() {
         if (disposed || !result.has_update || !result.latest_version) {
           return;
         }
-        if (result.update_level !== "major" && dismissed === result.latest_version) {
-          return;
-        }
+        // 有新版本时旧版本一启动就弹窗提示；用户「忽略」过的版本只保留顶部横幅。
         setUpdateInfo(result);
-        if (result.update_level === "major") {
-          setMajorDialogOpen(true);
+        if (dismissed !== result.latest_version) {
+          setUpdateDialogOpen(true);
         }
       } catch {
         // 自动更新检查静默失败。
@@ -93,7 +91,7 @@ export function useAutoUpdateNotice() {
   return {
     updateInfo,
     setUpdateInfo,
-    majorDialogOpen,
-    setMajorDialogOpen,
+    updateDialogOpen,
+    setUpdateDialogOpen,
   };
 }

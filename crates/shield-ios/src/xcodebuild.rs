@@ -1,7 +1,7 @@
 use crate::IosProjectConfig;
 use anyhow::{Context, Result};
 use std::ffi::OsString;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -29,6 +29,7 @@ pub(crate) fn resolve_packages(
         cancel,
         "解析 Swift Package 失败",
         Some(&project.with_extension("resolve.log")),
+        |_, _| None,
     )
 }
 
@@ -63,6 +64,7 @@ pub(crate) fn archive(
         cancel,
         "生成 Xcode Archive 失败",
         Some(&archive_path.with_extension("archive.log")),
+        |_, _| None,
     )
 }
 
@@ -86,6 +88,9 @@ pub(crate) fn export_archive(
     if allow_provisioning_updates {
         args.push(OsString::from("-allowProvisioningUpdates"));
     }
+    // -exportPath 必须可写；先建目录，避免某些 Xcode 版本直接判定导出路径无效。
+    fs::create_dir_all(export_path)
+        .with_context(|| format!("创建 IPA 导出目录失败：{}", export_path.display()))?;
     run(
         "xcodebuild",
         &args,
@@ -93,7 +98,54 @@ pub(crate) fn export_archive(
         cancel,
         "导出 IPA 失败",
         Some(&export_path.with_extension("export.log")),
+        |stdout, stderr| export_failure_hint(stdout, stderr, allow_provisioning_updates),
     )
+}
+
+/// 把「No profiles for '...' were found」翻译成可以直接执行的下一步。
+///
+/// 自动签名导出时 Xcode 必须向 Apple 账号换取 App Store 分发描述文件；
+/// 这台机器上通常只有开发描述文件，所以导出失败几乎都落在这一句上。
+pub(crate) fn export_failure_hint(
+    stdout: &[u8],
+    stderr: &[u8],
+    allow_provisioning_updates: bool,
+) -> Option<String> {
+    let bundle_ids = missing_profile_bundle_ids(stdout, stderr);
+    if bundle_ids.is_empty() {
+        return None;
+    }
+    let list = bundle_ids.join("、");
+    Some(if allow_provisioning_updates {
+        format!(
+            "Xcode 仍未能为 {list} 取得分发描述文件。请确认 Xcode 已登录该 Team 的 Apple 账号且账号拥有这些 App ID 的管理权限（应用与其扩展各自需要 App Store 分发描述文件），或改用带 provisioningProfiles 映射的 ExportOptions.plist"
+        )
+    } else {
+        format!(
+            "本机没有 {list} 的 App Store 分发描述文件，而本次未允许 Xcode 更新描述文件，所以导出被取消。请勾选「允许更新 Provisioning Profile」后重试（Xcode 会联网用已登录的开发者账号获取或创建描述文件），或改用带 provisioningProfiles 映射的 ExportOptions.plist"
+        )
+    })
+}
+
+fn missing_profile_bundle_ids(stdout: &[u8], stderr: &[u8]) -> Vec<String> {
+    const MARKER: &str = "No profiles for '";
+    let mut bundle_ids: Vec<String> = Vec::new();
+    for raw in [stdout, stderr] {
+        let text = String::from_utf8_lossy(raw);
+        let mut rest = text.as_ref();
+        while let Some(index) = rest.find(MARKER) {
+            rest = &rest[index + MARKER.len()..];
+            let Some(end) = rest.find('\'') else {
+                break;
+            };
+            let bundle_id = rest[..end].trim();
+            if !bundle_id.is_empty() && !bundle_ids.iter().any(|item| item == bundle_id) {
+                bundle_ids.push(bundle_id.to_string());
+            }
+            rest = &rest[end..];
+        }
+    }
+    bundle_ids
 }
 
 fn project_selector(project: &Path) -> Result<Vec<OsString>> {
@@ -108,14 +160,18 @@ fn project_selector(project: &Path) -> Result<Vec<OsString>> {
     ])
 }
 
-pub(crate) fn run(
+pub(crate) fn run<H>(
     program: &str,
     args: &[OsString],
     developer_dir: Option<&Path>,
     cancel: &Arc<AtomicBool>,
     context: &str,
     failure_log: Option<&Path>,
-) -> Result<()> {
+    failure_hint: H,
+) -> Result<()>
+where
+    H: Fn(&[u8], &[u8]) -> Option<String>,
+{
     if cancel.load(Ordering::SeqCst) {
         anyhow::bail!("iOS 保护任务已取消");
     }
@@ -158,13 +214,16 @@ pub(crate) fn run(
         .context("读取构建 stderr 失败")?;
     if !status.success() {
         let diagnostic = command_diagnostic(&stdout, &stderr);
+        let hint = failure_hint(&stdout, &stderr)
+            .map(|hint| format!("；建议：{hint}"))
+            .unwrap_or_default();
         let log_note = failure_log
             .map(|path| match write_command_log(path, &stdout, &stderr) {
                 Ok(()) => format!("；完整构建日志（仅保存在本机）：{}", path.display()),
                 Err(error) => format!("；保存完整日志失败（{}）：{error}", path.display()),
             })
             .unwrap_or_default();
-        anyhow::bail!("{context}：{diagnostic}{log_note}");
+        anyhow::bail!("{context}：{diagnostic}{hint}{log_note}");
     }
     Ok(())
 }
@@ -261,6 +320,70 @@ mod tests {
         );
     }
 
+    #[test]
+    fn 导出缺少描述文件时列出全部_bundle_id_并指向开关() {
+        let stdout =
+            b"error: exportArchive: No profiles for 'com.mova.rec.Share-Extension' were found\n";
+        let stderr = b"error: exportArchive: No profiles for 'com.mova.rec' were found\n** EXPORT FAILED **\n";
+        let hint = export_failure_hint(stdout, stderr, false).expect("应识别描述文件缺失");
+        assert!(hint.contains("com.mova.rec"));
+        assert!(hint.contains("com.mova.rec.Share-Extension"));
+        assert!(hint.contains("允许更新 Provisioning Profile"));
+        assert!(hint.contains("provisioningProfiles"));
+    }
+
+    #[test]
+    fn 已允许更新描述文件时提示改为检查账号权限() {
+        let stderr = b"error: exportArchive: No profiles for 'com.mova.rec' were found\n";
+        let hint = export_failure_hint(b"", stderr, true).expect("应识别描述文件缺失");
+        assert!(hint.contains("com.mova.rec"));
+        assert!(hint.contains("Apple 账号"));
+        assert!(!hint.contains("允许更新 Provisioning Profile"));
+    }
+
+    #[test]
+    fn 与描述文件无关的导出失败不追加建议() {
+        assert_eq!(
+            export_failure_hint(b"", b"error: exportArchive: Nothing to compile", false),
+            None
+        );
+    }
+
+    #[test]
+    fn 重复的_bundle_id_只提示一次() {
+        let log = b"error: exportArchive: No profiles for 'com.a' were found\nerror: exportArchive: No profiles for 'com.a' were found\n";
+        let hint = export_failure_hint(log, b"", false).expect("应识别描述文件缺失");
+        assert_eq!(hint.matches("com.a").count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 失败提示会附加在命令错误之后() {
+        let temp = tempfile::tempdir().unwrap();
+        let log = temp.path().join("export.export.log");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let args = [
+            "-c",
+            "printf \"error: exportArchive: No profiles for 'com.demo' were found\\n\"; exit 1",
+        ]
+        .map(OsString::from);
+        let error = run(
+            "/bin/sh",
+            &args,
+            None,
+            &cancel,
+            "导出 IPA 失败",
+            Some(&log),
+            |stdout, stderr| export_failure_hint(stdout, stderr, false),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("导出 IPA 失败"));
+        assert!(error.contains("com.demo"));
+        assert!(error.contains("建议"));
+        assert!(error.contains(log.to_str().unwrap()));
+    }
+
     #[cfg(unix)]
     #[test]
     fn 命令失败保留完整双流日志且不覆盖已有文件() {
@@ -268,9 +391,17 @@ mod tests {
         let log = temp.path().join("archive.log");
         let cancel = Arc::new(AtomicBool::new(false));
         let args = ["-c", "printf '构建开头\\nfatal error: 缺少头文件\\n构建结尾\\n'; printf 'warning: 次要警告\\n' >&2; exit 1"].map(OsString::from);
-        let error = run("/bin/sh", &args, None, &cancel, "归档失败", Some(&log))
-            .unwrap_err()
-            .to_string();
+        let error = run(
+            "/bin/sh",
+            &args,
+            None,
+            &cancel,
+            "归档失败",
+            Some(&log),
+            |_, _| None,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("fatal error: 缺少头文件"));
         assert!(error.contains(log.to_str().unwrap()));
         let content = std::fs::read_to_string(&log).unwrap();
@@ -281,9 +412,17 @@ mod tests {
             std::fs::metadata(&log).unwrap().permissions().mode() & 0o777,
             0o600
         );
-        let error = run("/bin/sh", &args, None, &cancel, "归档失败", Some(&log))
-            .unwrap_err()
-            .to_string();
+        let error = run(
+            "/bin/sh",
+            &args,
+            None,
+            &cancel,
+            "归档失败",
+            Some(&log),
+            |_, _| None,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("保存完整日志失败"));
         assert_eq!(std::fs::read_to_string(&log).unwrap(), content);
     }

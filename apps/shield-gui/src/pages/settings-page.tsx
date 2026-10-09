@@ -10,14 +10,13 @@ export function SettingsPage({
   themeMode,
   setThemeMode,
   telemetryEnabled,
-  setTelemetryEnabled,
 }: {
   locale: Locale;
   setLocale: (locale: Locale) => void;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
+  /** 设置页不再展示匿名统计开关，但仍需原样回写，避免保存外观时把它重置。 */
   telemetryEnabled: boolean;
-  setTelemetryEnabled: (enabled: boolean) => void;
 }) {
   const [selectedLocale, setSelectedLocale] = useState<Locale>(locale);
   const [selectedThemeMode, setSelectedThemeMode] = useState<ThemeMode>(themeMode);
@@ -40,18 +39,17 @@ export function SettingsPage({
     }
   }, []);
 
-  async function persist(nextLocale: Locale, nextThemeMode: ThemeMode, nextTelemetry = telemetryEnabled) {
+  async function persist(nextLocale: Locale, nextThemeMode: ThemeMode) {
     setSaving(true);
     setError("");
     try {
       await api.saveAppConfig({
         locale: nextLocale,
         theme_mode: nextThemeMode,
-        telemetry_enabled: nextTelemetry,
+        telemetry_enabled: telemetryEnabled,
       });
       setLocale(nextLocale);
       setThemeMode(nextThemeMode);
-      setTelemetryEnabled(nextTelemetry);
       setStatus("saved");
       if (timerRef.current) {
         window.clearTimeout(timerRef.current);
@@ -109,23 +107,6 @@ export function SettingsPage({
               />
             </div>
           </SettingsFieldRow>
-        </SettingsGroup>
-        <SettingsGroup title="匿名使用统计">
-          <div className="space-y-3 px-6 py-5">
-            <label className="flex items-center justify-between gap-4 text-[14px] font-semibold text-foreground">
-              <span className="min-w-0">允许匿名使用统计</span>
-              <input type="checkbox" className="h-4 w-4 shrink-0" aria-describedby="telemetry-description" checked={telemetryEnabled} disabled={saving} onChange={(event) => void persist(selectedLocale, selectedThemeMode, event.target.checked)} />
-            </label>
-            <div id="telemetry-description" className="space-y-2 text-sm leading-6 text-muted-foreground">
-              <p>匿名统计仅统计桌面工具的启动、加固、签名次数及失败阶段、类别，此通道不上传 APK、路径、包名、证书、密码或原始日志。</p>
-              <p>错误报告需每次单独确认，不受此开关控制。</p>
-            </div>
-          </div>
-        </SettingsGroup>
-        <SettingsGroup title={t(selectedLocale, "applicationSharingTitle")}>
-          <div className="px-6 py-5 text-sm leading-6 text-muted-foreground">
-            <p>{t(selectedLocale, "applicationSharingNotice")}</p>
-          </div>
         </SettingsGroup>
         {status === "saved" && (
           <StatusMessage kind="success">

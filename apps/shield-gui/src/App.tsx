@@ -45,12 +45,11 @@ export function App() {
     setThemeMode,
     configLoaded,
     telemetryEnabled,
-    setTelemetryEnabled,
     protectDefaults,
     setProtectDefaults,
   } = useAppConfigState();
   const certificatesState = useCertificatesState();
-  const { updateInfo, setUpdateInfo, majorDialogOpen, setMajorDialogOpen } = useAutoUpdateNotice();
+  const { updateInfo, setUpdateInfo, updateDialogOpen, setUpdateDialogOpen } = useAutoUpdateNotice();
   const { buildInfo, runtimeInfoLoaded, runtimeInfoRefreshing, refreshRuntimeInfo } = useRuntimeInfo();
   const [runningTasks, setRunningTasks] = useState<Partial<Record<TaskKind, boolean>>>({});
 
@@ -73,11 +72,30 @@ export function App() {
     { key: "about" as const, icon: Info, label: t(locale, "navAbout") },
   ];
 
-  async function dismissUpdate(version?: string) {
+  // 关闭更新弹窗即视为已知晓该版本：记录后不再自动弹窗，顶部横幅继续提醒。
+  async function closeUpdateDialog() {
+    const version = updateInfo?.latest_version;
+    if (version) {
+      await api.dismissUpdate(version).catch(() => undefined);
+    }
+    setUpdateDialogOpen(false);
+  }
+
+  // 顶部横幅的「忽略」表示该版本彻底不再提示。
+  async function dismissUpdateBanner() {
+    const version = updateInfo?.latest_version;
     if (version) {
       await api.dismissUpdate(version).catch(() => undefined);
     }
     setUpdateInfo(null);
+  }
+
+  // 关于页手动检查更新后同样直接弹窗，避免只出现一条容易被忽略的横幅。
+  function showUpdateResult(result: Awaited<ReturnType<typeof api.checkUpdate>> | null) {
+    setUpdateInfo(result);
+    if (result?.has_update) {
+      setUpdateDialogOpen(true);
+    }
   }
 
   return (
@@ -123,12 +141,14 @@ export function App() {
         </Sidebar>
 
         <SidebarInset className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <UpdateBanner
-            locale={locale}
-            updateInfo={updateInfo}
-            onDismiss={() => void dismissUpdate(updateInfo?.latest_version ?? undefined)}
-            onUpdate={() => setMajorDialogOpen(true)}
-          />
+          {!updateDialogOpen && (
+            <UpdateBanner
+              locale={locale}
+              updateInfo={updateInfo}
+              onDismiss={() => void dismissUpdateBanner()}
+              onUpdate={() => setUpdateDialogOpen(true)}
+            />
+          )}
           <div className="scrollbar-none min-h-0 flex-1 overflow-auto">
             <div className={page === "protect" ? undefined : "hidden"} aria-hidden={page !== "protect"}>
               <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-3 px-6 pt-6 sm:px-8 lg:px-10">
@@ -220,14 +240,12 @@ export function App() {
                 themeMode={themeMode}
                 setThemeMode={setThemeMode}
                 telemetryEnabled={telemetryEnabled}
-                setTelemetryEnabled={setTelemetryEnabled}
               />
             )}
             {page === "about" && (
               <AboutPage
                 locale={locale}
-                setUpdateInfo={setUpdateInfo}
-                buildInfo={buildInfo}
+                setUpdateInfo={showUpdateResult}
                 runtimeInfoRefreshing={runtimeInfoRefreshing}
                 onRefreshRuntimeInfo={() => void refreshRuntimeInfo()}
               />
@@ -237,10 +255,10 @@ export function App() {
 
         <UpdateDialog
           locale={locale}
-          open={majorDialogOpen}
+          open={updateDialogOpen}
           updateInfo={updateInfo}
           taskRunning={Boolean(runningTasks.protect || runningTasks.ios_protect || runningTasks.sign)}
-          onClose={() => setMajorDialogOpen(false)}
+          onClose={() => void closeUpdateDialog()}
         />
         <ErrorReportDialog telemetryEnabled={telemetryEnabled} />
         <Toaster
