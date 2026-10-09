@@ -46,14 +46,17 @@ body:
     attributes:
       label: 问题模块
       options:
-        - 加固
-        - iOS 加固
+        - 加固（Android）
+        - 加固（iOS）
+        - 运行期兼容性（Android）
+        - 运行期兼容性（iOS）
         - 签名
         - 证书管理
         - Java 环境检测
         - 更新检查
         - 界面交互
         - 构建 / CI
+        - 文档与诊断
         - 其他
     validations:
       required: true

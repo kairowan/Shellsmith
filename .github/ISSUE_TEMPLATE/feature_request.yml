@@ -10,6 +10,8 @@ body:
       value: |
         感谢建议。提交前请先搜索已有 issue；如果已有相同需求，请使用 👍 表情表示支持，并补充你的使用场景。
 
+        也可以直接在软件内提交：**设置 → 问题反馈**，选择“需求建议”后确认预览即可创建本模板对应的 issue。
+
         请不要上传 APK、keystore、证书密码、签名密码、业务代码或其他敏感材料。安全问题请使用 GitHub Security Advisories 私下反馈。
 
   - type: dropdown
@@ -17,14 +19,19 @@ body:
     attributes:
       label: 功能分类
       options:
-        - APK 加固能力
-        - Android 运行期兼容性
-        - 签名与证书管理
-        - GUI 使用体验
-        - CLI 与自动化
-        - 构建与发布
+        - 加固（Android）
+        - 加固（iOS）
+        - 运行期兼容性（Android）
+        - 运行期兼容性（iOS）
+        - 签名
+        - 证书管理
+        - Java 环境检测
+        - 更新检查
+        - 界面交互
+        - 构建 / CI
         - 文档与诊断
         - 其他
+        - CLI 与自动化
     validations:
       required: true
 
@@ -74,6 +81,7 @@ body:
         - label: macOS
         - label: Linux
         - label: Android 运行期
+        - label: iOS 运行期
         - label: 与平台无关
 
   - type: textarea
