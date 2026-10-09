@@ -171,6 +171,69 @@ export type UpdateProgress = {
   total: number | null;
 };
 
+export type FeedbackKind = "bug" | "feature";
+
+export type FeedbackModule =
+  | "android"
+  | "ios"
+  | "sign"
+  | "certificates"
+  | "java"
+  | "update"
+  | "gui"
+  | "build"
+  | "docs"
+  | "other";
+
+export type FeedbackImpact = "blocking" | "slower" | "nice_to_have";
+
+export type FeedbackPlatform =
+  | "windows"
+  | "macos"
+  | "linux"
+  | "android_runtime"
+  | "ios"
+  | "agnostic";
+
+export type FeedbackRequest = {
+  kind: FeedbackKind;
+  module: FeedbackModule;
+  title: string;
+  /** bug 为复现步骤，feature 为使用场景。 */
+  primary: string;
+  /** bug 为期望结果，feature 为期望方案。 */
+  expected: string;
+  /** bug 为实际结果，feature 为当前问题。 */
+  observed: string;
+  impact: FeedbackImpact | null;
+  platforms: FeedbackPlatform[];
+  alternatives: string;
+  extra: string;
+  logs: string;
+  includeEnvironment: boolean;
+};
+
+export type FeedbackPayload = {
+  schema_version: number;
+  kind: FeedbackKind;
+  title: string;
+  body: string;
+  app_version: string;
+};
+
+export type FeedbackDraft = {
+  issue_title: string;
+  body: string;
+  payload: FeedbackPayload;
+  fallback_url: string;
+  fallback_truncated: boolean;
+};
+
+export type FeedbackReceipt = {
+  number: number;
+  url: string;
+};
+
 export type AppInfo = {
   version: string;
   git_hash: string;
@@ -415,6 +478,8 @@ export const api = {
   getAppInfo: () => invoke<AppInfo>("get_app_info"),
   getBuildInfo: () => invoke<BuildInfo>("get_build_info"),
   getDiagnosticInfo: () => invoke<string>("get_diagnostic_info"),
+  prepareFeedback: (request: FeedbackRequest) => invoke<FeedbackDraft>("prepare_feedback", { request }),
+  submitFeedback: (payload: FeedbackPayload) => invoke<FeedbackReceipt>("submit_feedback", { payload }),
 };
 
 export async function openFileDialog(

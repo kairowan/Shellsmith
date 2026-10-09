@@ -16,7 +16,7 @@ keytool -help
 - `java -version` 显示 8 或更高版本
 - `keytool -help` 可以正常输出帮助
 
-如果 GUI 关于页提示缺少 `keytool`，通常说明当前 PATH 指向的是不完整运行时，或系统里安装了多个 Java 版本。
+如果加固或签名页提示缺少 `keytool`，通常说明当前 PATH 指向的是不完整运行时，或系统里安装了多个 Java 版本。
 
 ## APK 签名检查
 
@@ -160,4 +160,4 @@ bash scripts/check-release-ready.sh
 
 ## 反馈问题
 
-如果仍无法定位问题，请阅读 [支持与问题反馈](../process/support.md)，并在 GUI 关于页点击“复制诊断信息”后粘贴到对应 issue 模板中。
+如果仍无法定位问题，请阅读 [支持与问题反馈](../process/support.md)，并在 GUI 的 **设置 → 问题反馈** 中提交：Bug 反馈的诊断信息会自动附带，无需手动复制。

@@ -11,6 +11,7 @@ mod cert_service;
 mod cert_store;
 mod error_report;
 mod failure_diagnostic;
+mod feedback;
 mod file_ops;
 mod ios_runner;
 mod manifest_inspect;
@@ -594,6 +595,8 @@ fn main() {
             get_app_info,
             get_build_info,
             get_diagnostic_info,
+            feedback::prepare_feedback,
+            feedback::submit_feedback,
             get_latest_task
         ])
         .build(tauri::generate_context!())

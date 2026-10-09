@@ -83,7 +83,7 @@ body:
     id: diagnostic
     attributes:
       label: 诊断信息
-      description: 请在关于页点击“复制诊断信息”，然后粘贴到这里。
+      description: 如果通过软件内问题反馈（设置 → 问题反馈）提交，诊断信息会自动附加；手动提交 issue 时请自行填写版本、操作系统与 Java 状态。
       render: text
     validations:
       required: false

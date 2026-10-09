@@ -113,17 +113,18 @@ The iOS pipeline edits only a working copy, resolves exact upstream Swift Packag
 
 ## Privacy
 
-APKs, certificates, keystores, and signing passwords are processed locally and not uploaded. The desktop tool has three independent data channels:
+APKs, certificates, keystores, and signing passwords are processed locally and not uploaded. The desktop tool has the following independent data channels:
 
 The iOS balanced and strict profiles integrate freeRASP directly into the target app. Its `watcherMail`, security events, and network behavior are governed by Talsec's terms and privacy policy and require app-owner disclosure before release. Shellsmith does not host the freeRASP binary.
 
 | Channel | Data and controls |
 |---|---|
-| Anonymous usage statistics | Enabled by default; random installation identifier, tool version, launch/task counts, and fixed failure categories. Can be disabled in Settings; no package names or raw logs |
-| Safe error reports | Preview and confirm each report; no raw logs, APKs, paths, package names, certificates, or passwords. Independent of the statistics switch |
+| Safe error reports | Preview and confirm each report; no raw logs, APKs, paths, package names, certificates, or passwords. Independent of the other channels |
 | Per-app usage sharing | Controlled on protection/signing pages, selected by default for new package names. Opt-outs persist across pages and restarts. Successful operations send app name, package name, version code, tool version, operation, flow, success date, and protocol/deduplication metadata; no device identifier |
 
-App sharing is independent of anonymous statistics. Reports are maintainer-only and retained for 180 days. Opting out stops future sharing for that package but does not delete received records. **These reporting features are not injected into protected APKs.** See [data and privacy documentation](docs/ops/telemetry.md) for scope, retention, and deletion details.
+App sharing is maintainer-only and retained for 180 days. Opting out stops future sharing for that package but does not delete received records. **These reporting features are not injected into protected APKs.** See [data and privacy documentation](docs/ops/telemetry.md) for scope, retention, and deletion details.
+
+In-app problem feedback never reports automatically: the feedback text (for bug reports, together with the automatically attached version, OS, Java, and tool-status diagnostics) is sent to a public GitHub issue only after the user fills in the form, previews it, and confirms sending; if the service is unavailable, the app offers to open a prefilled issue page in the browser instead.
 
 ## Documentation and Development
 
@@ -140,9 +141,54 @@ Detailed guides are currently primarily in Chinese. The CLI is source-built; Rel
 
 ## Feedback and Community
 
-- Read the [support guide](docs/process/support.md), then open a [GitHub issue](https://github.com/kairowan/Shellsmith/issues). Copy diagnostics from **About**.
-- Use the [feature request form](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml), or upvote an existing matching request.
+- Read the [support guide](docs/process/support.md), then open a [GitHub issue](https://github.com/kairowan/Shellsmith/issues); you can also submit directly from the **Problem feedback** section on the Settings page, where diagnostics are attached automatically for bug reports and can be previewed before sending.
+- For feature requests, choose **Feature request** in the **Problem feedback** section on the Settings page, or use the [feature request form](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml); upvote an existing matching request instead of filing a duplicate.
 - Report vulnerabilities privately following [SECURITY.md](SECURITY.md). Do not publish exploits, business APKs, certificates, or passwords.
+
+## Acknowledgements
+
+Shellsmith builds on a large amount of open-source work. Listed below are the main projects that shape the tool's capabilities, ship inside release artifacts, or form the build chain. These tools are invoked locally for hardening and signing; their sources are not modified. Exact versions and the full transitive dependency list can be reproduced from `Cargo.lock`, `apps/shield-gui/package-lock.json`, and `shield-stub/gradle/libs.versions.toml`.
+
+### Desktop framework and interface
+
+| Project | License | Use |
+|---|---|---|
+| [Tauri](https://tauri.app/) · [tauri-plugin-updater](https://github.com/tauri-apps/plugins-workspace) · [tauri-plugin-dialog](https://github.com/tauri-apps/plugins-workspace) | Apache-2.0 OR MIT | Desktop framework, in-app updates with signature verification, file pickers |
+| [React](https://react.dev/) · [Vite](https://vitejs.dev/) · [Tailwind CSS](https://tailwindcss.com/) | MIT | View layer and frontend build |
+| [TypeScript](https://www.typescriptlang.org/) | Apache-2.0 | Frontend type system |
+| [shadcn/ui](https://ui.shadcn.com/) · [Radix UI](https://www.radix-ui.com/) | MIT | Components and accessible interaction |
+| [Lucide](https://lucide.dev/) · [Sonner](https://sonner.emilkowal.ski/) | ISC / MIT | Icons and toasts |
+| [react-markdown](https://github.com/remarkjs/react-markdown) · [remark-gfm](https://github.com/remarkjs/remark-gfm) | MIT | Safe rendering of release notes |
+
+### Rust libraries
+
+| Project | License | Use |
+|---|---|---|
+| [RustCrypto](https://github.com/RustCrypto): `chacha20poly1305`, `hkdf`, `sha2`, `sha1` | Apache-2.0 OR MIT | DEX encryption, key derivation, certificate fingerprints |
+| [zstd](https://github.com/gyscos/zstd-rs) | MIT | Compressing hardened artifacts |
+| [zip](https://github.com/zip-rs/zip2) | MIT | Packing and parsing APK, AAB, and IPA files |
+| [serde](https://serde.rs/) · [clap](https://github.com/clap-rs/clap) · [semver](https://github.com/dtolnay/semver) · [toml](https://github.com/toml-rs/toml) · [uuid](https://github.com/uuid-rs/uuid) | MIT OR Apache-2.0 | Serialization, CLI, version comparison, task identifiers |
+| [tokio](https://tokio.rs/) · [reqwest](https://github.com/seanmonstar/reqwest) | MIT / MIT OR Apache-2.0 | Async runtime and upstream SDK downloads |
+| [rusqlite](https://github.com/rusqlite/rusqlite) | MIT | Local certificate database |
+| [anyhow](https://github.com/dtolnay/anyhow) · [thiserror](https://github.com/dtolnay/thiserror) · [log](https://github.com/rust-lang/log) · [tempfile](https://github.com/Stebalien/tempfile) · [directories](https://github.com/dirs-dev/directories-rs) · [dunce](https://gitlab.com/kornelski/dunce) · [which](https://github.com/harryfei/which-rs) · [walkdir](https://github.com/BurntSushi/walkdir) · [rand](https://github.com/rust-random/rand) | MIT OR Apache-2.0 and others | Errors, logging, paths, file handling |
+| [colored](https://github.com/colored-rs/colored) | MPL-2.0 | Colored CLI output |
+| [jni](https://github.com/jni-rs/jni-rs) · [cc](https://github.com/rust-lang/cc-rs) | MIT OR Apache-2.0 | JNI bindings and native compilation for the Android stub |
+
+### Hardening, signing, and runtime components
+
+| Project | License | Use |
+|---|---|---|
+| [Apktool](https://apktool.org/) 3.0.1 | Apache-2.0 | APK decoding and rebuilding; redistributed with releases |
+| [apksigner](https://developer.android.com/tools/apksigner) (Android SDK Build-Tools) | Apache-2.0 | APK signing and signature verification; redistributed with releases |
+| [bundletool](https://github.com/google/bundletool) · [aapt2](https://developer.android.com/tools) | Apache-2.0 | AAB module handling and resource compilation |
+| [XopProtector](https://github.com/xopJack/XopProtector) | Apache-2.0 | PVM2 and True-VMP code protection; license and notices in `tools/licenses/` |
+| [freeRASP](https://github.com/talsec/Free-RASP-iOS) 7.1.4 | MIT, subject to Talsec's fair usage policy | iOS runtime threat detection; resolved on the user's machine, no binary redistribution |
+| [Swift Confidential](https://github.com/securevale/swift-confidential) 0.5.2 | Apache-2.0 | Swift sensitive literal protection (optional) |
+
+The build chain additionally uses [Tauri CLI](https://github.com/tauri-apps/tauri), [cargo-ndk](https://github.com/bbqsrc/cargo-ndk), [Android Gradle Plugin](https://developer.android.com/build), [Android NDK](https://developer.android.com/ndk), [JUnit 4](https://junit.org/junit4/), [AndroidX Test](https://developer.android.com/training/testing), [ESLint](https://eslint.org/), [PostCSS](https://postcss.org/), and [Autoprefixer](https://github.com/postcss/autoprefixer).
+
+If a credit is wrong, a license is mislabeled, or a project is missing, please open an issue or pull request and we will correct it.
+
 ## License
 
 Dual-licensed under **MIT OR Apache-2.0**, at your choice: [MIT](LICENSE-MIT) · [Apache-2.0](LICENSE-APACHE).

@@ -289,7 +289,7 @@ Release Notes 末尾同时保留 GitHub 生成的 `Full Changelog` 比较链接�
 - 安装包内包含 `apktool.jar`、`apksigner.jar`、`resources.zip`
 - 安装包内不包含测试 APK、测试证书、`shield.db`、`config.toml`、`.env` 或本地缓存
 - README、使用文档、Release Notes 已说明 Java/PVM2 版本、证书管理、密码加密、16 KB 对齐，以及 macOS adhoc 与 Developer ID 公证模式的区别
-- 支持与问题反馈文档、issue 模板和关于页诊断信息入口保持一致
+- 支持与问题反馈文档、issue 模板和设置页问题反馈入口保持一致
 - 下载 Release 产物后至少完成一次证书导入/创建、设为默认、签名、加固、自动签名回归
 - 解压内置 `resources.zip` 与 `resources-api19.zip`，确认只包含预期 DEX、元数据和 Native 库，不包含 `.DS_Store`、测试文件或其他本机临时产物
 
