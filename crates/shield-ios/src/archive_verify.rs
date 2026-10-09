@@ -353,7 +353,9 @@ pub(crate) fn find_single_ipa(export_directory: &Path) -> Result<PathBuf> {
     }
     let ipa = match ipa_files.as_slice() {
         [ipa] => ipa.clone(),
-        [] => anyhow::bail!("xcodebuild 导出成功但没有生成 IPA"),
+        [] => anyhow::bail!(
+            "xcodebuild 导出成功但没有生成 IPA：请确认 ExportOptions.plist 的 destination 为 export；为 upload 时 Xcode 只会直接上传，不写本地 IPA"
+        ),
         _ => anyhow::bail!("导出目录包含多个 IPA，无法确定主产物"),
     };
     validate_ipa_structure(&ipa)?;

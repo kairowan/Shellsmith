@@ -117,7 +117,7 @@ iOS 完整构建要求 macOS、完整 Xcode、可用的 Apple Team 和 Provision
 3. 点击“检查工程”。存在非应用 target、共享 scheme 缺失、完整 Xcode 缺失或上游已知错误接法时，构建按钮保持禁用。
 4. `confidential.yml` 和 freeRASP `watcherMail` 都是可选项。提供 `confidential.yml` 时，只保护明确列入配置的 Swift 字面量；未提供时仍启用 freeRASP，只跳过项目自定义敏感字面量保护。本地化键、selector、反射名称和资源名不要加入。
 5. `strict` 的 App Attest 服务端地址可选。不填写时仍执行严格客户端加固；填写后，客户端只生成调用接口，业务服务端仍须实现挑战、证明校验和重放防护。
-6. 选择独立的空输出目录和导出方式。只有允许 Xcode 使用本机开发者账号更新描述文件时，才开启“允许更新 Provisioning”。
+6. 选择独立的空输出目录和导出方式。默认已开启“允许更新 Provisioning Profile”：导出 `app-store-connect`、`enterprise` 需要 App Store 分发描述文件，而它通常不在本机，必须允许 Xcode 联网用已登录的开发者账号获取或创建。关闭该选项后，只有本机已装齐全部 Bundle ID（含 Share Extension 等扩展）的分发描述文件时才能导出成功。已自带 `ExportOptions.plist`（`signingStyle=manual` 加 `provisioningProfiles` 映射）时可以改用文件导入，此时该选项不影响导出。自动生成的导出配置固定为生成本地 IPA（`destination=export`），不会直接上传。
 7. 完成后在输出目录检查工作副本、`.xcarchive`、IPA 和 `shellsmith-report.json`，再用目标设备验证启动、敏感流程和威胁响应。
 
 标准纯 Objective-C UIKit 工程可通过 `AppDelegate.m` 中已有的 `application:didFinishLaunchingWithOptions:` 回调接入 balanced/strict 运行时保护；若发现多个启动回调，在“iOS 启动入口”中明确填写目标 `.m` 路径。Shellsmith 会在工作副本该回调的开头启动保护，保持 `main.m` 和原有回调逻辑不变。Swift Confidential 不处理 OC 字符串，纯 OC 工程请勿提供 `confidential.yml`；无该回调的自定义启动方式暂不支持自动注入。

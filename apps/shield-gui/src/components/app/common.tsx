@@ -376,11 +376,10 @@ export function UpdateBanner({
           <AppButton size="sm" variant="ghost" onClick={onUpdate}>
             {t(locale, "viewUpdate")}
           </AppButton>
-          {updateInfo.update_level !== "major" && (
-            <button className="icon-button" type="button" aria-label={t(locale, "ignore")} onClick={onDismiss}>
-              <X className="h-4 w-4" />
-            </button>
-          )}
+          {/* 所有更新级别一致：弹窗提示新版本，横幅保留为可随时收起的常驻提醒。 */}
+          <button className="icon-button" type="button" aria-label={t(locale, "ignore")} onClick={onDismiss}>
+            <X className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </div>

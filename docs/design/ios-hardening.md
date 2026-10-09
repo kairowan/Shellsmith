@@ -48,6 +48,14 @@ Xcode 命令失败时，摘要优先显示 stdout/stderr 中真正的 `error:`�
 
 `ScanDependencies ... Prefix.pch` 只说明预编译头的依赖扫描失败，需要查看其附近具体的 `fatal error`（例如头文件或模块不存在）。资源重名、重复 storyboard 以及业务源码自行发出的 `#warning` 不等于这次构建失败的根因，不能通过隐藏这些警告来认定修复成功。
 
+### 导出 IPA 与描述文件
+
+未提供 `ExportOptions.plist` 时，Shellsmith 在输出根目录生成一份自动签名配置：`method` 取用户选择的导出方式、`destination=export`、`signingStyle=automatic`、`teamID` 取工程 Team、`stripSwiftSymbols` 与 `uploadSymbols` 为真、`manageAppVersionAndBuildNumber` 为假。`destination` 固定为 `export`，因此加固流程始终拿到可校验的本地 IPA；用户自带的 plist 若写成 `destination=upload`，会在开始构建前直接报错，而不是等到找不到 IPA。
+
+`app-store-connect`、`enterprise` 需要 App Store 分发描述文件，而本机通常只装了开发描述文件，所以 Archive 能通过、导出会失败。这类失败只有一条出路：让 Xcode 联网用已登录的开发者账号获取或创建描述文件（导出与归档追加 `-allowProvisioningUpdates`，GUI 对应“允许更新 Provisioning Profile”选项，默认开启），或者由用户提供 `signingStyle=manual` 加 `provisioningProfiles` 映射的 `ExportOptions.plist`。Shellsmith 不代替用户登录 Apple 账号，也不保存账号令牌。
+
+主二进制与其扩展（Share Extension、Watch App、Widget 等）各自需要 App Store 分发描述文件。`xcodebuild` 报出的 `error: exportArchive: No profiles for '<bundle id>' were found` 会被解析成具体 Bundle ID 列表，并在错误信息后追加可执行建议：未允许更新描述文件时提示开启该选项，已允许时提示检查账号对这些 App ID 的管理权限。详细输出仍保存在输出根目录的 `export.export.log`。
+
 ## 配置
 
 从 [示例配置](../../examples/shellsmith-ios.toml) 开始；只有需要保护项目自定义敏感字面量时才创建 [敏感字符串配置](../../examples/confidential.yml)。配置不得保存证书私钥、钥匙串密码或 Apple 账号令牌。

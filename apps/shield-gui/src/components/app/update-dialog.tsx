@@ -5,6 +5,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AppButton } from "@/components/app/common";
 import { t, type Locale } from "@/lib/i18n";
+import { installBlockedKey } from "@/lib/update-install";
 import { api, type UpdateCheckResult, type UpdateProgress } from "@/lib/tauri";
 
 // 下载进度更新时无需重复解析同一份更新说明。
@@ -43,6 +44,7 @@ export function UpdateDialog({ locale, open, updateInfo, taskRunning, onClose }:
   const busy = progress !== null;
   if (!updateInfo?.latest_version) return null;
   const version = updateInfo.latest_version;
+  const manualDownloadUrl = updateInfo.manual_download_url || updateInfo.release_url || null;
 
   function close() {
     if (installing.current) return;
@@ -83,7 +85,7 @@ export function UpdateDialog({ locale, open, updateInfo, taskRunning, onClose }:
         <Dialog.Title className="flex items-center gap-2 text-lg font-semibold"><Download className="h-5 w-5" />{t(locale, "updateAvailable")} v{version}</Dialog.Title>
         <Dialog.Description className="mt-3 text-sm leading-6 text-muted-foreground">{t(locale, "updateInstallHint")}</Dialog.Description>
         {updateInfo.notes && <UpdateReleaseNotes notes={updateInfo.notes} onError={setError} />}
-        {!updateInfo.can_install && <p className="my-3 text-sm text-muted-foreground">{t(locale, "updateManualHint")}</p>}
+        {!updateInfo.can_install && <p role="status" className="my-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm leading-6 text-muted-foreground">{t(locale, installBlockedKey(updateInfo.install_blocked_reason))}</p>}
         {taskRunning && <p role="status" className="my-3 text-sm text-amber-600">{t(locale, "updateTaskBusy")}</p>}
         {progress && <div className="my-4 space-y-2">
           <p role="status" className="flex items-center gap-2 text-sm"><LoaderCircle className="h-4 w-4 animate-spin" />{phaseLabel}</p>
@@ -97,6 +99,7 @@ export function UpdateDialog({ locale, open, updateInfo, taskRunning, onClose }:
           <AppButton variant="secondary" disabled={busy} onClick={close}>{t(locale, "ignore")}</AppButton>
           {updateInfo.release_url && <AppButton variant="secondary" disabled={busy} onClick={() => void api.openUrl(updateInfo.release_url!)}>{t(locale, "viewRelease")}</AppButton>}
           {updateInfo.can_install && <AppButton disabled={busy || taskRunning} onClick={() => void install()}>{t(locale, "installUpdate")}</AppButton>}
+          {!updateInfo.can_install && manualDownloadUrl && <AppButton disabled={busy} onClick={() => void api.openUrl(manualDownloadUrl).catch((failure) => setError(String(failure)))}>{t(locale, "downloadInstaller")}</AppButton>}
         </div>
       </Dialog.Content>
     </Dialog.Portal>

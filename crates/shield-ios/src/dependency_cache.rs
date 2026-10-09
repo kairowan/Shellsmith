@@ -109,7 +109,7 @@ pub fn prepare_ios_sdk(
         args.push(staging.path().as_os_str().to_owned());
         args.push(url.into());
         xcodebuild::run("/usr/bin/curl", &args, None, cancel,
-            "下载 freeRASP 失败；可在能访问 GitHub 的电脑下载官方 v7.1.4 源码 ZIP，再用“导入官方 ZIP”准备本机缓存", None)?;
+            "下载 freeRASP 失败；可在能访问 GitHub 的电脑下载官方 v7.1.4 源码 ZIP，再用“导入官方 ZIP”准备本机缓存", None, |_, _| None)?;
     }
     read_sdk(staging.path(), &files(), None, cancel)
         .context("freeRASP ZIP 校验失败：需要完整且未修改的官方 v7.1.4 源码 ZIP")?;

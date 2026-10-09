@@ -31,7 +31,8 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
   const [appAttestEndpoint, setAppAttestEndpoint] = useState("");
   const [exportOptions, setExportOptions] = useState("");
   const [exportMethod, setExportMethod] = useState("development");
-  const [allowProvisioningUpdates, setAllowProvisioningUpdates] = useState(false);
+  // 分发描述文件一般不在本机，导出 app-store-connect 必须让 Xcode 联网换取；默认开启避免导出必然失败。
+  const [allowProvisioningUpdates, setAllowProvisioningUpdates] = useState(true);
   const [inspection, setInspection] = useState<IosProjectInspection | null>(null);
   const [report, setReport] = useState<IosProtectionReport | null>(null);
   const [checking, setChecking] = useState(false);
@@ -239,6 +240,9 @@ export function IosProtectPage({ active, locale }: { active: boolean; locale: Lo
                 <input type="checkbox" className="mt-0.5 h-4 w-4 accent-primary" checked={allowProvisioningUpdates} disabled={running} onChange={(event) => setAllowProvisioningUpdates(event.target.checked)} />
                 <span><b>{t(locale, "iosAllowProvisioning")}</b><span className="mt-1 block text-xs leading-5 text-muted-foreground">{t(locale, "iosAllowProvisioningHint")}</span></span>
               </label>
+              {!allowProvisioningUpdates && !exportOptions && (
+                <p className="mt-3 text-xs leading-5 text-warning">{t(locale, "iosAllowProvisioningRequired")}</p>
+              )}
             </Panel>
             <Panel title={t(locale, "saveLocation")}>
               <PathChooser value={output} placeholder={t(locale, "directoryNotSelected")} button={t(locale, "chooseDirectory")} disabled={running} onChoose={async () => { const value = await openDirectoryDialog(output || undefined); if (value) setOutput(value); }} />

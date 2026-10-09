@@ -146,6 +146,14 @@ export type CertCompareResult = {
   error?: string | null;
 };
 
+export type UpdateBlockReason =
+  | "debug_build"
+  | "mounted_volume"
+  | "app_translocation"
+  | "not_app_bundle"
+  | "linux_package"
+  | string;
+
 export type UpdateCheckResult = {
   has_update: boolean;
   latest_version?: string | null;
@@ -153,6 +161,8 @@ export type UpdateCheckResult = {
   update_level?: "patch" | "minor" | "major" | string | null;
   notes?: string | null;
   can_install: boolean;
+  install_blocked_reason?: UpdateBlockReason | null;
+  manual_download_url?: string | null;
 };
 
 export type UpdateProgress = {

@@ -12,6 +12,47 @@ pub(crate) struct UpdateCheckResult {
     pub update_level: Option<String>,
     pub notes: Option<String>,
     pub can_install: bool,
+    /// 无法覆盖安装时的可解释原因；能安装时为 None。
+    pub install_blocked_reason: Option<InstallBlockReason>,
+    /// 无法覆盖安装时当前平台的直连安装包，避免用户只能在 Release 页面里逐个找。
+    pub manual_download_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum InstallBlockReason {
+    DebugBuild,
+    MountedVolume,
+    AppTranslocation,
+    NotAppBundle,
+    LinuxPackage,
+}
+
+impl InstallBlockReason {
+    fn message(self) -> &'static str {
+        match self {
+            Self::DebugBuild => "开发模式仅检查版本，不执行覆盖安装",
+            Self::MountedVolume => {
+                "应用正从磁盘映像（DMG）中直接运行，磁盘映像是只读的，无法覆盖安装"
+            }
+            Self::AppTranslocation => {
+                "应用正从 Gatekeeper 的随机只读路径运行（App Translocation），例如下载后未移入「应用程序」就直接打开"
+            }
+            Self::NotAppBundle => "当前不是以 .app 应用包形式运行，无法覆盖安装",
+            Self::LinuxPackage => "当前是 deb 等系统包安装方式，不支持应用内覆盖更新",
+        }
+    }
+
+    /// 无法覆盖安装时的修复动作，直接告诉用户怎么才能用上一键更新。
+    fn remedy(self) -> &'static str {
+        match self {
+            Self::DebugBuild => "请使用 Release 页面提供的正式安装包测试更新",
+            Self::MountedVolume | Self::AppTranslocation | Self::NotAppBundle => {
+                "请把 Shellsmith.app 拖入「应用程序」文件夹后重新打开，之后即可使用一键更新"
+            }
+            Self::LinuxPackage => "请下载 AppImage 并改用 AppImage 运行，之后即可一键更新",
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -51,27 +92,87 @@ pub(crate) fn compare_semver(
     }
 }
 
-fn can_install(app: &tauri::AppHandle) -> bool {
+/// 一键更新的可行性，以及不可行时的原因。
+pub(crate) struct InstallSupport {
+    pub can_install: bool,
+    pub blocked_reason: Option<InstallBlockReason>,
+}
+
+fn install_support(app: &tauri::AppHandle) -> InstallSupport {
     if cfg!(debug_assertions) {
-        return false;
+        return InstallSupport {
+            can_install: false,
+            blocked_reason: Some(InstallBlockReason::DebugBuild),
+        };
     }
     #[cfg(target_os = "linux")]
-    return app.env().appimage.is_some();
+    {
+        let _ = app;
+        return if app.env().appimage.is_some() {
+            InstallSupport {
+                can_install: true,
+                blocked_reason: None,
+            }
+        } else {
+            InstallSupport {
+                can_install: false,
+                blocked_reason: Some(InstallBlockReason::LinuxPackage),
+            }
+        };
+    }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = app;
         #[cfg(target_os = "macos")]
-        return std::env::current_exe().is_ok_and(|path| {
-            path.parent()
-                .is_some_and(|parent| parent.ends_with("Contents/MacOS"))
-                && !path.starts_with("/Volumes")
-                && !path
-                    .components()
-                    .any(|part| part.as_os_str() == "AppTranslocation")
-        });
+        {
+            let blocked = |reason| InstallSupport {
+                can_install: false,
+                blocked_reason: Some(reason),
+            };
+            return match std::env::current_exe() {
+                Ok(path) if path.starts_with("/Volumes") => {
+                    blocked(InstallBlockReason::MountedVolume)
+                }
+                Ok(path)
+                    if path
+                        .components()
+                        .any(|part| part.as_os_str() == "AppTranslocation") =>
+                {
+                    blocked(InstallBlockReason::AppTranslocation)
+                }
+                Ok(path)
+                    if path
+                        .parent()
+                        .is_some_and(|parent| parent.ends_with("Contents/MacOS")) =>
+                {
+                    InstallSupport {
+                        can_install: true,
+                        blocked_reason: None,
+                    }
+                }
+                _ => blocked(InstallBlockReason::NotAppBundle),
+            };
+        }
         #[cfg(not(target_os = "macos"))]
-        true
+        InstallSupport {
+            can_install: true,
+            blocked_reason: None,
+        }
     }
+}
+
+/// 当前平台的直连安装包地址。资产命名与发布脚本、更新清单生成器保持一致：
+/// macOS 只发布 universal 包，非 universal 名称不会被更新清单接受。
+fn manual_download_url(version: &str, target_os: &str) -> Option<String> {
+    let asset = match target_os {
+        "macos" => format!("Shellsmith_{version}_macos_universal.dmg"),
+        "windows" => format!("Shellsmith_{version}_windows_x64_setup.exe"),
+        "linux" => format!("Shellsmith_{version}_linux_amd64.AppImage"),
+        _ => return None,
+    };
+    Some(format!(
+        "https://github.com/kairowan/Shellsmith/releases/download/v{version}/{asset}"
+    ))
 }
 
 async fn available_update(app: &tauri::AppHandle) -> Result<Option<Update>, String> {
@@ -101,7 +202,14 @@ pub(crate) async fn check_update_impl(app: &tauri::AppHandle) -> Result<UpdateCh
         )),
     );
     result.notes = update.body;
-    result.can_install = can_install(app);
+    let support = install_support(app);
+    result.can_install = support.can_install;
+    result.install_blocked_reason = support.blocked_reason;
+    result.manual_download_url = if support.can_install {
+        None
+    } else {
+        manual_download_url(&update.version, std::env::consts::OS)
+    };
     Ok(result)
 }
 
@@ -113,8 +221,18 @@ pub(crate) async fn install_update(
     on_progress: Channel<UpdateProgress>,
 ) -> Result<(), String> {
     let app = window.app_handle().clone();
-    if !can_install(&app) {
-        return Err("当前运行方式不支持覆盖更新。macOS 请先把应用放到「应用程序」再运行；Linux 请使用 AppImage，deb 请从 Release 页面下载安装。".into());
+    let support = install_support(&app);
+    if !support.can_install {
+        let reason = support
+            .blocked_reason
+            .map(|reason| format!("{}。{}。", reason.message(), reason.remedy()))
+            .unwrap_or_else(|| "当前运行方式不支持覆盖更新。".to_string());
+        return Err(format!(
+            "{reason}也可以直接下载安装包手动覆盖安装：{}",
+            manual_download_url(&version, std::env::consts::OS).unwrap_or_else(|| {
+                "https://github.com/kairowan/Shellsmith/releases/latest".to_string()
+            })
+        ));
     }
     let task_id = uuid::Uuid::new_v4().to_string();
     tasks.begin(
@@ -398,6 +516,61 @@ mod tests {
         let url = "https://github.com/kairowan/Shellsmith/releases/tag/v1.0.1";
         let r = compare_semver("1.0.0", "1.0.1", Some(url.into()));
         assert_eq!(r.release_url.as_deref(), Some(url));
+    }
+
+    #[test]
+    fn 默认结果不影响一键更新且不预置下载地址() {
+        let r = UpdateCheckResult::default();
+        assert!(!r.can_install);
+        assert!(r.install_blocked_reason.is_none());
+        assert!(r.manual_download_url.is_none());
+    }
+
+    #[test]
+    fn 直连安装包地址与发布资产命名一致() {
+        assert_eq!(
+            manual_download_url("1.5.1", "macos").as_deref(),
+            Some("https://github.com/kairowan/Shellsmith/releases/download/v1.5.1/Shellsmith_1.5.1_macos_universal.dmg")
+        );
+        assert_eq!(
+            manual_download_url("1.5.1", "windows").as_deref(),
+            Some("https://github.com/kairowan/Shellsmith/releases/download/v1.5.1/Shellsmith_1.5.1_windows_x64_setup.exe")
+        );
+        assert_eq!(
+            manual_download_url("1.5.1", "linux").as_deref(),
+            Some("https://github.com/kairowan/Shellsmith/releases/download/v1.5.1/Shellsmith_1.5.1_linux_amd64.AppImage")
+        );
+        assert_eq!(manual_download_url("1.5.1", "freebsd"), None);
+    }
+
+    #[test]
+    fn 每种阻止原因都有可读说明和修复动作() {
+        for reason in [
+            InstallBlockReason::DebugBuild,
+            InstallBlockReason::MountedVolume,
+            InstallBlockReason::AppTranslocation,
+            InstallBlockReason::NotAppBundle,
+            InstallBlockReason::LinuxPackage,
+        ] {
+            assert!(!reason.message().is_empty(), "{reason:?}");
+            assert!(!reason.remedy().is_empty(), "{reason:?}");
+        }
+    }
+
+    #[test]
+    fn 阻止原因序列化为前端可映射的蛇形命名() {
+        assert_eq!(
+            serde_json::to_string(&InstallBlockReason::AppTranslocation).unwrap(),
+            "\"app_translocation\""
+        );
+        assert_eq!(
+            serde_json::to_string(&InstallBlockReason::MountedVolume).unwrap(),
+            "\"mounted_volume\""
+        );
+        assert_eq!(
+            serde_json::to_string(&InstallBlockReason::LinuxPackage).unwrap(),
+            "\"linux_package\""
+        );
     }
 
     #[test]
