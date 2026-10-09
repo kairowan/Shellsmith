@@ -147,45 +147,38 @@ Detailed guides are currently primarily in Chinese. The CLI is source-built; Rel
 
 ## Acknowledgements
 
-Shellsmith builds on a large amount of open-source work. Listed below are the main projects that shape the tool's capabilities, ship inside release artifacts, or form the build chain. These tools are invoked locally for hardening and signing; their sources are not modified. Exact versions and the full transitive dependency list can be reproduced from `Cargo.lock`, `apps/shield-gui/package-lock.json`, and `shield-stub/gradle/libs.versions.toml`.
+Shellsmith's hardening capabilities build on the upstream projects and tools below. They define the capability boundary, or take part directly in hardening at build time or runtime. Licenses and third-party notices for redistributed components ship in `tools/licenses/`.
 
-### Desktop framework and interface
+### Origin project
+
+| Project | License | Notes |
+|---|---|---|
+| [Mocika Shield](https://github.com/mocikadev/mocika-shield) | MIT OR Apache-2.0 | The origin of this project. DEX encryption, stub loading, signature binding, baseline runtime protection, and certificate/signing management all evolved from it; Shellsmith extends it with iOS hardening, AAB handling, Native VMP, and in-app updates. |
+
+### Code protection
 
 | Project | License | Use |
 |---|---|---|
-| [Tauri](https://tauri.app/) · [tauri-plugin-updater](https://github.com/tauri-apps/plugins-workspace) · [tauri-plugin-dialog](https://github.com/tauri-apps/plugins-workspace) | Apache-2.0 OR MIT | Desktop framework, in-app updates with signature verification, file pickers |
-| [React](https://react.dev/) · [Vite](https://vitejs.dev/) · [Tailwind CSS](https://tailwindcss.com/) | MIT | View layer and frontend build |
-| [TypeScript](https://www.typescriptlang.org/) | Apache-2.0 | Frontend type system |
-| [shadcn/ui](https://ui.shadcn.com/) · [Radix UI](https://www.radix-ui.com/) | MIT | Components and accessible interaction |
-| [Lucide](https://lucide.dev/) · [Sonner](https://sonner.emilkowal.ski/) | ISC / MIT | Icons and toasts |
-| [react-markdown](https://github.com/remarkjs/react-markdown) · [remark-gfm](https://github.com/remarkjs/remark-gfm) | MIT | Safe rendering of release notes |
+| [XopProtector](https://github.com/xopJack/XopProtector) | Apache-2.0 | PVM2 and True-VMP code protection; `xop-pvm2-packer.jar` is redistributed with releases, with its license and third-party notices in `tools/licenses/` |
+| [LLVM](https://llvm.org/) | Apache-2.0 WITH LLVM-exception | Native VMP is implemented as an LLVM 21 pass plugin for the app's native build (`native-vmp/`) |
 
-### Rust libraries
+### iOS runtime protection
 
 | Project | License | Use |
 |---|---|---|
-| [RustCrypto](https://github.com/RustCrypto): `chacha20poly1305`, `hkdf`, `sha2`, `sha1` | Apache-2.0 OR MIT | DEX encryption, key derivation, certificate fingerprints |
-| [zstd](https://github.com/gyscos/zstd-rs) | MIT | Compressing hardened artifacts |
-| [zip](https://github.com/zip-rs/zip2) | MIT | Packing and parsing APK, AAB, and IPA files |
-| [serde](https://serde.rs/) · [clap](https://github.com/clap-rs/clap) · [semver](https://github.com/dtolnay/semver) · [toml](https://github.com/toml-rs/toml) · [uuid](https://github.com/uuid-rs/uuid) | MIT OR Apache-2.0 | Serialization, CLI, version comparison, task identifiers |
-| [tokio](https://tokio.rs/) · [reqwest](https://github.com/seanmonstar/reqwest) | MIT / MIT OR Apache-2.0 | Async runtime and upstream SDK downloads |
-| [rusqlite](https://github.com/rusqlite/rusqlite) | MIT | Local certificate database |
-| [anyhow](https://github.com/dtolnay/anyhow) · [thiserror](https://github.com/dtolnay/thiserror) · [log](https://github.com/rust-lang/log) · [tempfile](https://github.com/Stebalien/tempfile) · [directories](https://github.com/dirs-dev/directories-rs) · [dunce](https://gitlab.com/kornelski/dunce) · [which](https://github.com/harryfei/which-rs) · [walkdir](https://github.com/BurntSushi/walkdir) · [rand](https://github.com/rust-random/rand) | MIT OR Apache-2.0 and others | Errors, logging, paths, file handling |
-| [colored](https://github.com/colored-rs/colored) | MPL-2.0 | Colored CLI output |
-| [jni](https://github.com/jni-rs/jni-rs) · [cc](https://github.com/rust-lang/cc-rs) | MIT OR Apache-2.0 | JNI bindings and native compilation for the Android stub |
+| [freeRASP](https://github.com/talsec/Free-RASP-iOS) 7.1.4 | MIT, subject to Talsec's fair usage policy | iOS runtime threat detection; resolved on the user's machine, no binary redistribution |
+| [Swift Confidential](https://github.com/securevale/swift-confidential) 0.5.2 | Apache-2.0 | Swift sensitive literal protection (optional) |
 
-### Hardening, signing, and runtime components
+### Packaging, signing, and build tools
 
 | Project | License | Use |
 |---|---|---|
 | [Apktool](https://apktool.org/) 3.0.1 | Apache-2.0 | APK decoding and rebuilding; redistributed with releases |
 | [apksigner](https://developer.android.com/tools/apksigner) (Android SDK Build-Tools) | Apache-2.0 | APK signing and signature verification; redistributed with releases |
 | [bundletool](https://github.com/google/bundletool) · [aapt2](https://developer.android.com/tools) | Apache-2.0 | AAB module handling and resource compilation |
-| [XopProtector](https://github.com/xopJack/XopProtector) | Apache-2.0 | PVM2 and True-VMP code protection; license and notices in `tools/licenses/` |
-| [freeRASP](https://github.com/talsec/Free-RASP-iOS) 7.1.4 | MIT, subject to Talsec's fair usage policy | iOS runtime threat detection; resolved on the user's machine, no binary redistribution |
-| [Swift Confidential](https://github.com/securevale/swift-confidential) 0.5.2 | Apache-2.0 | Swift sensitive literal protection (optional) |
+| [Android NDK](https://developer.android.com/ndk) | Apache-2.0 | Compiling the stub native libraries and Android 4.4 compatibility libraries |
 
-The build chain additionally uses [Tauri CLI](https://github.com/tauri-apps/tauri), [cargo-ndk](https://github.com/bbqsrc/cargo-ndk), [Android Gradle Plugin](https://developer.android.com/build), [Android NDK](https://developer.android.com/ndk), [JUnit 4](https://junit.org/junit4/), [AndroidX Test](https://developer.android.com/training/testing), [ESLint](https://eslint.org/), [PostCSS](https://postcss.org/), and [Autoprefixer](https://github.com/postcss/autoprefixer).
+Desktop frameworks, frontend packages, and general-purpose Rust libraries are not enumerated here; exact versions and licenses can be reproduced from `Cargo.lock`, `apps/shield-gui/package-lock.json`, and `shield-stub/gradle/libs.versions.toml`.
 
 If a credit is wrong, a license is mislabeled, or a project is missing, please open an issue or pull request and we will correct it.
 
