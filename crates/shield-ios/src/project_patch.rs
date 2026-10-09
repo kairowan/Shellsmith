@@ -848,6 +848,58 @@ mod tests {
     use super::*;
     use crate::{IosProjectConfig, IosProtectionConfig};
 
+    #[cfg(unix)]
+    #[test]
+    fn 工作副本保留_pods_工作区锁文件和相对头文件链接() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("output/project");
+        fs::create_dir_all(source.join("Pods/Headers/Public/PodSDK")).unwrap();
+        for (path, content) in [
+            ("Demo.xcworkspace/contents.xcworkspacedata", "<Workspace/>"),
+            ("Demo.xcodeproj/project.pbxproj", "Demo"),
+            ("Pods/Pods.xcodeproj/project.pbxproj", "Pods"),
+            ("Pods/PodSDK/PodSDK.h", "#pragma once"),
+            ("Podfile.lock", "PODS: [PodSDK]"),
+            ("Pods/Manifest.lock", "PODS: [PodSDK]"),
+        ] {
+            let file = source.join(path);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, content).unwrap();
+        }
+        std::os::unix::fs::symlink(
+            "../../../PodSDK/PodSDK.h",
+            source.join("Pods/Headers/Public/PodSDK/PodSDK.h"),
+        )
+        .unwrap();
+        copy_project_tree(&source, &destination, &Arc::new(AtomicBool::new(false))).unwrap();
+        assert!(destination
+            .join("Demo.xcworkspace/contents.xcworkspacedata")
+            .is_file());
+        assert!(destination
+            .join("Pods/Pods.xcodeproj/project.pbxproj")
+            .is_file());
+        assert_eq!(
+            fs::read(destination.join("Podfile.lock")).unwrap(),
+            fs::read(destination.join("Pods/Manifest.lock")).unwrap()
+        );
+        let copied_header = destination
+            .join("Pods/Headers/Public/PodSDK/PodSDK.h")
+            .canonicalize()
+            .unwrap();
+        assert!(copied_header.starts_with(destination.canonicalize().unwrap()));
+        assert_eq!(fs::read_to_string(copied_header).unwrap(), "#pragma once");
+        fs::write(
+            destination.join("Demo.xcodeproj/project.pbxproj"),
+            "副本接入保护",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(source.join("Demo.xcodeproj/project.pbxproj")).unwrap(),
+            "Demo"
+        );
+    }
+
     #[test]
     fn patches_swiftui_entrypoint_once() {
         let temp = tempfile::NamedTempFile::new().unwrap();

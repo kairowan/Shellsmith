@@ -130,6 +130,71 @@
     @apply min-w-0 break-all font-mono text-xs leading-5 text-muted-foreground;
   }
 
+  .release-notes {
+    overflow-wrap: anywhere;
+  }
+
+  .release-notes :is(p, ul, ol, blockquote, pre, table) {
+    @apply my-3;
+  }
+
+  .release-notes :is(h1, h2, h3, h4, h5, h6) {
+    @apply mb-2 mt-4 font-semibold leading-snug;
+  }
+
+  .release-notes h1 { @apply text-lg; }
+  .release-notes h2 { @apply text-base; }
+  .release-notes ul { @apply list-disc pl-5; }
+  .release-notes ol { @apply list-decimal pl-5; }
+  .release-notes li { @apply my-1; }
+  .release-notes li > :is(ul, ol) { @apply my-1; }
+  .release-notes a { @apply text-primary underline underline-offset-2; }
+  .release-notes blockquote { @apply border-l-2 pl-3 text-muted-foreground; }
+  .release-notes code { @apply rounded bg-muted px-1 py-0.5 font-mono text-xs; }
+  .release-notes pre { @apply overflow-x-auto rounded-md bg-muted p-3; }
+  .release-notes pre code { @apply bg-transparent p-0; }
+  .release-notes table { @apply block max-w-full overflow-x-auto border-collapse; }
+  .release-notes :is(th, td) { @apply border px-3 py-1 text-left; }
+  .release-notes hr { @apply my-4; }
+  .release-notes > :first-child { @apply mt-0; }
+  .release-notes > :last-child { @apply mb-0; }
+
+  .update-progress {
+    --update-gradient: linear-gradient(90deg, #0e7490 0%, #147f9b 30%, #1b8da7 65%, #299bb2 100%);
+    @apply block h-2 w-full overflow-hidden rounded-full border-0 bg-muted;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  [data-theme="dark"] .update-progress {
+    --update-gradient: linear-gradient(90deg, #22a3bc 0%, #2caec4 30%, #3bb9ce 65%, #50c5d7 100%);
+  }
+
+  .update-progress::-webkit-progress-bar {
+    @apply rounded-full bg-muted;
+  }
+
+  .update-progress::-webkit-progress-value {
+    border-radius: 9999px;
+    background: var(--update-gradient);
+    transition: width 180ms ease-out;
+  }
+
+  .update-progress::-moz-progress-bar {
+    border-radius: 9999px;
+    background: var(--update-gradient);
+  }
+
+  /* 未知总大小时保留原生不确定进度语义，不伪造百分比。 */
+  .update-progress:not([value]) {
+    background: var(--update-gradient);
+    @apply animate-pulse;
+  }
+
+  .update-progress:not([value])::-webkit-progress-bar {
+    background: transparent;
+  }
+
   .icon-button {
     @apply inline-flex h-9 w-9 items-center justify-center rounded-md border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50;
   }
@@ -152,5 +217,9 @@
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .update-progress::-webkit-progress-value {
+    transition: none;
   }
 }
