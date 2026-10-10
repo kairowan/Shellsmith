@@ -183,6 +183,13 @@ jobs:
         shell: bash
         run: bash scripts/bump-version.sh "$VERSION"
 
+      - name: 校验 PVM2 打包器与运行时格式版本一致
+        shell: bash
+        run: |
+          python3 scripts/verify_pvm2_packager_version.py \
+            --jar tools/xop-pvm2-packer.jar \
+            --xop-root "$MOCIKA_XOP_ROOT"
+
       - name: 安装 GUI 前端依赖
         working-directory: apps/shield-gui
         run: npm ci
