@@ -6,21 +6,25 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/kairowan/Shellsmith/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/kairowan/Shellsmith/actions/workflows/ci.yml)
 [![许可证](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green?style=flat-square)](#许可证)
 
-在本机完成 Android APK/AAB 与 iOS 源码工程的加固、签名和产物验证。Android 使用 DEX、资源和运行时保护；iOS 使用选择性 Swift 字符串保护、freeRASP 与 Apple 原生签名链。两条链路都用于提高分析和篡改成本，不承诺无法脱壳或逆向。
+在本机完成 Android APK/AAB 与 iOS 源码工程的加固、签名和产物验证，加固与签名材料始终不出本机。
+
+- **Android**：DEX 加密与运行时保护，重新打包、对齐并按需签名。
+- **iOS**：选择性 Swift 字符串保护、freeRASP 运行时检测，配合 Apple 原生 Archive、导出与签名验证。
+
+两条链路都用于提高静态分析、篡改和非法重签的成本，不承诺无法脱壳或逆向。
 
 推荐使用 Windows、macOS、Linux 桌面 GUI，支持中英文界面；CLI 可从源码构建，用于自动化和本地开发。
 
-> 仅用于保护你拥有合法权利的 Android 应用，请勿用于绕过第三方保护或其他未授权场景。
+> 仅用于保护你拥有合法权利的 Android 与 iOS 应用，请勿用于绕过第三方保护或其他未授权场景。
 
 ## 核心能力
 
 - **DEX 加固与运行时保护**：加密业务 DEX，绑定原签名证书；提供基础反调试和可选的严格保护。
-- **iOS 源码保护**：在独立工作副本中接入 Swift Confidential 0.5.2 与 freeRASP iOS 7.1.4，再用 `xcodebuild` 完成 Archive、导出和签名验证。
-- **加固前风险检查**：检查签名、已有加固、系统要求、ABI 等兼容信号，提示风险及可处理方式。
+- **iOS 源码保护**：在独立工作副本中接入 Swift Confidential 与 freeRASP，再用 `xcodebuild` 完成 Archive、导出和签名验证。
 - **加固签名一体化**：证书导入、新建与管理，加固后自动签名，也支持独立签名。
+- **加固前风险检查与失败诊断**：检查签名、已有加固、系统要求、ABI 等兼容信号；失败时给出脱敏诊断摘要，可预览并确认发送错误报告。
 - **省去重复配置**：记住常用加固选项和加固页证书选择，可调整输出目录与文件名，任务开始后固定本次配置。
 - **安装与系统兼容**：处理 APK ZIP 对齐及常见 Native 库兼容问题；标准模式与 Android 4.4 工控模式分开选择。
-- **诊断与反馈**：提供脱敏诊断摘要，失败时可预览并确认发送安全错误报告；APK 和签名材料始终在本机处理。
 
 ## 下载与快速开始
 
@@ -32,9 +36,18 @@
 | macOS | `Shellsmith_x.y.z_macos_universal.dmg` |
 | Linux | `Shellsmith_x.y.z_linux_amd64.AppImage` 或 `.deb` |
 
-使用前安装 **完整 JDK 8 或更高版本**，确保 `java`、`keytool` 可用；PVM2 需要 Java 17+。使用桌面发布包无需自行安装 Android SDK。普通本地构建是 adhoc 签名；对外 macOS 产物只有在配置 Developer ID 与 notary profile 后才会签名、公证并生成 `_notarized` 文件，未带该后缀的包仅从可信位置使用。
+### 环境要求
 
-Android 快速流程：
+- 完整 JDK 8 或更高版本，确保 `java`、`keytool` 可用；使用 PVM2 需要 Java 17+。
+- 使用桌面发布包无需自行安装 Android SDK；AAB 与 APK 所需的 apktool、apksigner、bundletool、aapt2 已随包提供。
+- 仅 iOS 加固需要 macOS 并安装完整 Xcode，Windows 与 Linux 无法 Archive 或导出 IPA。
+
+签名状态随构建方式不同，下载后请按需确认：
+
+- 本地源码构建产出的是 adhoc 签名包。
+- 对外 macOS 产物只有在配置 Developer ID 与 notary profile 后才会签名、公证，并带上 `_notarized` 后缀；未带该后缀的包仅应从可信位置使用。
+
+### Android 快速流程
 
 1. 在 **证书** 页面导入原 APK 使用的签名证书。新项目可创建证书，但输入 APK 也必须先用该证书签名。
 2. 在 **加固** 页面选择已签名 APK，或切换到 **AAB · Google Play** 选择已签名 AAB，查看预检结果。
@@ -42,9 +55,15 @@ Android 快速流程：
 4. 确认输出目录、文件名和自动签名证书，按需调整当前应用的分享选择，再开始加固。
 5. 使用签名后的产物，在目标设备验证安装、启动、主要业务功能和覆盖升级。
 
-iOS 快速流程：在 macOS 安装完整 Xcode，在 **加固 → iOS** 选择 `.xcodeproj` 或 `.xcworkspace`，填写 scheme、Team ID、Bundle ID，先运行检查，再选择独立空目录执行保护。`confidential.yml`、freeRASP 邮箱和 App Attest 服务端地址均为可选项；没有后台地址时仍可执行严格客户端加固，但不包含服务端设备证明闭环。原工程不会被修改。
+### iOS 快速流程
 
-输出默认位于原 APK 同目录，并自动建议文件名；执行前可修改。不启用自动签名时，产物仍需使用原证书签名才能安装运行。**加固产物与原证书绑定，换证书重签会导致应用无法启动。**
+在 macOS 安装完整 Xcode，在 **加固 → iOS** 选择 `.xcodeproj` 或 `.xcworkspace`，填写 scheme、Team ID、Bundle ID，先运行检查，再选择独立空目录执行保护。`confidential.yml`、freeRASP 邮箱和 App Attest 服务端地址均为可选项；没有后台地址时仍可执行严格客户端加固，但不包含服务端设备证明闭环。原工程不会被修改。
+
+### 输出与签名
+
+输出默认位于原 APK 同目录，并自动建议文件名，执行前可修改。不启用自动签名时，产物仍需使用原证书签名才能安装运行。
+
+**加固产物与原证书绑定，换证书重签会导致应用无法启动。**
 
 <details>
 <summary>macOS 首次打开提示无法验证开发者</summary>
@@ -59,24 +78,6 @@ xattr -rd com.apple.quarantine /Applications/Shellsmith.app
 
 </details>
 
-## CI/CD 与跨平台发布
-
-GitHub Actions 位于 `.github/workflows/`：
-
-- 每次推送到 `main` 或创建 Pull Request 时运行 Rust、Python、iOS 核心和前端检查。
-- `main` 每次通过 CI 后，Release 工作流会自动计算 `1.4.2-build.<CI运行号>` 版本，在 Linux、macOS 和 Windows 原生 runner 上构建安装包，并创建 GitHub Release；也可以手动运行 `Release` 发布指定版本。
-- 发布流程会上传 Linux `.AppImage`/`.deb`、macOS `.dmg`、Windows `.exe`、Android runtime 资源包及 SHA-256 校验文件，并自动生成本次提交的变更摘要。
-- macOS 默认生成 adhoc 签名包；配置 `MACOS_RELEASE_MODE=developer-id`、Developer ID 身份和 notarytool profile 后，才生成可分发的公证包。
-
-本地也可以复用同一套脚本：
-
-```bash
-VERSION=1.4.2 ./scripts/release-linux.sh
-VERSION=1.4.2 ./scripts/release-macos.sh 1.4.2 universal
-```
-
-Windows 使用管理员 PowerShell 执行 `./scripts/release-windows.ps1 -Version 1.4.2`。三平台构建都包含 Stub、PVM2 Packer、Android 资源和签名工具，发布前仍应在目标系统安装并验证。
-
 ## 界面预览
 
 ![Shellsmith 加固页示意](docs/assets/screenshots/readme-protect-main.png)
@@ -85,37 +86,53 @@ Windows 使用管理员 PowerShell 执行 `./scripts/release-windows.ps1 -Versio
 
 ## 兼容性与限制
 
+### 适用范围
+
 | 模式 | 适用范围 |
 |---|---|
 | Android 5.0 及以上 | API 21+，支持 `armeabi-v7a`、`arm64-v8a`、`x86`、`x86_64`；不要求每个 APK 都包含四种架构 |
 | Android 4.4 工控兼容 | API 19+；只接受无 Native 库或 Native 库仅含 `armeabi-v7a` 的 APK；真机验证范围为 Android 4.4.2、`armeabi-v7a`/NEON 工控设备 |
 | iOS 源码工程 | iOS 13+；SwiftUI/UIKit 应用 target；Archive、导出与签名仅支持安装完整 Xcode 的 macOS |
 
-- 兼容模式不会降低原应用的 `minSdkVersion`，不同厂商系统和硬件仍需实测。
-- Android GUI 和 CLI 都支持 APK/AAB；AAB 的 Google Play App Signing、dynamic-feature、Asset Pack 和动态交付仍需在目标应用内测轨道验证。已加固 APK/AAB 不支持重复加固。
-- iOS 需要源码和合法签名权限；不对任意 IPA 注入、绕过签名或重打包。Objective-C 可接入 RASP，Swift Confidential 仅处理 Swift 源码。
+### 不支持与不会做的事
+
+- 已加固 APK/AAB 不支持重复加固。
+- iOS 需要源码和合法签名权限，不对任意 IPA 注入、绕过签名或重打包。
+- 兼容模式不会降低原应用的 `minSdkVersion`。
+- 不会为缺失架构生成业务库。
 - GUI 一次处理一个 APK 或 AAB，暂不提供批量队列。
-- 混合旧 ABI 可逐次确认排除，但优先建议从原工程过滤业务不需要的架构；不会为缺失架构生成业务库。
+- Swift Confidential 仅处理 Swift 源码；Objective-C 工程可接入 RASP，但不做字符串保护，请勿提供 `confidential.yml`。
+
+### 需要自行验证
+
+- 不同厂商系统和硬件仍需实测，构建通过不代表所有环境可用。
+- Android GUI 和 CLI 都支持 APK/AAB，但 AAB 的 Google Play App Signing、dynamic-feature、Asset Pack 和动态交付仍需在目标应用内测轨道验证。
+- 混合旧 ABI 可逐次确认排除，但优先建议从原工程过滤业务不需要的架构。
 - 16 KB ZIP 对齐不等于所有第三方 `.so` 都满足 ELF 页大小要求，也不等于通过 Google Play 审核。
+
+### 已知问题
+
 - Linux 启动时会应用 WebKitGTK DMABUF 兼容设置以规避 Fedora AppImage 空白窗口 [#121](https://github.com/kairowan/Shellsmith/issues/121)；仍需在反馈环境完成发布包回归。
 
-详细边界见[使用指南](docs/usage.md)；遇到问题请提供版本、环境及脱敏诊断信息。
+详细边界见[使用指南](docs/usage.md)。
 
 ## 工作原理与安全边界
+
+### Android 链路
 
 加固时读取原签名证书，压缩并加密 DEX，注入壳资源，再重新打包、对齐并按需签名。运行时由壳执行安全检查、校验或解密 DEX 缓存，加载业务代码并启动原应用。
 
 当前正式方案会在应用私有目录使用解密后的 DEX 缓存，**不是完整内存 DEX 或方法代码抽取方案**。Root、进程控制或其他高权限环境下，攻击者仍可能提取运行时代码。标准保护不因 Root 信号拒绝启动；严格保护可阻断部分风险环境，但无法保证识别隐藏 Root 或抵御绕过。
 
-加固不能替代服务端鉴权、密钥管理和应用自身的安全设计。技术细节见[运行时安全](docs/design/runtime-security.md)与[技术内参](docs/design/internals.md)。
+### iOS 链路
 
-iOS 流水线只改工作副本：接入精确版本的上游 Swift Package，生成统一威胁事件封装，调用 Apple 原生 Archive/Export，再核验签名、Team ID、Bundle ID、Entitlements、arm64、隐私清单、dSYM 和选定敏感字符串。freeRASP 的闭源检测能力和已知 RootHide 漏检仍属于上游残余风险，详见 [iOS 加固实现](docs/design/ios-hardening.md)。
+iOS 流水线只改工作副本：接入精确版本的上游 Swift Package，生成统一威胁事件封装，调用 Apple 原生 Archive/Export，再核验签名、Team ID、Bundle ID、Entitlements、arm64、隐私清单、dSYM 和选定敏感字符串。freeRASP 的闭源检测能力和已知 RootHide 漏检仍属于上游残余风险。
+
+加固不能替代服务端鉴权、密钥管理和应用自身的安全设计。技术细节见[运行时安全](docs/design/runtime-security.md)、[技术内参](docs/design/internals.md)与 [iOS 加固实现](docs/design/ios-hardening.md)。
 
 ## 隐私说明
 
 APK、证书、密钥库和签名密码只在本机处理，不上传业务文件。桌面工具有以下独立数据通道：
-
-iOS balanced/strict 会让目标应用直接集成 freeRASP；其 `watcherMail`、安全事件和网络行为受 Talsec 条款与隐私政策约束，发布前需由应用方完成披露。Shellsmith 不托管 freeRASP 二进制。
 
 | 通道 | 数据与控制方式 |
 |---|---|
@@ -125,6 +142,14 @@ iOS balanced/strict 会让目标应用直接集成 freeRASP；其 `watcherMail`�
 应用分享仅维护者可见，明细保留 180 天；取消停止同包名后续分享，不删除已接收记录。**加固后的 APK 不包含这些分享上报。** 数据范围、保留与删除说明见[数据与隐私说明](docs/ops/telemetry.md)。
 
 软件内“问题反馈”不会自动上报：只有在设置页主动填写表单、预览并确认提交后，反馈正文（Bug 反馈还会附带版本、系统、Java 与工具状态等诊断信息）才会发送到 GitHub 公开 issue；服务端不可用时，软件会提供在浏览器打开预填 issue 页面的入口。
+
+iOS balanced/strict 会让目标应用直接集成 freeRASP；其 `watcherMail`、安全事件和网络行为受 Talsec 条款与隐私政策约束，发布前需由应用方完成披露。Shellsmith 不托管 freeRASP 二进制。
+
+## 反馈与交流
+
+- 使用问题请先阅读[反馈指南](docs/process/support.md)，再提交 [GitHub Issue](https://github.com/kairowan/Shellsmith/issues)；也可直接在设置页的“问题反馈”区块提交。
+- 功能建议可在设置页的“问题反馈”中选择“需求建议”提交，也可使用[需求表单](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml)；已有相同需求可在原 issue 点赞。
+- 安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不公开可利用细节、业务 APK、证书或密码。
 
 ## 文档与开发者入口
 
@@ -139,11 +164,31 @@ iOS balanced/strict 会让目标应用直接集成 freeRASP；其 `watcherMail`�
 
 CLI 仅供源码构建和自动化使用，Release 不单独提供 CLI 包。构建顺序为先 `make build-stub`，再 `make build-cli` 或 `make build-gui`；完整依赖与平台步骤以构建指南为准。
 
-## 反馈与交流
+### CI/CD 与跨平台发布
 
-- 使用问题请先阅读[反馈指南](docs/process/support.md)，再提交 [GitHub Issue](https://github.com/kairowan/Shellsmith/issues)；也可直接在设置页的“问题反馈”区块提交，Bug 反馈的诊断信息会自动附带，发送前可预览。
-- 功能建议可在设置页的“问题反馈”中选择“需求建议”提交，也可使用[需求表单](https://github.com/kairowan/Shellsmith/issues/new?template=feature_request.yml)；已有相同需求可在原 issue 点赞。
-- 安全漏洞请按 [SECURITY.md](SECURITY.md) 私下报告，不公开可利用细节、业务 APK、证书或密码。
+GitHub Actions 位于 `.github/workflows/`：
+
+- 每次推送到 `main` 或创建 Pull Request 时运行 Rust、Python、iOS 核心和前端检查。
+- `main` 每次通过 CI 后，Release 工作流会自动计算 `<当前版本>-build.<CI运行号>` 版本，在 Linux、macOS 和 Windows 原生 runner 上构建安装包，并创建 GitHub Release；也可以手动运行 `Release` 发布指定版本。
+- 发布流程会上传 Linux `.AppImage`/`.deb`、macOS `.dmg`、Windows `.exe`、Android runtime 资源包及 SHA-256 校验文件，并自动生成本次提交的变更摘要。
+- macOS 默认生成 adhoc 签名包；配置 `MACOS_RELEASE_MODE=developer-id`、Developer ID 身份和 notarytool profile 后，才生成可分发的公证包。
+
+本地也可以复用同一套脚本，版本号直接从 `package.json` 读取，避免与当前发布版本脱节：
+
+```bash
+VERSION=$(node -p "require('./apps/shield-gui/package.json').version")
+VERSION="$VERSION" ./scripts/release-linux.sh
+VERSION="$VERSION" ./scripts/release-macos.sh "$VERSION" universal
+```
+
+Windows 使用管理员 PowerShell：
+
+```powershell
+$version = (Get-Content apps/shield-gui/package.json | ConvertFrom-Json).version
+.\scripts\release-windows.ps1 -Version $version
+```
+
+三平台构建都包含 Stub、PVM2 Packer、Android 资源和签名工具，发布前仍应在目标系统安装并验证。
 
 ## 致谢
 
