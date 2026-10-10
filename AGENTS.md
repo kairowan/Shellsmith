@@ -69,7 +69,8 @@ rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-andro
 加密 DEX 以 MSHD 块追加到 `classes.dex` 末尾（DEX `file_size` 之外，工具不可见）。
 DEXB 头部明文区布局：`magic(4) + version(4) + dex_count(4) + sig_len(1) + signature[sig_len] + ikm_len(1) + ikm[ikm_len] + nonce(12)`，之后为 ChaCha20-Poly1305 密文。
 新包默认使用 v6：`magic(4) + version(4) + dex_count(4) + flags(4) + sig_len(1) + signature + build_id(16) + wrap_nonce(12) + wrapped_ikm_len(2) + wrapped_ikm + payload_nonce(12) + ciphertext`。
-v6 不把 IKM 直接写入明文头部；运行时使用证书指纹和 build_id 派生包裹密钥后恢复 IKM。stub 同时兼容 v5 旧包，但 v5 不得用于新发布包。v5 与 v4 不兼容，旧加固 APK 需重新加固。
+v6 不把 IKM 直接写入明文头部；运行时使用证书指纹和 build_id 派生包裹密钥后恢复 IKM。
+**边界**：v6 不提供针对静态分析的机密性——包裹密钥的两个输入都在包内明文头部，仅凭 APK 即可离线还原 IKM 与全部派生密钥。不得据此对外宣称载荷保密；真正解决需要包外秘密（设备侧不可提取密钥或服务端下发），详见 `docs/design/internals.md` 的「DEXB v6 的机密性边界」。stub 同时兼容 v5 旧包，但 v5 不得用于新发布包。v5 与 v4 不兼容，旧加固 APK 需重新加固。
 
 ### 签名校验
 `extractAndDecryptFromDex(ctx, dex, key)` **必须传 `Context ctx`**（`attachBaseContext` 阶段 `ActivityThread.currentApplication()` 返回 null）。
