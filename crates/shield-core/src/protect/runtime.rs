@@ -177,6 +177,8 @@ pub(crate) struct RuntimeSelection {
     pub(crate) stub_component_factory: Option<String>,
     pub(crate) memory_dex: bool,
     pub(crate) xop_pvm2: bool,
+    /// 壳运行时支持的最高 PVM2 镜像格式版本；旧资源包为 None。
+    pub(crate) xop_pvm2_format: Option<u32>,
     pub(crate) xop_vm_bridge: Option<String>,
     pub(crate) xop_vm_bridge_method: Option<String>,
     pub(crate) assets_pas2: bool,
@@ -207,6 +209,7 @@ pub(crate) fn read_runtime_selection(
         stub_component_factory: metadata.stub_component_factory,
         memory_dex: metadata.memory_dex,
         xop_pvm2: metadata.xop_pvm2,
+        xop_pvm2_format: metadata.xop_pvm2_format,
         xop_vm_bridge: metadata.xop_vm_bridge,
         xop_vm_bridge_method: metadata.xop_vm_bridge_method,
         assets_pas2: metadata.assets_pas2,
@@ -325,6 +328,70 @@ mod tests {
         let error =
             read_runtime_selection(&resources, EnvironmentPolicy::Strict, false).unwrap_err();
         assert!(error.to_string().contains("不支持严格环境策略"));
+    }
+
+    fn write_resources(dir: &Path, name: &str, metadata: &str) -> std::path::PathBuf {
+        let resources = dir.join(name);
+        let file = fs::File::create(&resources).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("metadata.json", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(metadata.as_bytes()).unwrap();
+        zip.finish().unwrap();
+        resources
+    }
+
+    #[test]
+    fn 资源包声明的_pvm2_格式版本进入运行时选择() {
+        let dir = tempfile::tempdir().unwrap();
+        let resources = write_resources(
+            dir.path(),
+            "resources.zip",
+            r#"{
+                "stub_application":"msk.d",
+                "native_library":"libmocikashield.so",
+                "native_name_placeholder":"mocikanativeslot",
+                "native_name_length":16,
+                "native_name_scheme":1,
+                "runtime_protocol":2,
+                "cache_schema":1,
+                "environment_policy":true,
+                "memory_dex":false,
+                "xop_pvm2":true,
+                "xop_pvm2_format":6,
+                "xop_vm_bridge":"msk.y",
+                "xop_vm_bridge_method":"a"
+            }"#,
+        );
+        let selection =
+            read_runtime_selection(&resources, EnvironmentPolicy::Compatible, false).unwrap();
+        assert_eq!(selection.xop_pvm2_format, Some(6));
+    }
+
+    #[test]
+    fn 旧资源包没有_pvm2_格式版本时按未知处理() {
+        let dir = tempfile::tempdir().unwrap();
+        let resources = write_resources(
+            dir.path(),
+            "resources-legacy.zip",
+            r#"{
+                "stub_application":"msk.d",
+                "native_library":"libmocikashield.so",
+                "native_name_placeholder":"mocikanativeslot",
+                "native_name_length":16,
+                "native_name_scheme":1,
+                "runtime_protocol":2,
+                "cache_schema":1,
+                "environment_policy":true,
+                "memory_dex":false,
+                "xop_pvm2":true,
+                "xop_vm_bridge":"msk.y",
+                "xop_vm_bridge_method":"a"
+            }"#,
+        );
+        let selection =
+            read_runtime_selection(&resources, EnvironmentPolicy::Compatible, false).unwrap();
+        assert_eq!(selection.xop_pvm2_format, None);
     }
 
     #[test]

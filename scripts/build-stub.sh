@@ -403,6 +403,22 @@ echo -e "${BLUE}步骤6: 生成metadata.json...${NC}"
 BUILD_DATE=$(date +"%Y-%m-%d %H:%M:%S")
 BUILD_VERSION="${SHIELD_VERSION:-1.0.0}"
 
+# 壳运行时静态链入的 Xop 解释器支持的最高 PVM2 镜像格式版本。
+# 加固前会与打包器 JAR 声明的版本比对：打包器更新就拒绝打包，避免产出启动即崩的包。
+XOP_ROOT_DIR="${MOCIKA_XOP_ROOT:-$PROJECT_ROOT/../XopProtector}"
+XOP_PVM2_FORMAT_HEADER="$XOP_ROOT_DIR/native/src/main/cpp/vm/pvm2_format.h"
+XOP_PVM2_FORMAT_FIELD=""
+if [ -f "$XOP_PVM2_FORMAT_HEADER" ]; then
+    XOP_PVM2_FORMAT_VERSION=$(grep -oE 'PVM2_VERSION_V[0-9]+[[:space:]]*=[[:space:]]*[0-9]+' "$XOP_PVM2_FORMAT_HEADER" \
+        | grep -oE '[0-9]+$' | sort -n | tail -1)
+    if [ -n "$XOP_PVM2_FORMAT_VERSION" ]; then
+        XOP_PVM2_FORMAT_FIELD="  \"xop_pvm2_format\": $XOP_PVM2_FORMAT_VERSION,"
+        echo -e "${GREEN}✓ PVM2 格式版本: v${XOP_PVM2_FORMAT_VERSION}（来自 $XOP_PVM2_FORMAT_HEADER）${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠ 未找到 $XOP_PVM2_FORMAT_HEADER，metadata.json 不声明 xop_pvm2_format（将跳过版本比对）${NC}"
+fi
+
 cat > "$OUTPUT_DIR/metadata.json" << EOF
 {
   "version": "$BUILD_VERSION",
@@ -431,6 +447,7 @@ cat > "$OUTPUT_DIR/metadata.json" << EOF
   "environment_policy": true,
   "memory_dex": false,
   "xop_pvm2": true,
+$XOP_PVM2_FORMAT_FIELD
   "xop_vm_bridge": "$OBF_XOP_BRIDGE",
   "xop_vm_bridge_method": "$OBF_XOP_BRIDGE_METHOD",
   "assets_pas2": true,
@@ -495,6 +512,7 @@ cat > "$OUTPUT_DIR/metadata.json" << EOF
   "memory_dex": true,
   "memory_dex_min_api": 31,
   "xop_pvm2": true,
+$XOP_PVM2_FORMAT_FIELD
   "xop_vm_bridge": "$OBF_XOP_BRIDGE",
   "xop_vm_bridge_method": "$OBF_XOP_BRIDGE_METHOD",
   "assets_pas2": true,
