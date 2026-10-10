@@ -55,7 +55,7 @@ Shellsmith 是 Android 与 iOS 双平台应用加固工具。Android 流程加�
 | 反馈问题 | [process/support.md](process/support.md) |
 | 提交或评审功能建议 | [process/feature-requests.md](process/feature-requests.md) |
 | 提交代码 | [process/commit-convention.md](process/commit-convention.md) |
-| 查看后续计划 | [process/roadmap.md](process/roadmap.md) |
+| 查看当前安全态势与后续更新计划 | [process/roadmap.md](process/roadmap.md) |
 | 追溯已完成版本与旧研究过程 | [process/roadmap-history.md](process/roadmap-history.md) |
 
 ## 文档归类

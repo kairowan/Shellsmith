@@ -207,7 +207,7 @@ Shellsmith 的加固能力建立在这些上游项目与工具之上：它们定
 | 项目 | 许可证 | 用途 |
 |---|---|---|
 | [XopProtector](https://github.com/xopJack/XopProtector) | Apache-2.0 | PVM2 与 True-VMP 代码保护；壳运行时源码与打包器源码随本仓库分发（`third_party/xopprotector/`），`xop-pvm2-packer.jar` 随发布包分发，许可证与第三方声明见 `tools/licenses/` |
-| [LLVM](https://llvm.org/) | Apache-2.0 WITH LLVM-exception | Native VMP 以 LLVM 21 Pass 插件形式接入业务 Native 构建（`native-vmp/`） |
+| [LLVM](https://llvm.org/) | Apache-2.0 WITH LLVM-exception | Native VMP 以 LLVM 21 Pass 插件形式接入业务 Native 构建（`native-vmp/`，独立组件，尚未接入加固流程） |
 
 ### iOS 运行时保护
 
