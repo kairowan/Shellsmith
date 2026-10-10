@@ -152,8 +152,9 @@ def mismatch_message(packer_version: int, runtime_version: int) -> str:
     return (
         f"PVM2 格式版本不一致——内置打包器产出 v{packer_version}，"
         f"而钉住的 XopProtector 运行时最高只支持 v{runtime_version}。"
-        f"继续发布会产出在设备上启动即崩的安装包"
-        f"（运行时报 PVM2 unsupported version {packer_version}）。"
+        f"不带加固期握手的版本会产出在设备上启动即崩的安装包"
+        f"（运行时报 PVM2 unsupported version {packer_version}）；"
+        f"带握手的最新版本会在加固前直接拒绝该组合，因此 True-VMP 不可用但不会崩。"
         f"修复方式：用与 XOP_PROTECTOR_REF 相同的提交重建 "
         f"tools/xop-pvm2-packer.jar，或把 XOP_PROTECTOR_REF 提升到支持 "
         f"v{packer_version} 的提交后重建运行时。"
