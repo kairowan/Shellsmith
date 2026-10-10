@@ -78,7 +78,9 @@ class Pvm2PackagerVersionTests(unittest.TestCase):
             header = write_header(Path(tmp) / "xop", [1, 2, 3, 4, 5])
             self.assertEqual(module.runtime_format_version(header), 5)
 
-    def run_script(self, jar: Path, xop_root: Path) -> subprocess.CompletedProcess:
+    def run_script(
+        self, jar: Path, xop_root: Path, extra: list[str] | None = None
+    ) -> subprocess.CompletedProcess:
         return subprocess.run(
             [
                 sys.executable,
@@ -87,6 +89,7 @@ class Pvm2PackagerVersionTests(unittest.TestCase):
                 str(jar),
                 "--xop-root",
                 str(xop_root),
+                *(extra or []),
             ],
             capture_output=True,
             text=True,
@@ -123,6 +126,29 @@ class Pvm2PackagerVersionTests(unittest.TestCase):
             self.assertIn("v5", result.stderr)
             self.assertIn("XOP_PROTECTOR_REF", result.stderr)
             self.assertIn("PVM2 unsupported version 6", result.stderr)
+
+    def test_warn_only_不阻塞发布但要留下可见警告(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jar = Path(tmp) / "packer.jar"
+            write_packer_jar(jar, 6)
+            root = Path(tmp) / "xop"
+            write_header(root, [1, 2, 3, 4, 5])
+
+            # 默认仍然拒绝不匹配的组合。
+            self.assertEqual(self.run_script(jar, root).returncode, 1)
+
+            # 过渡期：只警告，供发布流程使用，并输出 GitHub 注解便于在 Actions 中看到。
+            result = self.run_script(jar, root, ["--warn-only"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("::warning::", result.stdout)
+            self.assertIn("v6", result.stdout)
+            self.assertIn("未阻塞发布", result.stderr)
+
+            # 版本一致时 --warn-only 与默认行为相同。
+            write_header(root, [1, 2, 3, 4, 5, 6])
+            consistent = self.run_script(jar, root, ["--warn-only"])
+            self.assertEqual(consistent.returncode, 0)
+            self.assertNotIn("::warning::", consistent.stdout)
 
     def test_缺少运行时源码时跳过而不是误报(self):
         with tempfile.TemporaryDirectory() as tmp:

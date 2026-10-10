@@ -9,10 +9,6 @@ export function installBlockedKey(reason?: UpdateBlockReason | null): I18nKey {
   switch (reason) {
     case "debug_build":
       return "updateBlockedDebug";
-    case "mounted_volume":
-      return "updateBlockedMountedVolume";
-    case "app_translocation":
-      return "updateBlockedTranslocation";
     case "not_app_bundle":
       return "updateBlockedNotAppBundle";
     case "linux_package":

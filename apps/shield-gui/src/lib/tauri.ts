@@ -148,8 +148,6 @@ export type CertCompareResult = {
 
 export type UpdateBlockReason =
   | "debug_build"
-  | "mounted_volume"
-  | "app_translocation"
   | "not_app_bundle"
   | "linux_package"
   | string;
@@ -163,6 +161,11 @@ export type UpdateCheckResult = {
   can_install: boolean;
   install_blocked_reason?: UpdateBlockReason | null;
   manual_download_url?: string | null;
+  /**
+   * 当前运行位置只读（DMG、App Translocation 或裸二进制）时，新版 .app 的落地路径。
+   * 有值时仍然可以一键安装，只是安装目标不是当前这份。
+   */
+  install_relocates_to?: string | null;
 };
 
 export type UpdateProgress = {

@@ -148,10 +148,30 @@ def runtime_format_version(header: Path) -> int:
     return max(versions)
 
 
+def mismatch_message(packer_version: int, runtime_version: int) -> str:
+    return (
+        f"PVM2 格式版本不一致——内置打包器产出 v{packer_version}，"
+        f"而钉住的 XopProtector 运行时最高只支持 v{runtime_version}。"
+        f"继续发布会产出在设备上启动即崩的安装包"
+        f"（运行时报 PVM2 unsupported version {packer_version}）。"
+        f"修复方式：用与 XOP_PROTECTOR_REF 相同的提交重建 "
+        f"tools/xop-pvm2-packer.jar，或把 XOP_PROTECTOR_REF 提升到支持 "
+        f"v{packer_version} 的提交后重建运行时。"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--jar", type=Path, required=True, help="仓库内置的打包器 JAR")
     parser.add_argument("--xop-root", type=Path, required=True, help="XopProtector 源码根目录")
+    parser.add_argument(
+        "--warn-only",
+        action="store_true",
+        help=(
+            "版本不一致时只警告不失败。仅供发布流程在 XOP_PROTECTOR_REF 尚未更新、"
+            "且加固期握手已能拦住坏包的过渡期使用；解除后必须去掉该开关。"
+        ),
+    )
     args = parser.parse_args()
 
     if not args.jar.is_file():
@@ -177,16 +197,13 @@ def main() -> int:
         return 1
 
     if packer_version > runtime_version:
-        print(
-            f"错误：PVM2 格式版本不一致——内置打包器产出 v{packer_version}，"
-            f"而钉住的 XopProtector 运行时最高只支持 v{runtime_version}。\n"
-            f"      继续发布会产出在设备上启动即崩的安装包"
-            f"（运行时报 PVM2 unsupported version {packer_version}）。\n"
-            f"      修复方式：用与 XOP_PROTECTOR_REF 相同的提交重建 "
-            f"tools/xop-pvm2-packer.jar，或把 XOP_PROTECTOR_REF 提升到支持 "
-            f"v{packer_version} 的提交后重建运行时。",
-            file=sys.stderr,
-        )
+        message = mismatch_message(packer_version, runtime_version)
+        if args.warn_only:
+            # 加固期握手已经能拒绝不匹配的组合，因此这里不阻塞发布，但必须留下可见记录。
+            print(f"::warning::{message}")
+            print(f"警告（未阻塞发布）：{message}", file=sys.stderr)
+            return 0
+        print(f"错误：{message}", file=sys.stderr)
         return 1
 
     print(f"✓ PVM2 格式版本一致：打包器 v{packer_version}，运行时最高支持 v{runtime_version}")
