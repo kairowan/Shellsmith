@@ -57,6 +57,11 @@ make build-stub
 
 输出：`shield-stub/build/outputs/resources/resources.zip`
 
+壳运行时（静态链入的 Xop PVM2 解释器）直接编译仓库内的 `third_party/xopprotector/native/src/main/cpp`，
+不需要检出外部仓库。该目录同时保存了内置打包器 `tools/xop-pvm2-packer.jar` 的 Java 源码，
+两者因此始终同源；若要用更新版本的 XopProtector 覆盖，设置 `MOCIKA_XOP_ROOT` 指向新的检出即可，
+但必须同时确认内置打包器与该检出同源（发布流程会校验两侧的镜像格式版本）。
+
 首次执行前需添加 Android Rust 编译目标：
 
 ```bash

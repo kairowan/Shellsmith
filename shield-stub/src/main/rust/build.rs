@@ -32,9 +32,11 @@ fn main() {
         return;
     }
 
+    // 默认用仓库内的 XopProtector 源码副本：打包器 JAR 与运行时因此同源，
+    // 不再依赖外部仓库在特定提交上恰好匹配。可用 MOCIKA_XOP_ROOT 覆盖。
     let xop_root = env::var_os("MOCIKA_XOP_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| manifest.join("../../../../../XopProtector"));
+        .unwrap_or_else(|| manifest.join("../../../../third_party/xopprotector"));
     let cpp = xop_root.join("native/src/main/cpp");
     if !cpp.join("vm/pvm2_interp.cpp").is_file() {
         panic!(

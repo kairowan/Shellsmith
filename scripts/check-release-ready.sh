@@ -123,6 +123,15 @@ else
   printf '%s\n' "$tracked_sensitive"
 fi
 
+info "检查 PVM2 打包器与运行时源码的格式版本一致"
+if pvm2_output="$(python3 scripts/verify_pvm2_packager_version.py \
+  --jar tools/xop-pvm2-packer.jar --xop-root third_party/xopprotector 2>&1)"; then
+  ok "${pvm2_output#✓ }"
+else
+  fail "PVM2 打包器与运行时源码的镜像格式版本不一致"
+  printf '%s\n' "$pvm2_output"
+fi
+
 info "检查未跟踪敏感或本地产物"
 untracked_sensitive="$(git ls-files --others --exclude-standard | grep -E '(^|/)(shield\.db|config\.toml|tool_config\.json)|\.(apk|aab|jks|p12|keystore|env)$' || true)"
 if [[ -z "$untracked_sensitive" ]]; then
