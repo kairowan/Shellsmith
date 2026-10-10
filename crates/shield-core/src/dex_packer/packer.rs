@@ -167,6 +167,13 @@ mod tests {
         f
     }
 
+    /// 从 DEXB v6 头部解析出 IKM 与载荷。
+    ///
+    /// 这个辅助函数本身就是一条**已知边界**的证明：`signature` 与 `build_id` 都直接
+    /// 取自包内头部明文，所以仅凭 APK 文件即可还原 IKM 并解出全部业务 DEX 与
+    /// PVM2/PAS2/PSO2 子密钥。v6 的加密不针对有意志的静态分析者提供机密性，
+    /// 它提供的是「重打包即拒绝运行」与提高自动化扫描成本。
+    /// 边界说明见 `docs/design/internals.md` 的「DEXB v6 的机密性边界」。
     fn parse_bin(
         raw: &[u8],
         ikm: &[u8],
@@ -294,6 +301,36 @@ mod tests {
         let packer = DexPacker::new();
         let tmp_out = tempfile::NamedTempFile::new().unwrap();
         assert!(packer.pack(tmp_out.path(), b"key", "").is_err());
+    }
+
+    /// 把「DEXB v6 不提供对静态分析的机密性」这条边界固化成可执行断言。
+    ///
+    /// 断言两件事：头部里**没有** IKM 的明文字节（这是 v6 相对 v5 的改动），
+    /// 但仅凭头部字段就能还原 IKM 并解出载荷（这是当前边界，不是实现缺陷）。
+    /// 若将来改成设备侧或服务端密钥，本测试会失败——那时应同步更新
+    /// `docs/design/internals.md` 的边界说明与 README 的安全边界段落。
+    #[test]
+    fn 离线仅凭包内头部即可还原_ikm_与载荷_这是已知边界() {
+        let tmp_dex = make_fake_dex(b"boundary-check");
+        let mut packer = DexPacker::new();
+        packer.add_dex(tmp_dex.path(), "classes.dex").unwrap();
+
+        let ikm = b"boundary-check-ikm-32-bytes!!!!";
+        let signature = "AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899";
+        let tmp_out = tempfile::NamedTempFile::new().unwrap();
+        packer.pack(tmp_out.path(), ikm, signature).unwrap();
+        let raw = fs::read(tmp_out.path()).unwrap();
+
+        // 头部不包含 IKM 明文。
+        assert!(
+            !raw.windows(ikm.len()).any(|window| window == ikm),
+            "头部不应出现明文 IKM"
+        );
+
+        // 但只用包内材料即可还原 IKM 与载荷（parse_bin 内部会断言还原结果一致）。
+        let (_, dex_count, _, metas) = parse_bin(&raw, ikm, signature);
+        assert_eq!(dex_count, 1);
+        assert_eq!(metas[0].0, "classes.dex");
     }
 
     #[test]

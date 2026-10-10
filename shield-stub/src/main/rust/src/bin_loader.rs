@@ -644,7 +644,9 @@ mod tests {
     }
 
     #[test]
-    fn v6_roundtrip_does_not_store_plaintext_ikm_in_header() {
+    // 注意测试名只断言「头部不存放明文 IKM」，不代表机密性：包裹密钥的两个输入
+    // 都取自包内公开材料，仅凭文件即可离线还原 IKM（见 docs/design/internals.md）。
+    fn v6_头部不直接存放明文_ikm() {
         let ikm = b"random-ikm-32-bytes-for-testing!";
         let build_id = [7u8; 16];
         let wrap_nonce = [8u8; DEXB_NONCE_LEN];

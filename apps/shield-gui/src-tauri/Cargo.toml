@@ -1,6 +1,6 @@
 [package]
 name = "mocika-shield"
-version = "1.6.2"
+version = "1.6.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 publish = false
@@ -27,6 +27,7 @@ shield-ios = { path = "../../../crates/shield-ios" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 which = "8"
 dunce = "1"
+url = "2"
 toml = "0.8"
 rusqlite = { version = "0.37", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
@@ -37,3 +38,11 @@ rand = { workspace = true }
 [dev-dependencies]
 tempfile = "3"
 tauri = { version = "2.11.5", features = ["test"] }
+
+# 打开外部链接时不经过 cmd.exe，直接调用 shell API（见 file_ops.rs）。
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }

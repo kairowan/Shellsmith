@@ -243,10 +243,11 @@ pub(crate) async fn submit_feedback(payload: FeedbackPayload) -> Result<Feedback
             }
             let receipt: FeedbackReceipt =
                 serde_json::from_slice(&bytes).map_err(|_| "反馈回执格式不符合约定".to_string())?;
-            if receipt.url.is_empty() || !receipt.url.starts_with("https://github.com/") {
-                return Err("反馈回执格式不符合约定".into());
-            }
-            Ok(receipt)
+            // 回执链接会被前端直接打开，因此按仓库白名单做结构化校验：只判断前缀时，
+            // 服务端或链路被控可返回 `.../&命令` 这类载荷，最终落到系统打开动作上。
+            let url = crate::file_ops::canonical_allowed_url(&receipt.url)
+                .map_err(|_| "反馈回执格式不符合约定".to_string())?;
+            Ok(FeedbackReceipt { url, ..receipt })
         }
         429 => Err("提交过于频繁，请稍后再试，或改用浏览器提交".into()),
         400 => Err("反馈内容未通过服务端校验，请检查必填项后重试".into()),
