@@ -189,6 +189,15 @@ pub fn protect_apk(
             "所选 Runtime 资源未声明 xop_pvm2=true；拒绝生成无法解释 PVM2 跳板的安装包"
         )));
     }
+    if let Some(packer) = opts.xop_pvm2_packer_path.as_deref() {
+        // 打包器与壳运行时取自不同 XopProtector 源码时，镜像版本会超出运行时上限，
+        // 产物在设备上表现为启动即崩（PVM2 unsupported version N / VMP not ready）。
+        crate::protect::pvm2_format::verify_format_compatibility(
+            packer,
+            runtime_selection.xop_pvm2_format,
+        )
+        .map_err(ShieldError::from)?;
+    }
     if matches!(opts.protection_profile, ProtectionProfile::Strict)
         && !runtime_selection.assets_pas2
     {

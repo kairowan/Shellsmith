@@ -95,6 +95,8 @@ cp "$API19_OUTPUT/jniLibs/armeabi-v7a/libmocikashield.so" \
     "$WORK_DIR/lib/armeabi-v7a/libmocikashield.so"
 perl -pi -e 's/"min_android_api": 21/"min_android_api": 19/' "$WORK_DIR/metadata.json"
 perl -pi -e 's/"xop_pvm2": true/"xop_pvm2": false/' "$WORK_DIR/metadata.json"
+# API 19 兼容资源不含 PVM2 运行时，因此不应声明 PVM2 镜像格式版本。
+perl -ni -e 'print unless m{"xop_pvm2_format":}' "$WORK_DIR/metadata.json"
 perl -pi -e 's/"native_so_text": true/"native_so_text": false/' "$WORK_DIR/metadata.json"
 perl -pi -e 's/"native_so_functions": true/"native_so_functions": false/' "$WORK_DIR/metadata.json"
 perl -0pi -e 's/"supported_architectures":\s*\[[^\]]*\]/"supported_architectures": [\n    "armeabi-v7a"\n  ]/' "$WORK_DIR/metadata.json"
@@ -104,6 +106,10 @@ if ! grep -q '"min_android_api": 19' "$WORK_DIR/metadata.json"; then
 fi
 if ! grep -q '"xop_pvm2": false' "$WORK_DIR/metadata.json"; then
     echo "错误：Android 4.4 兼容资源必须显式禁用 Xop PVM2"
+    exit 1
+fi
+if grep -q '"xop_pvm2_format"' "$WORK_DIR/metadata.json"; then
+    echo "错误：Android 4.4 兼容资源不包含 PVM2 运行时，不得声明 xop_pvm2_format"
     exit 1
 fi
 if ! grep -q '"armeabi-v7a"' "$WORK_DIR/metadata.json" \
