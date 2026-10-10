@@ -11,16 +11,28 @@ const { installBlockedKey } = await server.ssrLoadModule("/src/lib/update-instal
 
 test("每种阻止一键更新的原因都有专属说明而不是笼统提示", () => {
   assert.equal(installBlockedKey("debug_build"), "updateBlockedDebug");
-  assert.equal(installBlockedKey("mounted_volume"), "updateBlockedMountedVolume");
-  assert.equal(installBlockedKey("app_translocation"), "updateBlockedTranslocation");
   assert.equal(installBlockedKey("not_app_bundle"), "updateBlockedNotAppBundle");
   assert.equal(installBlockedKey("linux_package"), "updateBlockedLinuxPackage");
+  // macOS 只读位置（DMG、App Translocation）不再算「无法更新」：后端会改装到「应用程序」。
+  assert.equal(installBlockedKey("mounted_volume"), "updateManualHint");
+  assert.equal(installBlockedKey("app_translocation"), "updateManualHint");
 });
 
 test("未知或缺失原因回退到通用说明", () => {
   assert.equal(installBlockedKey(undefined), "updateManualHint");
   assert.equal(installBlockedKey(null), "updateManualHint");
   assert.equal(installBlockedKey("未来的新原因"), "updateManualHint");
+});
+
+test("无法就地覆盖但可改装位置时仍给出一键安装", () => {
+  const dialog = readFileSync(new URL("../src/components/app/update-dialog.tsx", import.meta.url), "utf8");
+  // 改装场景由后端置 can_install=true，因此仍然渲染「下载并安装」按钮。
+  assert.match(dialog, /updateInfo\.can_install && <AppButton/);
+  // 同时说明新版会装到哪里，避免用户以为更新失败或位置被悄悄改变。
+  assert.match(dialog, /updateInfo\.install_relocates_to && <p/);
+  assert.match(dialog, /updateInstallRelocatesTo/);
+  // 只在真正无法安装时才提示原因。
+  assert.match(dialog, /\{!updateInfo\.can_install && <p/);
 });
 
 test("弹窗按原因显示说明，并在无法覆盖安装时给出直连安装包入口", () => {

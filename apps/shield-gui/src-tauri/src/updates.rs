@@ -1,5 +1,7 @@
 use crate::task_manager::{TaskKind, TaskManager, TaskStatus};
 use serde::{Deserialize, Serialize};
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tauri::{ipc::Channel, Manager};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -16,14 +18,14 @@ pub(crate) struct UpdateCheckResult {
     pub install_blocked_reason: Option<InstallBlockReason>,
     /// 无法覆盖安装时当前平台的直连安装包，避免用户只能在 Release 页面里逐个找。
     pub manual_download_url: Option<String>,
+    /// 需要改装到其它位置时，新版 .app 的落地路径；就地覆盖时为 None。
+    pub install_relocates_to: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum InstallBlockReason {
     DebugBuild,
-    MountedVolume,
-    AppTranslocation,
     NotAppBundle,
     LinuxPackage,
 }
@@ -32,14 +34,10 @@ impl InstallBlockReason {
     fn message(self) -> &'static str {
         match self {
             Self::DebugBuild => "开发模式仅检查版本，不执行覆盖安装",
-            Self::MountedVolume => {
-                "应用正从磁盘映像（DMG）中直接运行，磁盘映像是只读的，无法覆盖安装"
+            Self::NotAppBundle => "未能确定当前可执行文件位置，无法执行覆盖安装",
+            Self::LinuxPackage => {
+                "当前是 deb 系统包安装方式，安装位置由系统包管理器管理，无法在应用内静默替换"
             }
-            Self::AppTranslocation => {
-                "应用正从 Gatekeeper 的随机只读路径运行（App Translocation），例如下载后未移入「应用程序」就直接打开"
-            }
-            Self::NotAppBundle => "当前不是以 .app 应用包形式运行，无法覆盖安装",
-            Self::LinuxPackage => "当前是 deb 等系统包安装方式，不支持应用内覆盖更新",
         }
     }
 
@@ -47,10 +45,10 @@ impl InstallBlockReason {
     fn remedy(self) -> &'static str {
         match self {
             Self::DebugBuild => "请使用 Release 页面提供的正式安装包测试更新",
-            Self::MountedVolume | Self::AppTranslocation | Self::NotAppBundle => {
-                "请把 Shellsmith.app 拖入「应用程序」文件夹后重新打开，之后即可使用一键更新"
+            Self::NotAppBundle => "请从「应用程序」中的 Shellsmith.app 启动后重试",
+            Self::LinuxPackage => {
+                "下载 deb 后由系统安装器完成安装；若希望之后能一键更新，请改用 AppImage 版本"
             }
-            Self::LinuxPackage => "请下载 AppImage 并改用 AppImage 运行，之后即可一键更新",
         }
     }
 }
@@ -92,10 +90,114 @@ pub(crate) fn compare_semver(
     }
 }
 
-/// 一键更新的可行性，以及不可行时的原因。
+/// 一键更新的可行性、不可行时的原因，以及需要改装位置时的目标。
+#[derive(Debug)]
 pub(crate) struct InstallSupport {
     pub can_install: bool,
     pub blocked_reason: Option<InstallBlockReason>,
+    pub relocation: Option<RelocationPlan>,
+}
+
+/// 当前运行位置无法写入时，把新版本装到这里的 .app，并改从它启动。
+///
+/// macOS 上从 DMG 或 Gatekeeper 转位路径运行时，应用包整体只读，插件的原地替换
+/// （rename 当前 .app 再放入新版）必然失败；改为安装到「应用程序」后，用户无需手动
+/// 拖拽，且下一次更新就能走正常的原地覆盖。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RelocationPlan {
+    /// 交给更新器的安装目标（.app 内的可执行文件），它据此推导要替换的 .app。
+    pub target_executable: PathBuf,
+    /// 展示给用户的 .app 落地路径。
+    pub target_app: PathBuf,
+}
+
+/// macOS 应用的运行形态。
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MacRunMode {
+    /// 正常 .app，磁盘位置可写，可原地覆盖。
+    Bundle,
+    /// 直接从只读磁盘映像（DMG）运行。
+    MountedVolume,
+    /// Gatekeeper 的随机只读路径（App Translocation）。
+    Translocated,
+    /// 不是 .app 形态（裸二进制运行）。
+    NotBundle,
+}
+
+/// 依据可执行文件路径判定 macOS 运行形态。
+///
+/// 纯路径判定，便于三平台回归；正式运行时传入 `current_exe()`。
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn classify_macos_executable(exe: &Path) -> MacRunMode {
+    if exe.starts_with("/Volumes") {
+        return MacRunMode::MountedVolume;
+    }
+    if exe
+        .components()
+        .any(|part| part.as_os_str() == "AppTranslocation")
+    {
+        return MacRunMode::Translocated;
+    }
+    if exe
+        .parent()
+        .is_some_and(|parent| parent.ends_with("Contents/MacOS"))
+    {
+        return MacRunMode::Bundle;
+    }
+    MacRunMode::NotBundle
+}
+
+/// 从可执行文件路径取 .app 名称；裸二进制运行时退回产品名。
+#[cfg(any(target_os = "macos", test))]
+fn bundle_name(exe: &Path) -> OsString {
+    exe.components()
+        .map(|part| part.as_os_str().to_os_string())
+        .find(|name| name.to_string_lossy().ends_with(".app"))
+        .unwrap_or_else(|| OsString::from("Shellsmith.app"))
+}
+
+/// 把新版本安装到「应用程序」时的目标路径。
+#[cfg(any(target_os = "macos", test))]
+fn macos_relocation_plan(exe: &Path) -> RelocationPlan {
+    let binary = exe
+        .file_name()
+        .map(OsStr::to_os_string)
+        .unwrap_or_else(|| OsString::from("mocika-shield"));
+    let target_app = Path::new("/Applications").join(bundle_name(exe));
+    let target_executable = target_app.join("Contents").join("MacOS").join(binary);
+    RelocationPlan {
+        target_executable,
+        target_app,
+    }
+}
+
+/// macOS 的安装能力判定：只读位置或裸二进制一律改装到「应用程序」，不再让用户手动拖拽。
+///
+/// 纯路径判定，便于三平台回归；正式运行时传入 `std::env::current_exe()`。
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn macos_support_for(exe: Option<&Path>) -> InstallSupport {
+    match exe {
+        Some(exe) => match classify_macos_executable(exe) {
+            MacRunMode::Bundle => InstallSupport {
+                can_install: true,
+                blocked_reason: None,
+                relocation: None,
+            },
+            MacRunMode::MountedVolume | MacRunMode::Translocated | MacRunMode::NotBundle => {
+                InstallSupport {
+                    can_install: true,
+                    blocked_reason: None,
+                    relocation: Some(macos_relocation_plan(exe)),
+                }
+            }
+        },
+        None => InstallSupport {
+            can_install: false,
+            blocked_reason: Some(InstallBlockReason::NotAppBundle),
+            relocation: None,
+        },
+    }
 }
 
 fn install_support(app: &tauri::AppHandle) -> InstallSupport {
@@ -103,20 +205,24 @@ fn install_support(app: &tauri::AppHandle) -> InstallSupport {
         return InstallSupport {
             can_install: false,
             blocked_reason: Some(InstallBlockReason::DebugBuild),
+            relocation: None,
         };
     }
     #[cfg(target_os = "linux")]
     {
         let _ = app;
+        // AppImage 可以整体替换自身；deb 由系统包管理器管理，交给系统安装器完成。
         return if app.env().appimage.is_some() {
             InstallSupport {
                 can_install: true,
                 blocked_reason: None,
+                relocation: None,
             }
         } else {
             InstallSupport {
                 can_install: false,
                 blocked_reason: Some(InstallBlockReason::LinuxPackage),
+                relocation: None,
             }
         };
     }
@@ -124,50 +230,25 @@ fn install_support(app: &tauri::AppHandle) -> InstallSupport {
     {
         let _ = app;
         #[cfg(target_os = "macos")]
-        {
-            let blocked = |reason| InstallSupport {
-                can_install: false,
-                blocked_reason: Some(reason),
-            };
-            return match std::env::current_exe() {
-                Ok(path) if path.starts_with("/Volumes") => {
-                    blocked(InstallBlockReason::MountedVolume)
-                }
-                Ok(path)
-                    if path
-                        .components()
-                        .any(|part| part.as_os_str() == "AppTranslocation") =>
-                {
-                    blocked(InstallBlockReason::AppTranslocation)
-                }
-                Ok(path)
-                    if path
-                        .parent()
-                        .is_some_and(|parent| parent.ends_with("Contents/MacOS")) =>
-                {
-                    InstallSupport {
-                        can_install: true,
-                        blocked_reason: None,
-                    }
-                }
-                _ => blocked(InstallBlockReason::NotAppBundle),
-            };
-        }
+        let support = macos_support_for(std::env::current_exe().ok().as_deref());
+        // Windows 安装包走 NSIS 静默安装，可原地覆盖，无需改装位置。
         #[cfg(not(target_os = "macos"))]
-        InstallSupport {
+        let support = InstallSupport {
             can_install: true,
             blocked_reason: None,
-        }
+            relocation: None,
+        };
+        support
     }
 }
 
 /// 当前平台的直连安装包地址。资产命名与发布脚本、更新清单生成器保持一致：
-/// macOS 只发布 universal 包，非 universal 名称不会被更新清单接受。
+/// macOS 只发布 universal 包；Linux 只发布 deb，AppImage 走应用内更新而不会走到这里。
 fn manual_download_url(version: &str, target_os: &str) -> Option<String> {
     let asset = match target_os {
         "macos" => format!("Shellsmith_{version}_macos_universal.dmg"),
         "windows" => format!("Shellsmith_{version}_windows_x64_setup.exe"),
-        "linux" => format!("Shellsmith_{version}_linux_amd64.AppImage"),
+        "linux" => format!("Shellsmith_{version}_linux_amd64.deb"),
         _ => return None,
     };
     Some(format!(
@@ -175,12 +256,22 @@ fn manual_download_url(version: &str, target_os: &str) -> Option<String> {
     ))
 }
 
-async fn available_update(app: &tauri::AppHandle) -> Result<Option<Update>, String> {
-    app.updater_builder()
+async fn available_update(
+    app: &tauri::AppHandle,
+    install_target: Option<&Path>,
+) -> Result<Option<Update>, String> {
+    let mut builder = app
+        .updater_builder()
         .timeout(Duration::from_secs(20))
         .version_comparator(|current, release| {
             release.version.pre.is_empty() && release.version > current
-        })
+        });
+    if let Some(target) = install_target {
+        // 指定安装目标后，插件据此推导要替换的 .app，并复用其备份与系统授权逻辑；
+        // 否则它会去 rename 当前这份只读的 .app，安装必然失败。
+        builder = builder.executable_path(target);
+    }
+    builder
         .build()
         .map_err(|error| format!("初始化更新器失败：{error}"))?
         .check()
@@ -190,7 +281,7 @@ async fn available_update(app: &tauri::AppHandle) -> Result<Option<Update>, Stri
 
 pub(crate) async fn check_update_impl(app: &tauri::AppHandle) -> Result<UpdateCheckResult, String> {
     // ponytail: 每次检查直接读取稳定版清单，不缓存一天，也不为更新另建业务后台。
-    let Some(update) = available_update(app).await? else {
+    let Some(update) = available_update(app, None).await? else {
         return Ok(UpdateCheckResult::default());
     };
     let mut result = compare_semver(
@@ -205,6 +296,10 @@ pub(crate) async fn check_update_impl(app: &tauri::AppHandle) -> Result<UpdateCh
     let support = install_support(app);
     result.can_install = support.can_install;
     result.install_blocked_reason = support.blocked_reason;
+    result.install_relocates_to = support
+        .relocation
+        .as_ref()
+        .map(|plan| plan.target_app.display().to_string());
     result.manual_download_url = if support.can_install {
         None
     } else {
@@ -243,11 +338,23 @@ pub(crate) async fn install_update(
         String::new(),
         "Update",
     )?;
-    let result = download_and_install(&app, &version, &on_progress).await;
+    let result =
+        download_and_install(&app, &version, support.relocation.as_ref(), &on_progress).await;
     match result {
-        Ok(()) => {
+        Ok(None) => {
             // 安装后到退出前仍保持互斥，避免重启间隙接入新的加固任务。
             app.restart();
+        }
+        Ok(Some(target_app)) => {
+            // 新版装在别处，当前运行位置仍是上一版，restart 只会再启动旧版本。
+            relaunch_from(&target_app).map_err(|error| {
+                format!(
+                    "更新已安装到 {}，但自动重启失败：{error}",
+                    target_app.display()
+                )
+            })?;
+            app.exit(0);
+            Ok(())
         }
         Err(error) => {
             let _ = tasks.finish(&window, &task_id, TaskStatus::Failed, Some(error.clone()));
@@ -256,12 +363,29 @@ pub(crate) async fn install_update(
     }
 }
 
+/// 启动新安装的 .app；失败由调用方转成可读错误。
+#[cfg(target_os = "macos")]
+fn relaunch_from(target_app: &Path) -> Result<(), std::io::Error> {
+    std::process::Command::new("open")
+        .arg(target_app)
+        .spawn()
+        .map(|_| ())
+}
+
+/// 非 macOS 平台不会发生改装位置，保留同名桩以便调用点无需条件编译。
+#[cfg(not(target_os = "macos"))]
+fn relaunch_from(_target_app: &Path) -> Result<(), std::io::Error> {
+    Ok(())
+}
+
+/// 返回 `Some(路径)` 表示新版装在别处，需要从该路径启动。
 async fn download_and_install(
     app: &tauri::AppHandle,
     expected_version: &str,
+    relocation: Option<&RelocationPlan>,
     progress: &Channel<UpdateProgress>,
-) -> Result<(), String> {
-    let mut update = available_update(app)
+) -> Result<Option<PathBuf>, String> {
+    let mut update = available_update(app, relocation.map(|plan| plan.target_executable.as_path()))
         .await?
         .ok_or("没有可安装的新版本，请重新检查更新")?;
     if update.version != expected_version {
@@ -304,7 +428,7 @@ async fn download_and_install(
         .await
         .map_err(|error| format!("更新安装任务失败：{error}"))?
         .map_err(|error| format!("安装更新失败，请从 Release 页面手动安装：{error}"))?;
-    Ok(())
+    Ok(relocation.map(|plan| plan.target_app.clone()))
 }
 
 #[cfg(test)]
@@ -524,6 +648,7 @@ mod tests {
         assert!(!r.can_install);
         assert!(r.install_blocked_reason.is_none());
         assert!(r.manual_download_url.is_none());
+        assert!(r.install_relocates_to.is_none());
     }
 
     #[test]
@@ -536,9 +661,10 @@ mod tests {
             manual_download_url("1.5.1", "windows").as_deref(),
             Some("https://github.com/kairowan/Shellsmith/releases/download/v1.5.1/Shellsmith_1.5.1_windows_x64_setup.exe")
         );
+        // deb 安装走不到应用内更新，给它 deb 包才是有用的产物。
         assert_eq!(
             manual_download_url("1.5.1", "linux").as_deref(),
-            Some("https://github.com/kairowan/Shellsmith/releases/download/v1.5.1/Shellsmith_1.5.1_linux_amd64.AppImage")
+            Some("https://github.com/kairowan/Shellsmith/releases/download/v1.5.1/Shellsmith_1.5.1_linux_amd64.deb")
         );
         assert_eq!(manual_download_url("1.5.1", "freebsd"), None);
     }
@@ -547,8 +673,6 @@ mod tests {
     fn 每种阻止原因都有可读说明和修复动作() {
         for reason in [
             InstallBlockReason::DebugBuild,
-            InstallBlockReason::MountedVolume,
-            InstallBlockReason::AppTranslocation,
             InstallBlockReason::NotAppBundle,
             InstallBlockReason::LinuxPackage,
         ] {
@@ -560,16 +684,105 @@ mod tests {
     #[test]
     fn 阻止原因序列化为前端可映射的蛇形命名() {
         assert_eq!(
-            serde_json::to_string(&InstallBlockReason::AppTranslocation).unwrap(),
-            "\"app_translocation\""
-        );
-        assert_eq!(
-            serde_json::to_string(&InstallBlockReason::MountedVolume).unwrap(),
-            "\"mounted_volume\""
+            serde_json::to_string(&InstallBlockReason::NotAppBundle).unwrap(),
+            "\"not_app_bundle\""
         );
         assert_eq!(
             serde_json::to_string(&InstallBlockReason::LinuxPackage).unwrap(),
             "\"linux_package\""
+        );
+    }
+
+    #[test]
+    fn 只读映像与转位路径都识别为需要改装位置() {
+        // 从 DMG 直接运行：整卷只读，插件的原地替换必然失败。
+        let volume = Path::new("/Volumes/Shellsmith/Shellsmith.app/Contents/MacOS/mocika-shield");
+        assert_eq!(classify_macos_executable(volume), MacRunMode::MountedVolume);
+        // Gatekeeper 转位路径：随机只读副本。
+        let translocated = Path::new(
+            "/private/var/folders/xy/abc/T/AppTranslocation/9F3/d/Shellsmith.app/Contents/MacOS/mocika-shield",
+        );
+        assert_eq!(
+            classify_macos_executable(translocated),
+            MacRunMode::Translocated
+        );
+        // 裸二进制运行。
+        assert_eq!(
+            classify_macos_executable(Path::new("/Users/me/build/target/release/mocika-shield")),
+            MacRunMode::NotBundle
+        );
+    }
+
+    #[test]
+    fn 已安装的应用程序包可原地覆盖() {
+        let installed = Path::new("/Applications/Shellsmith.app/Contents/MacOS/mocika-shield");
+        assert_eq!(classify_macos_executable(installed), MacRunMode::Bundle);
+        // 用户目录下的 .app 同样可写，不需要改装位置。
+        let home = Path::new("/Users/me/Applications/Shellsmith.app/Contents/MacOS/mocika-shield");
+        assert_eq!(classify_macos_executable(home), MacRunMode::Bundle);
+    }
+
+    #[test]
+    fn 改装目标沿用原应用包名与可执行文件名() {
+        let plan = macos_relocation_plan(Path::new(
+            "/Volumes/Shellsmith/Shellsmith.app/Contents/MacOS/mocika-shield",
+        ));
+        assert_eq!(
+            plan.target_executable,
+            Path::new("/Applications/Shellsmith.app/Contents/MacOS/mocika-shield")
+        );
+        assert_eq!(plan.target_app, Path::new("/Applications/Shellsmith.app"));
+
+        // 转位路径同样落到「应用程序」，去掉随机只读前缀。
+        let from_translocation = macos_relocation_plan(Path::new(
+            "/private/var/folders/xy/abc/T/AppTranslocation/9F3/d/Shellsmith.app/Contents/MacOS/mocika-shield",
+        ));
+        assert_eq!(
+            from_translocation.target_app,
+            Path::new("/Applications/Shellsmith.app")
+        );
+    }
+
+    #[test]
+    fn 只读位置与裸二进制都改为安装到应用程序而不是拒绝安装() {
+        // 这三种位置都无法原地覆盖：DMG 只读、转位副本只读、裸二进制没有 .app。
+        for path in [
+            "/Volumes/Shellsmith/Shellsmith.app/Contents/MacOS/mocika-shield",
+            "/private/var/folders/xy/abc/T/AppTranslocation/9F3/d/Shellsmith.app/Contents/MacOS/mocika-shield",
+            "/Users/me/build/target/release/mocika-shield",
+        ] {
+            let support = macos_support_for(Some(Path::new(path)));
+            assert!(support.can_install, "{path} 应仍可一键更新");
+            assert!(support.blocked_reason.is_none(), "{path}");
+            let plan = support.relocation.expect("应给出改装目标");
+            assert_eq!(plan.target_app, Path::new("/Applications/Shellsmith.app"));
+        }
+    }
+
+    #[test]
+    fn 已安装位置不触发改装且无法定位可执行文件时明确拒绝() {
+        let installed = macos_support_for(Some(Path::new(
+            "/Applications/Shellsmith.app/Contents/MacOS/mocika-shield",
+        )));
+        assert!(installed.can_install);
+        assert!(installed.relocation.is_none());
+
+        let unknown = macos_support_for(None);
+        assert!(!unknown.can_install);
+        assert_eq!(
+            unknown.blocked_reason,
+            Some(InstallBlockReason::NotAppBundle)
+        );
+        assert!(unknown.relocation.is_none());
+    }
+
+    #[test]
+    fn 裸二进制改装时退回产品名并保留可执行文件名() {
+        let plan = macos_relocation_plan(Path::new("/Users/me/build/target/release/mocika-shield"));
+        assert_eq!(plan.target_app, Path::new("/Applications/Shellsmith.app"));
+        assert_eq!(
+            plan.target_executable,
+            Path::new("/Applications/Shellsmith.app/Contents/MacOS/mocika-shield")
         );
     }
 

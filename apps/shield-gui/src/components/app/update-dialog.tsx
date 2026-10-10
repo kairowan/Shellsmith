@@ -86,6 +86,10 @@ export function UpdateDialog({ locale, open, updateInfo, taskRunning, onClose }:
         <Dialog.Description className="mt-3 text-sm leading-6 text-muted-foreground">{t(locale, "updateInstallHint")}</Dialog.Description>
         {updateInfo.notes && <UpdateReleaseNotes notes={updateInfo.notes} onError={setError} />}
         {!updateInfo.can_install && <p role="status" className="my-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm leading-6 text-muted-foreground">{t(locale, installBlockedKey(updateInfo.install_blocked_reason))}</p>}
+        {updateInfo.install_relocates_to && <p role="status" className="my-3 rounded-lg border bg-muted/40 p-3 text-sm leading-6 text-muted-foreground">
+          {t(locale, "updateInstallRelocatesTo")}
+          <code className="break-all">{updateInfo.install_relocates_to}</code>
+        </p>}
         {taskRunning && <p role="status" className="my-3 text-sm text-amber-600">{t(locale, "updateTaskBusy")}</p>}
         {progress && <div className="my-4 space-y-2">
           <p role="status" className="flex items-center gap-2 text-sm"><LoaderCircle className="h-4 w-4 animate-spin" />{phaseLabel}</p>
