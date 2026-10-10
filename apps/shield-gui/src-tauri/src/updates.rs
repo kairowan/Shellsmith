@@ -759,6 +759,20 @@ mod tests {
         }
     }
 
+    /// 改装逻辑依赖更新器自身的这条推导：把安装目标指到目标 .app 内的可执行文件，
+    /// 更新器就把 extract_path 解析为该 .app，于是新版被放进「应用程序」，
+    /// 而不是去 rename 当前只读的那一份。这里直接对公开推导函数做回归。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn 更新器把可执行文件路径推导为所属应用包() {
+        use tauri_plugin_updater::extract_path_from_executable;
+        let target = Path::new("/Applications/Shellsmith.app/Contents/MacOS/mocika-shield");
+        assert_eq!(
+            extract_path_from_executable(target).unwrap(),
+            Path::new("/Applications/Shellsmith.app")
+        );
+    }
+
     #[test]
     fn 已安装位置不触发改装且无法定位可执行文件时明确拒绝() {
         let installed = macos_support_for(Some(Path::new(
