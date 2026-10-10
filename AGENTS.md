@@ -185,5 +185,5 @@ GUI 自动维护的应用级配置固定使用 `config.toml`。证书列表、�
 | [docs/process/release.md](docs/process/release.md) | 发布流程、版本号管理、三平台发布检查清单 |
 | [docs/process/test-checklist.md](docs/process/test-checklist.md) | 发布前与关键改动后的回归测试清单 |
 | [docs/process/feature-requests.md](docs/process/feature-requests.md) | 功能需求收集、投票口径与评审流程 |
-| [docs/process/roadmap.md](docs/process/roadmap.md) | 当前功能路线图：稳定线、下一版本、候选与停止项 |
+| [docs/process/roadmap.md](docs/process/roadmap.md) | 当前安全态势、当前主题（对抗 AI 驱动的逆向分析）、候选与停止项 |
 | [docs/process/roadmap-history.md](docs/process/roadmap-history.md) | 已完成版本、旧缺陷与研究过程历史档案 |

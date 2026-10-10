@@ -207,7 +207,7 @@ Shellsmith's hardening capabilities build on the upstream projects and tools bel
 | Project | License | Use |
 |---|---|---|
 | [XopProtector](https://github.com/xopJack/XopProtector) | Apache-2.0 | PVM2 and True-VMP code protection; the runtime and packer sources are redistributed in `third_party/xopprotector/`, and `xop-pvm2-packer.jar` ships with releases, with its license and third-party notices in `tools/licenses/` |
-| [LLVM](https://llvm.org/) | Apache-2.0 WITH LLVM-exception | Native VMP is implemented as an LLVM 21 pass plugin for the app's native build (`native-vmp/`) |
+| [LLVM](https://llvm.org/) | Apache-2.0 WITH LLVM-exception | Native VMP is implemented as an LLVM 21 pass plugin for the app's native build (`native-vmp/`; standalone component, not yet wired into the hardening flow) |
 
 ### iOS runtime protection
 
