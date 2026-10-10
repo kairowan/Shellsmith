@@ -320,20 +320,20 @@ mod tests {
         assert!(verify_format_compatibility(&unknown.path().join("packer.jar"), Some(5)).is_ok());
     }
 
-    /// 内置打包器 JAR 是本地构建产物、不随仓库分发，因此仓库内测试只在它存在时校验。
+    /// 内置打包器 JAR 是随仓库分发的产物；测试固定校验它与发布运行时同源，
+    /// 并复现"运行时落后一版"的现场，防止再次把不匹配的组合发出去。
     #[test]
-    fn 内置打包器_jar_声明可读的格式版本() {
+    fn 内置打包器_jar_与发布运行时的格式版本一致() {
         let jar = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/xop-pvm2-packer.jar");
-        if !jar.is_file() {
-            return;
-        }
-        let version = packer_format_version(&jar).expect("应能解析内置打包器");
-        assert!(
-            version.is_some_and(|value| value >= 1),
-            "内置打包器未声明有效的 PVM2 格式版本: {version:?}"
-        );
-        // 复现真实故障：壳运行时落后一个版本时必须被拒绝，而不是产出启动即崩的包。
-        let version = version.unwrap();
+        let version = packer_format_version(&jar)
+            .expect("应能解析内置打包器")
+            .expect("内置打包器必须声明 PVM2 格式版本");
+        assert!(version >= 1);
+
+        // 发布 CI 从 XOP_PROTECTOR_REF 编译运行时；两者同版本时必须放行。
+        verify_format_compatibility(&jar, Some(version)).expect("同版本必须放行");
+
+        // 运行时落后时必须在打包前拒绝，而不是产出启动即崩的包。
         if version >= 2 {
             let error = verify_format_compatibility(&jar, Some(version - 1))
                 .unwrap_err()
