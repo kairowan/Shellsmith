@@ -405,7 +405,7 @@ BUILD_VERSION="${SHIELD_VERSION:-1.0.0}"
 
 # 壳运行时静态链入的 Xop 解释器支持的最高 PVM2 镜像格式版本。
 # 加固前会与打包器 JAR 声明的版本比对：打包器更新就拒绝打包，避免产出启动即崩的包。
-XOP_ROOT_DIR="${MOCIKA_XOP_ROOT:-$PROJECT_ROOT/../XopProtector}"
+XOP_ROOT_DIR="${MOCIKA_XOP_ROOT:-$PROJECT_ROOT/third_party/xopprotector}"
 XOP_PVM2_FORMAT_HEADER="$XOP_ROOT_DIR/native/src/main/cpp/vm/pvm2_format.h"
 XOP_PVM2_FORMAT_FIELD=""
 if [ -f "$XOP_PVM2_FORMAT_HEADER" ]; then

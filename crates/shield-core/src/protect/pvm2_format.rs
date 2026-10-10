@@ -59,8 +59,8 @@ pub(crate) fn verify_format_compatibility(packer: &Path, runtime_max: Option<u32
     }
     anyhow::bail!(
         "PVM2 格式版本不一致：打包器产出 v{packer_version}，壳运行时最高只支持 v{runtime_version}。\
-         两者必须来自同一份 XopProtector 源码：请用同一个 MOCIKA_XOP_ROOT 重新构建壳运行时\
-         （make build-stub）与 tools/xop-pvm2-packer.jar，或换成与当前运行时匹配的打包器 JAR。\
+         打包器与运行时源码都在本仓库 third_party/xopprotector：请用该目录的源码重建壳运行时\
+         （make build-stub）与 tools/xop-pvm2-packer.jar，或改用与当前运行时匹配的打包器 JAR。\
          继续打包会产出在设备上启动即崩的安装包（运行时报 PVM2 unsupported version {packer_version}）"
     );
 }
@@ -330,7 +330,7 @@ mod tests {
             .expect("内置打包器必须声明 PVM2 格式版本");
         assert!(version >= 1);
 
-        // 发布 CI 从 XOP_PROTECTOR_REF 编译运行时；两者同版本时必须放行。
+        // 运行时由仓库内 third_party/xopprotector 编译；两者同版本时必须放行。
         verify_format_compatibility(&jar, Some(version)).expect("同版本必须放行");
 
         // 运行时落后时必须在打包前拒绝，而不是产出启动即崩的包。
