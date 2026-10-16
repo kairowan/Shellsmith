@@ -142,7 +142,7 @@ export function StatusMessage({
             )}
           />
         )}
-        <div className="min-w-0 break-words">{children}</div>
+        <div className="min-w-0 whitespace-pre-line break-words">{children}</div>
       </div>
       {action}
     </div>

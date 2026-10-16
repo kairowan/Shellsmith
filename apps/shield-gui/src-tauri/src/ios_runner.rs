@@ -93,7 +93,13 @@ pub(crate) async fn protect_ios_project(
         Err(message) if message.contains("已取消") => TaskStatus::Cancelled,
         Err(_) => TaskStatus::Failed,
     };
-    let _ = task_manager.finish(&window, &options.1, status, result.as_ref().err().cloned());
+    let _ = task_manager.finish(
+        &window,
+        &options.1,
+        status,
+        result.as_ref().err().cloned(),
+        None,
+    );
     result
 }
 
@@ -146,7 +152,13 @@ pub(crate) async fn prepare_ios_sdk(
         Err(message) if message.contains("已取消") => TaskStatus::Cancelled,
         Err(_) => TaskStatus::Failed,
     };
-    let _ = task_manager.finish(&window, &task_id, status, result.as_ref().err().cloned());
+    let _ = task_manager.finish(
+        &window,
+        &task_id,
+        status,
+        result.as_ref().err().cloned(),
+        None,
+    );
     result
 }
 

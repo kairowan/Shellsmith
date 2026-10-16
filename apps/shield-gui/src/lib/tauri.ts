@@ -337,6 +337,13 @@ export type TaskSnapshot = {
   finished_at_ms?: number | null;
   logs: TaskLog[];
   error?: string | null;
+  pvm2_failure?: Pvm2FailureSummary | null;
+};
+
+export type Pvm2FailureSummary = {
+  selected_classes: number;
+  selected_methods: number;
+  reasons: Partial<Record<"no_code" | "initializer" | "ui_runtime_glue" | "data_resource_runtime_glue" | "compiler_generated_bridge" | "playback_compatibility" | "nullable_receiver" | "unsupported_opcode" | "register_limit" | "code_size_limit" | "exception_mapping" | "control_flow" | "type" | "not_attempted" | "other", number>>;
 };
 
 export type DragDropPayload = {

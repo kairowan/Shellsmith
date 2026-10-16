@@ -586,6 +586,13 @@ pub(crate) fn transform(
         },
     )?;
     if !output.status.success() {
+        if output.stdout.contains("selected zero methods")
+            || output.stderr.contains("selected zero methods")
+        {
+            if let Ok(failure) = crate::protection_report::Pvm2Failure::zero_methods(&report_path) {
+                return Err(failure.into());
+            }
+        }
         anyhow::bail!(transform_failure_message(&output.stdout, &output.stderr));
     }
     let code = fs::read(&code_out).context("Xop 未生成 PVM2 code.bin")?;
@@ -919,7 +926,7 @@ fn optional_usize(values: &BTreeMap<String, String>, key: &str) -> Result<usize>
 
 fn transform_failure_message(stdout: &str, stderr: &str) -> String {
     if stdout.contains("selected zero methods") || stderr.contains("selected zero methods") {
-        return "Xop PVM2 已匹配到业务类，但没有可转换的方法。构造器和静态初始化器不会转换；含当前不支持的 invoke-custom/polymorphic 指令、超过寄存器/代码大小上限或异常处理表无法映射的方法会被跳过。请改选包含普通自有业务逻辑的类前缀，或查看 PVM2 覆盖率报告"
+        return "PVM2_ZERO_METHODS：没有可转换的方法，且未取得有效的逐方法失败报告，无法确定具体跳过原因。请确认使用配套的内置打包器；当前信息不能认定是类前缀或指令问题"
             .to_string();
     }
 
@@ -1102,9 +1109,84 @@ mod tests {
             "java.lang.IllegalStateException: pvm2-transform selected zero methods; provide a matching --true-vmp-prefix\n\tat com.example.Packer.main(Packer.java:1)",
         );
         assert!(message.contains("没有可转换的方法"));
-        assert!(message.contains("覆盖率报告"));
+        assert!(message.contains("未取得有效的逐方法失败报告"));
         assert!(!message.contains("java.lang"));
         assert!(!message.contains("Packer.java"));
+    }
+
+    #[test]
+    #[ignore = "需要 JDK 17 与从当前源码构建的 tools/xop-pvm2-packer.jar"]
+    fn 真实打包器零转换经共享核心返回分类并保留失败报告() {
+        use crate::protection_report::{Pvm2Failure, Pvm2SkipReason};
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let jar = root
+            .join("tools/xop-pvm2-packer.jar")
+            .canonicalize()
+            .unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let classes = work.path().join("classes");
+        fs::create_dir(&classes).unwrap();
+        assert!(Command::new("javac")
+            .args(["--release", "17", "-cp"])
+            .arg(&jar)
+            .arg("-d")
+            .arg(&classes)
+            .arg(root.join("tests/java/com/yqsh/protector/packer/Pvm2ProtectionCheck.java"))
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let classpath = std::env::join_paths([classes, jar.clone()]).unwrap();
+        let generated = Command::new("java")
+            .args(["-ea", "-cp"])
+            .arg(classpath)
+            .arg("com.yqsh.protector.packer.Pvm2ProtectionCheck")
+            .arg(work.path())
+            .output()
+            .unwrap();
+        assert!(
+            generated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&generated.stderr)
+        );
+        for (kind, expected, count) in [
+            ("native", Pvm2SkipReason::NoCode, 2),
+            ("ui", Pvm2SkipReason::UiRuntimeGlue, 3),
+            ("registers", Pvm2SkipReason::RegisterLimit, 3),
+        ] {
+            let dex = work.path().join(format!("zero-{kind}/dex"));
+            fs::write(
+                dex.join("AndroidManifest.xml"),
+                "<manifest package=\"fixture.unrelated\"/>",
+            )
+            .unwrap();
+            let error = transform(
+                Path::new("java"),
+                &jar,
+                &dex,
+                &[1; 32],
+                &"a".repeat(64),
+                ProtectionProfile::Strict,
+                &["Lfixture/".into()],
+                &Default::default(),
+                &BTreeMap::from([("classes.dex".into(), "base".into())]),
+                "fixture.Bridge",
+                "interpret",
+                &AtomicBool::new(false),
+                &|_| {},
+            )
+            .unwrap_err();
+            let failure = error
+                .downcast_ref::<Pvm2Failure>()
+                .expect("失败统计不能被字符串化丢失");
+            assert_eq!(failure.summary.selected_methods, count);
+            assert_eq!(failure.summary.reasons[&expected], 1);
+            let mut error = crate::ShieldError::from(error);
+            Pvm2Failure::preserve(&mut error, &work.path().join(format!("{kind}.apk")));
+            assert!(error.to_string().contains("本地逐方法失败报告"));
+            assert!(!error.to_string().contains("Lfixture/"));
+            assert!(!work.path().join(format!("{kind}.apk")).exists());
+        }
     }
 
     #[test]

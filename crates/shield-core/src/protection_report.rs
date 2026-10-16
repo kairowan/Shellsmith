@@ -49,6 +49,256 @@ pub(crate) struct MethodReport {
     pub native_vmp: Vec<crate::native_vmp::NativeRecord>,
 }
 
+/// 仅允许固定分类和数量进入可分享摘要，原始原因只保存在本地逐方法报告。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pvm2SkipReason {
+    NoCode,
+    Initializer,
+    UiRuntimeGlue,
+    DataResourceRuntimeGlue,
+    CompilerGeneratedBridge,
+    PlaybackCompatibility,
+    NullableReceiver,
+    UnsupportedOpcode,
+    RegisterLimit,
+    CodeSizeLimit,
+    ExceptionMapping,
+    ControlFlow,
+    Type,
+    NotAttempted,
+    Other,
+}
+
+impl Pvm2SkipReason {
+    fn classify(reason: &str) -> Self {
+        match reason {
+            "no_code" => Self::NoCode,
+            "initializer" => Self::Initializer,
+            "ui_runtime_glue" => Self::UiRuntimeGlue,
+            "data_resource_runtime_glue" => Self::DataResourceRuntimeGlue,
+            "compiler_generated_bridge" => Self::CompilerGeneratedBridge,
+            "playback_compatibility" => Self::PlaybackCompatibility,
+            "not_attempted" => Self::NotAttempted,
+            "too large" => Self::CodeSizeLimit,
+            r if r.contains("unsupported opcode 0x") => Self::UnsupportedOpcode,
+            r if r.contains("too many regs") => Self::RegisterLimit,
+            r if r.contains("nullable receiver") || r.contains("receiver register") => {
+                Self::NullableReceiver
+            }
+            r if r.contains("branch") => Self::ControlFlow,
+            r if r.contains("try ") || r.contains("tries") || r.contains("handler") => {
+                Self::ExceptionMapping
+            }
+            r if r.contains("unsupported return") || r.contains("argument type") => Self::Type,
+            _ => Self::Other,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::NoCode => "无 DEX 方法体（Native/抽象方法）",
+            Self::Initializer => "构造器/静态初始化器",
+            Self::UiRuntimeGlue => "界面/生命周期兼容规则",
+            Self::DataResourceRuntimeGlue => "数据/资源框架兼容规则",
+            Self::CompilerGeneratedBridge => "编译器生成桥接类",
+            Self::PlaybackCompatibility => "媒体/辅助类兼容规则",
+            Self::NullableReceiver => "接收者非空语义无法证明",
+            Self::UnsupportedOpcode => "不支持的指令",
+            Self::RegisterLimit => "寄存器超限",
+            Self::CodeSizeLimit => "方法大小超限",
+            Self::ExceptionMapping => "异常处理映射不支持",
+            Self::ControlFlow => "控制流不支持",
+            Self::Type => "类型不支持",
+            Self::NotAttempted => "未进入转换",
+            Self::Other => "其他原因（详见本地报告）",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pvm2FailureSummary {
+    /// 逐方法清单涉及的类，不计没有任何方法的空类。
+    pub selected_classes: usize,
+    pub selected_methods: usize,
+    pub reasons: BTreeMap<Pvm2SkipReason, usize>,
+}
+
+#[derive(Debug)]
+pub struct Pvm2Failure {
+    pub summary: Pvm2FailureSummary,
+    report: MethodReport,
+    report_path: Option<PathBuf>,
+    report_save_failed: bool,
+}
+
+impl Pvm2Failure {
+    pub(crate) fn zero_methods(path: &Path) -> Result<Self> {
+        ensure!(
+            fs::metadata(path)?.len() <= 64 * 1024 * 1024,
+            "方法失败报告超过 64 MiB 限制"
+        );
+        let report = MethodReport::read(path)?;
+        ensure!(
+            report.schema_version == 2
+                && report.code_version == 4
+                && matches!(report.image_version, 7 | 8),
+            "方法失败报告协议无效"
+        );
+        let mut classes = BTreeSet::new();
+        let mut methods = BTreeSet::new();
+        let mut reasons = BTreeMap::new();
+        for row in &report.methods {
+            ensure!(
+                valid_signature(&row.descriptor) && methods.insert((&row.module, &row.descriptor)),
+                "方法失败报告包含无效或重复方法"
+            );
+            ensure!(
+                row.transform_status == "skipped"
+                    && !row.artifact_verified
+                    && row.final_method_index.is_none()
+                    && row.final_dex_index.is_none(),
+                "零转换失败报告包含成功转换记录"
+            );
+            ensure!(
+                report
+                    .dexes
+                    .get(&row.input_dex)
+                    .is_some_and(|dex| dex.module == row.module),
+                "方法失败报告模块映射不一致"
+            );
+            let reason = row
+                .reason
+                .as_deref()
+                .filter(|r| !r.is_empty())
+                .context("方法失败报告缺少跳过原因")?;
+            classes.insert((&row.module, row.descriptor.split_once("->").unwrap().0));
+            *reasons.entry(Pvm2SkipReason::classify(reason)).or_insert(0) += 1;
+        }
+        let summary = Pvm2FailureSummary {
+            selected_classes: classes.len(),
+            selected_methods: methods.len(),
+            reasons,
+        };
+        Ok(Self {
+            summary,
+            report,
+            report_path: None,
+            report_save_failed: false,
+        })
+    }
+
+    /// APK/AAB 外层知道最终输出目录；在临时工作目录销毁前分别保留失败报告。
+    pub fn preserve(error: &mut crate::ShieldError, artifact: &Path) {
+        let crate::ShieldError::Other(source) = error else {
+            return;
+        };
+        let Some(failure) = source.downcast_mut::<Self>() else {
+            return;
+        };
+        failure.report_path = None;
+        match failure.save_report(artifact) {
+            Ok(path) => {
+                failure.report_path = Some(path);
+                failure.report_save_failed = false;
+            }
+            Err(_) => failure.report_save_failed = true,
+        }
+    }
+
+    fn save_report(&mut self, artifact: &Path) -> Result<PathBuf> {
+        let parent = artifact
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        self.report.build.insert("status".into(), "failed".into());
+        self.report
+            .build
+            .insert("failure_code".into(), "PVM2_ZERO_METHODS".into());
+        self.report.build.insert(
+            "failure_summary".into(),
+            serde_json::to_value(&self.summary)?,
+        );
+        // 每次失败独立留存，不覆盖之前的成功报告或失败证据；临时文件默认仅本机用户可读。
+        let mut file = tempfile::Builder::new()
+            .prefix("pvm2-failure-")
+            .suffix(".json")
+            .tempfile_in(parent)?;
+        serde_json::to_writer_pretty(&mut file, &self.report)?;
+        let (_, path) = file.keep()?;
+        Ok(path)
+    }
+}
+
+impl std::fmt::Display for Pvm2Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "PVM2_ZERO_METHODS：没有可转换的方法。逐方法清单涉及 {} 个类、{} 个方法，成功转换 0。",
+            self.summary.selected_classes, self.summary.selected_methods
+        )?;
+        for (reason, count) in &self.summary.reasons {
+            write!(f, "\n{}：{}", reason.label(), count)?;
+        }
+        if self.summary.selected_methods == 0 {
+            write!(
+                f,
+                "\n所选范围没有方法记录，请核对 APK 中的实际类名及选择范围。"
+            )?;
+        } else if self
+            .summary
+            .reasons
+            .keys()
+            .all(|r| matches!(r, Pvm2SkipReason::NoCode | Pvm2SkipReason::Initializer))
+        {
+            write!(f, "\n所选范围只有无 DEX 方法体或初始化方法，请选择含普通 DEX 方法体的业务范围；SO 内部函数需另走 Native 保护链路。")?;
+        } else {
+            if self.summary.reasons.keys().any(|r| {
+                matches!(
+                    r,
+                    Pvm2SkipReason::UiRuntimeGlue
+                        | Pvm2SkipReason::DataResourceRuntimeGlue
+                        | Pvm2SkipReason::CompilerGeneratedBridge
+                        | Pvm2SkipReason::PlaybackCompatibility
+                )
+            }) {
+                write!(f, "\n部分方法被兼容规则排除，请根据本地报告确认要保护的业务范围；不应强行绕过兼容检查。")?;
+            }
+            if self.summary.reasons.keys().any(|r| {
+                matches!(
+                    r,
+                    Pvm2SkipReason::NullableReceiver
+                        | Pvm2SkipReason::UnsupportedOpcode
+                        | Pvm2SkipReason::RegisterLimit
+                        | Pvm2SkipReason::CodeSizeLimit
+                        | Pvm2SkipReason::ExceptionMapping
+                        | Pvm2SkipReason::ControlFlow
+                        | Pvm2SkipReason::Type
+                        | Pvm2SkipReason::NotAttempted
+                        | Pvm2SkipReason::Other
+                )
+            }) {
+                write!(f, "\n存在转换能力或语义检查限制，请携带原因统计反馈，不能仅靠修改类前缀认定已解决。")?;
+            }
+        }
+        if let Some(path) = &self.report_path {
+            write!(
+                f,
+                "\n本地逐方法失败报告（含业务标识，请勿直接公开）：{}",
+                path.display()
+            )?;
+        } else if self.report_save_failed {
+            write!(
+                f,
+                "\n逐方法报告保存失败，请检查输出目录权限或磁盘空间；上述原因统计仍可复制。"
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for Pvm2Failure {}
+
 pub(crate) fn sha256(data: &[u8]) -> String {
     format!("{:x}", Sha256::digest(data))
 }
@@ -445,6 +695,125 @@ mod tests {
             "methods": [], "dexes": {}, "code_sha256": "",
             "artifact_dexes": {"base/dex/classes.dex": sha256(b"stub"), "feature/dex/classes.dex": sha256(b"feature")}
         })).unwrap()
+    }
+
+    #[test]
+    fn 零转换报告分类脱敏并在临时目录销毁后保留到实际输出目录() {
+        let temporary = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("methods.json");
+        let mut detail = report();
+        detail.dexes.insert(
+            "classes.dex".into(),
+            DexRecord {
+                module: "base".into(),
+                input_sha256: "input".into(),
+                output_sha256: "output".into(),
+            },
+        );
+        let cases = [
+            ("no_code", Pvm2SkipReason::NoCode),
+            ("initializer", Pvm2SkipReason::Initializer),
+            ("ui_runtime_glue", Pvm2SkipReason::UiRuntimeGlue),
+            (
+                "data_resource_runtime_glue",
+                Pvm2SkipReason::DataResourceRuntimeGlue,
+            ),
+            (
+                "compiler_generated_bridge",
+                Pvm2SkipReason::CompilerGeneratedBridge,
+            ),
+            (
+                "playback_compatibility",
+                Pvm2SkipReason::PlaybackCompatibility,
+            ),
+            (
+                "nullable receiver at register 3",
+                Pvm2SkipReason::NullableReceiver,
+            ),
+            ("unsupported opcode 0xfc", Pvm2SkipReason::UnsupportedOpcode),
+            ("too many regs", Pvm2SkipReason::RegisterLimit),
+            ("too large", Pvm2SkipReason::CodeSizeLimit),
+            ("handler cannot map", Pvm2SkipReason::ExceptionMapping),
+            ("bad branch target", Pvm2SkipReason::ControlFlow),
+            ("unsupported return Lprivate/Secret;", Pvm2SkipReason::Type),
+            ("not_attempted", Pvm2SkipReason::NotAttempted),
+            (
+                "private-customer /Users/private/project password=secret",
+                Pvm2SkipReason::Other,
+            ),
+        ];
+        for (i, (reason, _)) in cases.iter().enumerate() {
+            detail.methods.push(serde_json::from_value(serde_json::json!({
+                "module": "base", "descriptor": format!("Lprivate/Secret;->method{i}()V"), "required": false,
+                "input_instruction_bytes": 0, "input_dex": "classes.dex", "transform_status": "skipped",
+                "reason": reason, "artifact_verified": false, "plaintext_policy": null
+            })).unwrap());
+        }
+        detail.write(&path).unwrap();
+        let failure = Pvm2Failure::zero_methods(&path).unwrap();
+        assert_eq!(failure.summary.selected_classes, 1);
+        assert_eq!(failure.summary.selected_methods, cases.len());
+        for (_, reason) in cases {
+            assert_eq!(failure.summary.reasons[&reason], 1);
+        }
+        let safe = serde_json::to_string(&failure.summary).unwrap();
+        for secret in ["private", "Secret", "method0", "password", "/Users/"] {
+            assert!(!safe.contains(secret));
+        }
+        assert!(!failure.to_string().contains("private"));
+        let mut error = crate::ShieldError::from(anyhow::Error::new(failure));
+        Pvm2Failure::preserve(&mut error, &temporary.path().join("intermediate.apk"));
+        // AAB 复用 APK 核心时，必须重新保存到最终输出目录，不能留下将被删除的临时路径。
+        Pvm2Failure::preserve(&mut error, &output.path().join("final.aab"));
+        drop(temporary);
+        let crate::ShieldError::Other(source) = &error else {
+            panic!()
+        };
+        let failure = source.downcast_ref::<Pvm2Failure>().unwrap();
+        let saved = failure.report_path.clone().unwrap();
+        assert!(saved.is_file() && saved.starts_with(output.path()));
+        let stored: serde_json::Value = serde_json::from_slice(&fs::read(&saved).unwrap()).unwrap();
+        assert_eq!(stored["build"]["status"], "failed");
+        assert_eq!(stored["build"]["failure_code"], "PVM2_ZERO_METHODS");
+        assert_eq!(stored["methods"].as_array().unwrap().len(), cases.len());
+        assert!(!output.path().join("final.aab").exists());
+        assert!(!report_path(&output.path().join("final.aab")).exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&saved).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        Pvm2Failure::preserve(&mut error, &output.path().join("final.aab"));
+        assert!(saved.is_file());
+        Pvm2Failure::preserve(&mut error, &output.path().join("missing/final.aab"));
+        assert!(error.to_string().contains("报告保存失败"));
+        assert!(error.to_string().contains("成功转换 0"));
+    }
+
+    #[test]
+    fn 零转换诊断拒绝缺失损坏或夹带成功记录的报告() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("methods.json");
+        assert!(Pvm2Failure::zero_methods(&path).is_err());
+        fs::write(&path, b"broken").unwrap();
+        assert!(Pvm2Failure::zero_methods(&path).is_err());
+        let mut detail = report();
+        detail.write(&path).unwrap();
+        assert!(Pvm2Failure::zero_methods(&path)
+            .unwrap()
+            .to_string()
+            .contains("没有方法记录"));
+        detail.methods.push(serde_json::from_value(serde_json::json!({
+            "module": "base", "descriptor": "La/A;->value()I", "required": false, "input_instruction_bytes": 6,
+            "input_dex": "classes.dex", "transform_status": "transformed", "reason": null,
+            "artifact_verified": true, "plaintext_policy": "bounded_cache", "final_dex_index": 0, "final_method_index": 0
+        })).unwrap());
+        detail.write(&path).unwrap();
+        assert!(Pvm2Failure::zero_methods(&path).is_err());
     }
 
     #[test]

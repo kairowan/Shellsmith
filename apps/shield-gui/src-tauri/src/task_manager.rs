@@ -44,6 +44,7 @@ pub(crate) struct TaskSnapshot {
     pub(crate) finished_at_ms: Option<u64>,
     pub(crate) logs: Vec<TaskLog>,
     pub(crate) error: Option<String>,
+    pub(crate) pvm2_failure: Option<shield_core::protection_report::Pvm2FailureSummary>,
     #[serde(skip)]
     pub(crate) protect_succeeded: bool,
     #[serde(skip)]
@@ -103,6 +104,7 @@ impl TaskManager {
                 message: "任务已开始".to_string(),
             }],
             error: None,
+            pvm2_failure: None,
             protect_succeeded: false,
             signing_started: false,
         };
@@ -158,6 +160,7 @@ impl TaskManager {
         task_id: &str,
         status: TaskStatus,
         error: Option<String>,
+        pvm2_failure: Option<shield_core::protection_report::Pvm2FailureSummary>,
     ) -> Result<bool, String> {
         let mut tasks = self.0.lock().map_err(|_| "任务状态锁已损坏".to_string())?;
         let task = tasks
@@ -169,6 +172,7 @@ impl TaskManager {
         }
         task.finished_at_ms = Some(now);
         task.error = error.clone();
+        task.pvm2_failure = pvm2_failure;
         task.logs.push(TaskLog {
             timestamp_ms: now,
             step: task.current_step.clone(),

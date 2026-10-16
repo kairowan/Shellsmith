@@ -54,6 +54,7 @@ export function useProtectWorkflow({
   const [dragActive, setDragActive] = useState(false);
   const [warning, setWarning] = useState("");
   const [error, setError] = useState("");
+  const [pvm2Failure, setPvm2Failure] = useState<TaskSnapshot["pvm2_failure"]>(null);
   const [precheck, setPrecheck] = useState("");
   const [preflight, setPreflight] = useState<ApkCheckResult | null>(null);
   const [runtimeUi, setRuntimeUi] = useState(defaults.runtime_ui ?? defaultRuntimeUi);
@@ -119,6 +120,7 @@ export function useProtectWorkflow({
     setFilenameEdited(false);
     setState("idle");
     setError("");
+    setPvm2Failure(null);
     setPrecheck("");
     setPreflight(null);
     setWarning("");
@@ -157,6 +159,7 @@ export function useProtectWorkflow({
       }
       setWarning("");
       setError("");
+      setPvm2Failure(null);
       setPrecheck("");
       setPreflight(null);
       setCurrentStep("");
@@ -219,6 +222,7 @@ export function useProtectWorkflow({
       onTauriEvent<TaskSnapshot>("task-state", (payload) => {
         if (payload.kind !== "protect" || payload.task_id !== taskId.current) return;
         setCurrentStep(payload.current_step);
+        setPvm2Failure(payload.pvm2_failure ?? null);
         setCurrentDetail(payload.logs.at(-1)?.message ?? "");
         setStartedAt(payload.started_at_ms);
         setFinishedAt(payload.finished_at_ms ?? null);
@@ -292,6 +296,7 @@ export function useProtectWorkflow({
       started = true;
       setExcludedAbis(exclusions);
       setError("");
+      setPvm2Failure(null);
       setCurrentStep("CheckTools");
       setCurrentDetail("");
       setStartedAt(Date.now());
@@ -365,6 +370,7 @@ export function useProtectWorkflow({
     dragActive,
     warning,
     error,
+    pvm2Failure,
     precheck,
     preflight,
     runtimeMode,

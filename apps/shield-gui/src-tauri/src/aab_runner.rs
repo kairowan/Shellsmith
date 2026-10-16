@@ -172,7 +172,7 @@ pub(crate) async fn execute_protect_aab(
             if cancel.load(Ordering::Relaxed) {
                 ExecutionFailure::cancelled()
             } else {
-                ExecutionFailure::from(format!("{error:#}"))
+                ExecutionFailure::from_source(format!("{error:#}"), error.as_ref())
             }
         })?;
         task_manager

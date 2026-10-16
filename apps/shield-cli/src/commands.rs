@@ -448,7 +448,11 @@ pub fn run_protect_aab_with_control(
                     progress(&step, &event.message);
                 },
                 Arc::clone(&cancel),
-            )?;
+            )
+            .map_err(|mut error| {
+                shield_core::protection_report::Pvm2Failure::preserve(&mut error, &args.output);
+                error
+            })?;
         }
         ProtectionEngineArg::Xop => {
             let packer = args

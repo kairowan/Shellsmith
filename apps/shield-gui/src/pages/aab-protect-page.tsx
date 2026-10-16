@@ -2,9 +2,11 @@ import { RuntimeUiSettings } from "@/components/app/runtime-ui-settings";
 import { defaultRuntimeUi } from "@/lib/tauri";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderOpen, RotateCcw, Square } from "lucide-react";
+import { Clipboard, FolderOpen, RotateCcw, Square } from "lucide-react";
 import { AppButton, DropZone, SelectedApkCard, SelectInput, StatusMessage, TextInput } from "@/components/app/common";
 import { ProtectProgressPanel } from "@/components/app/protect-progress-panel";
+import { useClipboard } from "@/hooks/use-clipboard";
+import { buildPvm2FailureDiagnostic } from "@/lib/protect-diagnostic";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import {
   dirname,
@@ -55,6 +57,8 @@ export function AabProtectPage({
   const [inspection, setInspection] = useState<AabInspection | null>(null);
   const [state, setState] = useState<AabState>("idle");
   const [error, setError] = useState("");
+  const [pvm2Failure, setPvm2Failure] = useState<TaskSnapshot["pvm2_failure"]>(null);
+  const { copy } = useClipboard(locale);
   const [warning, setWarning] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [selectedCertificateId, setSelectedCertificateId] = useState("");
@@ -107,6 +111,7 @@ export function AabProtectPage({
     setState("prechecking");
     setInspection(null);
     setError("");
+    setPvm2Failure(null);
     try {
       const result = await api.checkAab(path);
       if (sequence !== checkSequence.current) return;
@@ -139,6 +144,7 @@ export function AabProtectPage({
     setInspection(null);
     setWarning("");
     setError("");
+    setPvm2Failure(null);
     setPrefixesText("");
     setPvm2RequiredMethods("");
     setCurrentStep("");
@@ -171,6 +177,7 @@ export function AabProtectPage({
     const unlisten = onTauriEvent<TaskSnapshot>("task-state", (task) => {
       if (task.kind !== "protect" || task.task_id !== taskId.current) return;
       setCurrentStep(task.current_step);
+      setPvm2Failure(task.pvm2_failure ?? null);
       setCurrentDetail(task.logs.at(-1)?.message ?? "");
       setStartedAt(task.started_at_ms);
       setFinishedAt(task.finished_at_ms ?? null);
@@ -194,6 +201,7 @@ export function AabProtectPage({
     taskId.current = crypto.randomUUID();
     setState("running");
     setError("");
+    setPvm2Failure(null);
     setCurrentStep("CheckTools");
     setCurrentDetail("");
     setStartedAt(Date.now());
@@ -236,6 +244,7 @@ export function AabProtectPage({
     setInspection(null);
     setState("idle");
     setError("");
+    setPvm2Failure(null);
     setWarning("");
     setPrefixesText("");
     setPvm2RequiredMethods("");
@@ -301,7 +310,7 @@ export function AabProtectPage({
                 </div>
               )}
               {state === "done" && <StatusMessage kind="success" action={<AppButton size="sm" variant="secondary" onClick={() => void api.showInFolder(output)}><FolderOpen className="h-4 w-4" />{t(locale, "showInFolder")}</AppButton>}>{t(locale, "aabProtectCompleted")}</StatusMessage>}
-              {error && <StatusMessage kind="error"><b>{t(locale, "errorDetail")}：</b>{error}</StatusMessage>}
+              {error && <StatusMessage kind="error" action={pvm2Failure && <AppButton size="sm" variant="secondary" onClick={() => void copy(buildPvm2FailureDiagnostic(pvm2Failure, locale))}><Clipboard className="h-4 w-4" />{t(locale, "copyDiagnosticSummary")}</AppButton>}><b>{t(locale, "errorDetail")}：</b>{error}</StatusMessage>}
             </div>
 
             {state === "running" || state === "done" ? (

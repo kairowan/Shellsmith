@@ -357,7 +357,13 @@ pub(crate) async fn install_update(
             Ok(())
         }
         Err(error) => {
-            let _ = tasks.finish(&window, &task_id, TaskStatus::Failed, Some(error.clone()));
+            let _ = tasks.finish(
+                &window,
+                &task_id,
+                TaskStatus::Failed,
+                Some(error.clone()),
+                None,
+            );
             Err(error)
         }
     }

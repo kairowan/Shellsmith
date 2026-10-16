@@ -161,7 +161,10 @@ pub fn protect_apk(
         .map_err(ShieldError::from)?;
     let mut working = opts.clone();
     working.output = staged.path().to_owned();
-    let report = protect_apk_inner(&working, on_progress, cancel)?;
+    let report = protect_apk_inner(&working, on_progress, cancel).map_err(|mut error| {
+        crate::protection_report::Pvm2Failure::preserve(&mut error, &opts.output);
+        error
+    })?;
     let has_report = report.is_some();
     if let Some(report) = report {
         report

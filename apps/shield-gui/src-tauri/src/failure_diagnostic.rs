@@ -1,6 +1,7 @@
 //! 将任务失败映射为受控诊断；不负责发送或持久化原始错误。
 use serde::{Deserialize, Serialize};
 use shield_core::diagnostic::{Diagnostic, FailureCode, ToolName, CLASSIFIER_VERSION};
+use shield_core::protection_report::{Pvm2Failure, Pvm2FailureSummary};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ExecutionFailure {
@@ -9,6 +10,7 @@ pub(crate) struct ExecutionFailure {
     pub(crate) cancelled: bool,
     /// 空字段等前置输入校验不属于已执行操作失败。
     pub(crate) executed: bool,
+    pub(crate) pvm2_failure: Option<Pvm2FailureSummary>,
 }
 
 impl ExecutionFailure {
@@ -18,6 +20,7 @@ impl ExecutionFailure {
             diagnostic: Diagnostic::new(FailureCode::Unknown),
             cancelled: true,
             executed: false,
+            pvm2_failure: None,
         }
     }
     pub(crate) fn diagnosed(message: String, diagnostic: Diagnostic) -> Self {
@@ -26,6 +29,7 @@ impl ExecutionFailure {
             diagnostic,
             cancelled: false,
             executed: true,
+            pvm2_failure: None,
         }
     }
     pub(crate) fn preflight(message: String, diagnostic: Diagnostic) -> Self {
@@ -34,16 +38,23 @@ impl ExecutionFailure {
             diagnostic,
             cancelled: false,
             executed: false,
+            pvm2_failure: None,
         }
     }
     pub(crate) fn from_shield(error: shield_core::ShieldError) -> Self {
+        let pvm2_failure = match &error {
+            shield_core::ShieldError::Other(source) => source
+                .downcast_ref::<Pvm2Failure>()
+                .map(|f| f.summary.clone()),
+            _ => None,
+        };
         let preflight = match &error {
             shield_core::ShieldError::Other(source) => {
                 shield_core::diagnostic::is_preflight_error(source)
             }
             _ => false,
         };
-        match Diagnostic::from_shield(&error) {
+        let mut failure = match Diagnostic::from_shield(&error) {
             Some(diagnostic) if preflight => Self::preflight(error.to_string(), diagnostic),
             Some(diagnostic) => Self::diagnosed(error.to_string(), diagnostic),
             None => Self {
@@ -51,8 +62,34 @@ impl ExecutionFailure {
                 diagnostic: Diagnostic::new(FailureCode::Unknown),
                 cancelled: true,
                 executed: false,
+                pvm2_failure: None,
             },
+        };
+        failure.pvm2_failure = pvm2_failure;
+        failure
+    }
+
+    pub(crate) fn from_source(message: String, error: &(dyn std::error::Error + 'static)) -> Self {
+        let mut failure = Self::from(message);
+        let mut cause = Some(error);
+        while let Some(value) = cause {
+            if let Some(pvm2) = value.downcast_ref::<Pvm2Failure>() {
+                failure.pvm2_failure = Some(pvm2.summary.clone());
+                break;
+            }
+            if let Some(shield_core::ShieldError::Other(source)) =
+                value.downcast_ref::<shield_core::ShieldError>()
+            {
+                failure.pvm2_failure = source
+                    .downcast_ref::<Pvm2Failure>()
+                    .map(|f| f.summary.clone());
+                if failure.pvm2_failure.is_some() {
+                    break;
+                }
+            }
+            cause = value.source();
         }
+        failure
     }
 }
 impl From<String> for ExecutionFailure {
@@ -62,6 +99,7 @@ impl From<String> for ExecutionFailure {
             diagnostic: Diagnostic::new(FailureCode::Unknown),
             cancelled: false,
             executed: true,
+            pvm2_failure: None,
         }
     }
 }

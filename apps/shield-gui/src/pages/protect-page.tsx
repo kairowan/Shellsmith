@@ -148,6 +148,7 @@ export function ProtectPage({
     xopPvm2Configured: pvmReady,
     currentStep: workflow.currentStep,
     failed: workflow.state === "failed",
+    pvm2Failure: workflow.pvm2Failure,
   }));
   const diagnosticCopyLabel = copiedLabel === t(locale, "copied") ? copiedLabel : t(locale, "copyDiagnosticSummary");
   const minSdk = workflow.preflight?.facts.min_sdk;

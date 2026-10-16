@@ -68,7 +68,8 @@ public final class Pvm2Report {
                 if (impl != null) for (var instruction : impl.getInstructions()) size += instruction.getCodeUnits() * 2;
                 String reason = impl == null ? "no_code" : method.getName().startsWith("<") ? "initializer" : "not_attempted";
                 String exclusion = AutoVmpPolicy.exclusionReason(cls.getType());
-                if (!required.contains(id) && exclusion != null) reason = exclusion;
+                // 没有方法体和初始化器先按实际结构计数，避免被类级兼容规则掩盖。
+                if (reason.equals("not_attempted") && !required.contains(id) && exclusion != null) reason = exclusion;
                 JSONObject row = new JSONObject().put("module", module).put("descriptor", signature)
                         .put("required", required.contains(id)).put("input_instruction_bytes", size)
                         .put("input_dex", file.getName()).put("transform_status", "skipped")

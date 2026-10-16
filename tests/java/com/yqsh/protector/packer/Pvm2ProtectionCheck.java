@@ -99,6 +99,7 @@ public final class Pvm2ProtectionCheck {
         }
         assert Pvm2Safety.check(new short[]{0x0238, 4, 0x1020, 0, 0x0038, 5, 0x106e, 0, 1, 0x000e}, 3, 2, true, false) != null;
         Path root = Path.of(args[0]);
+        checkZeroMethodReports(root);
         Path dex = Files.createDirectory(root.resolve("dex"));
         fixture(dex.resolve("classes.dex"));
         fixture(dex.resolve("classes3.dex"));
@@ -187,11 +188,55 @@ public final class Pvm2ProtectionCheck {
     }
 
     private static void run(Path dex, Path config, Path code, Path report, boolean prefixes) throws Exception {
+        run(dex, config, code, report, prefixes ? "Lfixture/" : null);
+    }
+
+    private static void run(Path dex, Path config, Path code, Path report, String prefix) throws Exception {
         List<String> args = new ArrayList<>(List.of("pvm2-transform", "--dex-dir", dex.toString(), "--code-out", code.toString(), "--insn-key-hex", KEY, "--package-name", "fixture.unrelated", "--vm-bridge", BRIDGE, "--report-config", config.toString(), "--report-out", report.toString(), "--no-payment-auto-vmp", "--no-industry-auto-vmp"));
-        if (prefixes) args.addAll(List.of("--true-vmp-prefix", "Lfixture/"));
+        if (prefix != null) args.addAll(List.of("--true-vmp-prefix", prefix));
         Method method = PackerMain.class.getDeclaredMethod("runPvm2TransformCli", String[].class);
         method.setAccessible(true);
         method.invoke(null, (Object) args.toArray(String[]::new));
+    }
+
+    private static void checkZeroMethodReports(Path root) throws Exception {
+        // 三种真实零转换原因：无 DEX 方法体、类级兼容排除、编译器寄存器上限。
+        for (String kind : List.of("native", "ui", "registers")) {
+            Path work = Files.createDirectory(root.resolve("zero-" + kind));
+            Path dex = Files.createDirectory(work.resolve("dex"));
+            String owner = kind.equals("ui") ? "Lfixture/MainActivity;" : "Lfixture/Rules;";
+            List<ImmutableMethod> methods = new ArrayList<>();
+            methods.add(new ImmutableMethod(owner, "nativeCall", List.of(), "I", 0x109, Set.of(), Set.of(), null));
+            methods.add(new ImmutableMethod(owner, "<clinit>", List.of(), "V", 0x10008, Set.of(), Set.of(),
+                    new ImmutableMethodImplementation(0, List.of(new ImmutableInstruction10x(Opcode.RETURN_VOID)), List.of(), List.of())));
+            if (!kind.equals("native")) methods.add(new ImmutableMethod(owner, "value", List.of(), "I", 9, Set.of(), Set.of(),
+                    new ImmutableMethodImplementation(kind.equals("registers") ? 512 : 1,
+                            List.of(new ImmutableInstruction31i(Opcode.CONST, 0, 42), new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of())));
+            DexPool pool = new DexPool(Opcodes.getDefault());
+            pool.internClass(new ImmutableClassDef(owner, 1, "Ljava/lang/Object;", List.of(), null, Set.of(), List.of(), methods));
+            FileDataStore store = new FileDataStore(dex.resolve("classes.dex").toFile());
+            try { pool.writeTo(store); } finally { store.close(); }
+            Path config = work.resolve("config.json"), report = work.resolve("report.json");
+            Files.writeString(config, new JSONObject().put("schema_version", 2)
+                    .put("modules", new JSONObject().put("classes.dex", "base")).put("required", new JSONArray()).toString());
+            try {
+                run(dex, config, work.resolve("code.bin"), report, "Lfixture/");
+                throw new AssertionError("零方法转换被误判为成功");
+            } catch (InvocationTargetException expected) {
+                assert expected.getCause().getMessage().contains("selected zero methods");
+            }
+            JSONObject result = new JSONObject(Files.readString(report));
+            Map<String, Integer> reasons = new TreeMap<>();
+            for (Object value : result.getJSONArray("methods")) {
+                JSONObject row = (JSONObject) value;
+                assert row.getString("transform_status").equals("skipped") && !row.getBoolean("artifact_verified");
+                reasons.merge(row.getString("reason"), 1, Integer::sum);
+            }
+            assert reasons.get("no_code") == 1 && reasons.get("initializer") == 1 : reasons;
+            if (kind.equals("ui")) assert reasons.get("ui_runtime_glue") == 1 : reasons;
+            if (kind.equals("registers")) assert reasons.get("too many regs") == 1 : reasons;
+            System.out.println("零方法失败报告通过：" + kind + " " + reasons);
+        }
     }
 
     private static void fixture(Path path) throws Exception {

@@ -28,6 +28,10 @@ pub(crate) fn finish_task(
         task_id,
         status,
         result.as_ref().err().map(|error| error.message.clone()),
+        result
+            .as_ref()
+            .err()
+            .and_then(|error| error.pvm2_failure.clone()),
     )? {
         window
             .state::<crate::application_sharing::SharingState>()
