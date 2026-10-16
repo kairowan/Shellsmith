@@ -3167,8 +3167,10 @@ PROTECTOR_ENCRYPT static jobject interpret_body(JNIEnv* env, int dex_index, uint
             case OP_THROW: {
                 if (pc + 1 > code_size) goto fail;
                 uint8_t src = code[pc++];
-                if (!reg_bounds(src, regs.size()) || regs[src].o == nullptr) goto fail;
-                env->Throw(static_cast<jthrowable>(regs[src].o));
+                if (!reg_bounds(src, regs.size())) goto fail;
+                // throw null 与 ART 一致地产生 NPE，且必须经过当前方法的异常表。
+                if (regs[src].o == nullptr) throw_npe(env, "throw null");
+                else env->Throw(static_cast<jthrowable>(regs[src].o));
                 if (dispatch_exception(env, img, fault_pc, &pc, &stashed_exception)) {
                     break;
                 }

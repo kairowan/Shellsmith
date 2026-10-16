@@ -92,8 +92,8 @@ int main(int argc, char** argv) {
     assert(written == 123 && std::all_of(std::begin(boundary), std::end(boundary), [](uint8_t c) { return c == 0xa5; }));
     const auto plain = image();
     std::vector<uint8_t> code;
-    u16(code, 4); u16(code, 1); u32(code, 8); u32(code, 2); u16(code, argc > 1 && std::string(argv[1]) != "block-before-init" ? 170 : 98);
-    for (int i = 0; i < (argc > 1 && std::string(argv[1]) != "block-before-init" ? 170 : 98); i++) {
+    u16(code, 4); u16(code, 1); u32(code, 8); u32(code, 2); u16(code, argc > 1 && std::string(argv[1]) != "block-before-init" ? 188 : 98);
+    for (int i = 0; i < (argc > 1 && std::string(argv[1]) != "block-before-init" ? 188 : 98); i++) {
         auto bytes = plain;
         if (i >= 98) {
             std::ifstream input(std::string(argv[1]) + "/image" + std::to_string(i - 98) + ".bin", std::ios::binary);
@@ -346,6 +346,56 @@ int main(int argc, char** argv) {
     env->DeleteLocalRef(unary); env->DeleteLocalRef(array); env->DeleteLocalRef(text);
     env->DeleteLocalRef(equalText); env->DeleteLocalRef(alias);
     puts("引用叶子方法：三种 ISA 共 666 次透传、空值选择、身份比较、数组引用及清理验证通过");
+    // 继承类/接口方法沿用相同跳板参数布局，this 不能和首个业务参数混淆。
+    jclass arithmetic = env->FindClass("java/lang/ArithmeticException");
+    jclass nullPointer = env->FindClass("java/lang/NullPointerException");
+    jobject thrown = env->NewObject(arithmetic, env->GetMethodID(arithmetic, "<init>", "()V"));
+    jobjectArray instanceArgs = env->NewObjectArray(2, objectClass, nullptr);
+    jobjectArray thisOnly = env->NewObjectArray(1, objectClass, nullptr);
+    int compatibilityChecks = 0;
+    for (int isa = 0; isa < 3; isa++) for (jobject receiver : {sentinel, wrappers[0]}) {
+        assert(receiver);
+        env->SetObjectArrayElement(instanceArgs, 0, receiver);
+        env->SetObjectArrayElement(thisOnly, 0, receiver);
+        result = interpret(env, 2, 182 + isa, thisOnly);
+        assert(!env->ExceptionCheck() && env->IsSameObject(result, receiver));
+        env->DeleteLocalRef(result); compatibilityChecks++;
+        for (jobject argument : {receiver, thrown, static_cast<jobject>(nullptr)}) {
+            env->SetObjectArrayElement(instanceArgs, 1, argument);
+            result = interpret(env, 2, 185 + isa, instanceArgs);
+            assert(!env->ExceptionCheck() && env->IsSameObject(result, argument));
+            if (result) env->DeleteLocalRef(result);
+            compatibilityChecks++;
+        }
+        for (int kind = 0; kind < 3; kind++) for (int divisor : {INT32_MIN, -3, 0, 1, 2, INT32_MAX}) {
+            jobject argument = env->CallStaticObjectMethod(integer, box, divisor);
+            env->SetObjectArrayElement(instanceArgs, 1, argument); env->DeleteLocalRef(argument);
+            result = interpret(env, 2, 170 + kind * 3 + isa, instanceArgs);
+            if (kind == 1 && divisor == 0) {
+                assert(!result && env->ExceptionCheck());
+                jthrowable error = env->ExceptionOccurred(); env->ExceptionClear();
+                assert(env->IsInstanceOf(error, arithmetic)); env->DeleteLocalRef(error);
+            } else {
+                int expected = kind == 2 ? (divisor == 0 ? 42 : 40 / divisor + 2) : (divisor == 0 ? -7 : 12 / divisor);
+                assert(result && !env->ExceptionCheck() && env->CallIntMethod(result, unbox) == expected);
+                env->DeleteLocalRef(result);
+            }
+            compatibilityChecks++;
+        }
+        for (jobject argument : {thrown, static_cast<jobject>(nullptr)}) {
+            env->SetObjectArrayElement(instanceArgs, 1, argument);
+            result = interpret(env, 2, 179 + isa, instanceArgs);
+            assert(!result && env->ExceptionCheck());
+            jthrowable error = env->ExceptionOccurred(); env->ExceptionClear();
+            assert(argument ? env->IsSameObject(error, argument) : env->IsInstanceOf(error, nullPointer));
+            env->DeleteLocalRef(error); compatibilityChecks++;
+        }
+    }
+    assert(compatibilityChecks == 144);
+    for (int id = 170; id < 188; id++) assert(!items.at(id)->parsed_vm && items.at(id)->vm_image.capacity() == 0);
+    env->DeleteLocalRef(arithmetic); env->DeleteLocalRef(nullPointer); env->DeleteLocalRef(thrown);
+    env->DeleteLocalRef(instanceArgs); env->DeleteLocalRef(thisOnly);
+    puts("继承与异常方法：三种 ISA 共 144 次 this/参数身份、捕获优先级、不匹配异常传播、finally 清理及重抛身份检查通过");
     for (jobject wrapper : wrappers) if (wrapper) env->DeleteLocalRef(wrapper);
     env->DeleteLocalRef(sentinel); env->DeleteLocalRef(tailArgs); env->DeleteLocalRef(mixedArgs); env->DeleteLocalRef(objectClass);
     puts("声明参数类型：5 种包装引用、null、混合宽参数、数量/类型错误拒绝通过");

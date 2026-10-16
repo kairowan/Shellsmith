@@ -110,5 +110,32 @@ public final class Pvm2RuntimeImages {
             Files.write(Path.of(args[0], "image" + i + ".gcm"),
                     com.yqsh.protector.packer.util.CryptoUtils.aesGcmEncrypt(new byte[16], result.image));
         }
+        String owner = "Lfixture/ui/VirtualRules;";
+        List<ImmutableMethod> methods = new ArrayList<>(Pvm2ProtectionCheck.exceptionMethods(owner));
+        methods.add(new ImmutableMethod(owner, "self", List.of(), "Ljava/lang/Object;", 1, Set.of(), Set.of(),
+                new ImmutableMethodImplementation(1, List.of(new ImmutableInstruction11x(Opcode.RETURN_OBJECT, 0)), List.of(), List.of())));
+        methods.add(new ImmutableMethod(owner, "identity", List.of(new ImmutableMethodParameter("Ljava/lang/Object;", Set.of(), null)),
+                "Ljava/lang/Object;", 1, Set.of(), Set.of(), new ImmutableMethodImplementation(2,
+                        List.of(new ImmutableInstruction11x(Opcode.RETURN_OBJECT, 1)), List.of(), List.of())));
+        var cls = new ImmutableClassDef(owner, 1, "Lexternal/Base;", List.of("Lexternal/Contract;"), null, Set.of(), List.of(), methods);
+        DexPool pool = new DexPool(Opcodes.getDefault()); pool.internClass(cls);
+        Path path = Path.of(args[0], "compatibility.dex");
+        FileDataStore store = new FileDataStore(path.toFile());
+        try { pool.writeTo(store); } finally { store.close(); }
+        Dex compatibility = new Dex(path.toFile());
+        Map<String, Code> bodies = new HashMap<>();
+        for (var definition : compatibility.classDefs()) for (var method : compatibility.readClassData(definition).allMethods())
+            bodies.put(compatibility.strings().get(compatibility.methodIds().get(method.getMethodIndex()).getNameIndex()), compatibility.readCode(method));
+        for (int kind = 0; kind < methods.size(); kind++) for (int isa = 0; isa < 3; isa++) {
+            var method = methods.get(kind);
+            if (AutoVmpPolicy.exclusionReason(cls, method) != null) throw new AssertionError("兼容样本未准入");
+            var result = Pvm2Compiler.tryCompile(compatibility, bodies.get(method.getName()), method.getReturnType(), false,
+                    Pvm2Morph.fromIsa(isa, new SecureRandom()), true, method.getParameterTypes().stream().map(CharSequence::toString).toArray(String[]::new));
+            if (!result.isOk()) throw new AssertionError(method.getName() + ": " + result.failReason);
+            int index = 72 + kind * 3 + isa;
+            Files.write(Path.of(args[0], "image" + index + ".bin"), result.image);
+            Files.write(Path.of(args[0], "image" + index + ".gcm"),
+                    com.yqsh.protector.packer.util.CryptoUtils.aesGcmEncrypt(new byte[16], result.image));
+        }
     }
 }

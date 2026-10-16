@@ -22,6 +22,15 @@ ANDROID_SERIAL=目标设备序列号 RUN_DEVICE_TEST=1 PVM2_STRICT_TEST=1 \
 
 存在多台在线设备时必须设置 `ANDROID_SERIAL`，脚本不会随机选择设备。候选版设备矩阵使用 `tests/scripts/run-device-matrix.sh`。脚本可盘点设备、以 `MATRIX_PVM2_STRICT_TEST=1` 逐设备执行 strict APK E2E，或安装 bundletool 生成的 APKS split，并可用 `MATRIX_REQUIRED_APIS/ABIS/VENDORS` 对缺失格子失败关闭；报告不保存 adb serial。dynamic-feature 必须执行功能代码探针，install-time Asset Pack 必须执行 PAS2 解密读取探针，不能只以 base 进程存活标记通过。
 
+PVM2 方法准入、跳板或异常语义调整后，还需运行 Java/D8 到 ART 的语义回归（JDK 17、SDK 35、Build Tools 35.0.0，以及已构建的 CLI、打包器和标准壳）：
+
+```bash
+ANDROID_SDK_ROOT=/本机/Android/sdk \
+  python3 tests/scripts/check-pvm2-art.py --serial 目标设备序列号
+```
+
+该脚本自建无资源 APK 和测试证书，核验 26 个转换方法及 10 个保留方法，覆盖继承/接口分派、D8 桥接、私有方法反射、引用身份、整数边界、捕获顺序、重抛与 `finally`。每次启动以独立标记确认 482 项断言；执行未加固基线、加固首次启动、再次启动、覆盖安装及基线恢复。省略 `--serial` 仅构建并检查产物；指定设备时只安装测试包，不卸载应用或清除设备日志。默认保留合法空资源表，`--without-resource-table` 补测完全无资源表的 APK。结果写入 `target/pvm2-art-checks/result.json`，模拟器通过不能代替厂商真机验收。
+
 AAB 候选版必须验证：`bundletool validate` 通过、APKS 包含预期 base/ABI/功能或 Asset Pack split、安装后进程保持运行，并在日志中观察到 PVM2 功能代码、PAS2 资源和业务 `.so` 探针。当前本机证据覆盖 API 35/Android 15 与 API 36/Android 16 的 arm64 install-time 组合；Google Play 内测和 Play App Signing 仍是独立门禁。
 
 ## 使用时机

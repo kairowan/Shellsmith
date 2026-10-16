@@ -100,8 +100,10 @@ public final class Pvm2ProtectionCheck {
         }
         assert Pvm2Safety.check(new short[]{0x0238, 4, 0x1020, 0, 0x0038, 5, 0x106e, 0, 1, 0x000e}, 3, 2, true, false) != null;
         Path root = Path.of(args[0]);
+        checkEmptyResourceTable(root);
         checkZeroMethodReports(root);
         checkMethodCompatibility(root);
+        checkInheritedExceptions(root);
         Path dex = Files.createDirectory(root.resolve("dex"));
         fixture(dex.resolve("classes.dex"));
         fixture(dex.resolve("classes3.dex"));
@@ -211,7 +213,7 @@ public final class Pvm2ProtectionCheck {
             methods.add(new ImmutableMethod(owner, "nativeCall", List.of(), "I", 0x109, Set.of(), Set.of(), null));
             methods.add(new ImmutableMethod(owner, "<clinit>", List.of(), "V", 0x10008, Set.of(), Set.of(),
                     new ImmutableMethodImplementation(0, List.of(new ImmutableInstruction10x(Opcode.RETURN_VOID)), List.of(), List.of())));
-            if (!kind.equals("native")) methods.add(new ImmutableMethod(owner, "value", List.of(), "I", kind.equals("ui") ? 1 : 9, Set.of(), Set.of(),
+            if (!kind.equals("native")) methods.add(new ImmutableMethod(owner, kind.equals("ui") ? "hashCode" : "value", List.of(), "I", kind.equals("ui") ? 1 : 9, Set.of(), Set.of(),
                     new ImmutableMethodImplementation(kind.equals("registers") ? 512 : 1,
                             List.of(new ImmutableInstruction31i(Opcode.CONST, 0, 42), new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of())));
             DexPool pool = new DexPool(Opcodes.getDefault());
@@ -253,6 +255,102 @@ public final class Pvm2ProtectionCheck {
         return new ImmutableClassDef(type, 1, parent, interfaces, null, Set.of(), List.of(), methods);
     }
 
+    // 同一批异常方法同时用于真实打包检查和生产 Native 解释器执行，避免只验证准入结果。
+    static List<ImmutableMethod> exceptionMethods(String owner) {
+        var parameter = List.of(new ImmutableMethodParameter("I", Set.of(), null));
+        var division = List.of(new ImmutableInstruction21s(Opcode.CONST_16, 0, 12),
+                new ImmutableInstruction23x(Opcode.DIV_INT, 0, 0, 2), new ImmutableInstruction11x(Opcode.RETURN, 0),
+                new ImmutableInstruction11x(Opcode.MOVE_EXCEPTION, 0), new ImmutableInstruction11n(Opcode.CONST_4, 0, -7),
+                new ImmutableInstruction11x(Opcode.RETURN, 0));
+        var ordered = new ArrayList<com.android.tools.smali.dexlib2.iface.instruction.Instruction>(division);
+        ordered.addAll(List.of(new ImmutableInstruction11x(Opcode.MOVE_EXCEPTION, 0),
+                new ImmutableInstruction11n(Opcode.CONST_4, 0, -8), new ImmutableInstruction11x(Opcode.RETURN, 0),
+                new ImmutableInstruction11x(Opcode.MOVE_EXCEPTION, 0), new ImmutableInstruction21s(Opcode.CONST_16, 0, -9),
+                new ImmutableInstruction11x(Opcode.RETURN, 0)));
+        return List.of(
+            new ImmutableMethod(owner, "ordered", parameter, "I", 1, Set.of(), Set.of(),
+                new ImmutableMethodImplementation(3, ordered, List.of(new ImmutableTryBlock(2, 2, List.of(
+                    new ImmutableExceptionHandler("Ljava/lang/ArithmeticException;", 5),
+                    new ImmutableExceptionHandler("Ljava/lang/RuntimeException;", 8), new ImmutableExceptionHandler(null, 11)))), List.of())),
+            new ImmutableMethod(owner, "mismatch", parameter, "I", 1, Set.of(), Set.of(),
+                new ImmutableMethodImplementation(3, division, List.of(new ImmutableTryBlock(2, 2,
+                    List.of(new ImmutableExceptionHandler("Ljava/lang/NullPointerException;", 5)))), List.of())),
+            new ImmutableMethod(owner, "cleanup", parameter, "I", 1, Set.of(), Set.of(),
+                new ImmutableMethodImplementation(4, List.of(
+                    new ImmutableInstruction21s(Opcode.CONST_16, 0, 40),
+                    new ImmutableInstruction23x(Opcode.DIV_INT, 1, 0, 3),
+                    new ImmutableInstruction22b(Opcode.ADD_INT_LIT8, 0, 1, 2), new ImmutableInstruction11x(Opcode.RETURN, 0),
+                    new ImmutableInstruction11x(Opcode.MOVE_EXCEPTION, 1),
+                    new ImmutableInstruction22b(Opcode.ADD_INT_LIT8, 0, 0, 2), new ImmutableInstruction11x(Opcode.THROW, 1),
+                    new ImmutableInstruction11x(Opcode.MOVE_EXCEPTION, 1), new ImmutableInstruction11x(Opcode.RETURN, 0)),
+                    List.of(new ImmutableTryBlock(2, 2, List.of(new ImmutableExceptionHandler(null, 7))),
+                            new ImmutableTryBlock(7, 4, List.of(new ImmutableExceptionHandler("Ljava/lang/ArithmeticException;", 11)))), List.of())),
+            new ImmutableMethod(owner, "rethrow", List.of(new ImmutableMethodParameter("Ljava/lang/Throwable;", Set.of(), null)),
+                "V", 1, Set.of(), Set.of(), new ImmutableMethodImplementation(3, List.of(
+                    new ImmutableInstruction11x(Opcode.THROW, 2), new ImmutableInstruction11x(Opcode.MOVE_EXCEPTION, 0),
+                    new ImmutableInstruction11x(Opcode.THROW, 0)),
+                    List.of(new ImmutableTryBlock(0, 1, List.of(new ImmutableExceptionHandler("Ljava/lang/Throwable;", 1)))), List.of())));
+    }
+
+    private static void checkInheritedExceptions(Path root) throws Exception {
+        Path work = Files.createDirectory(root.resolve("inherited-exceptions"));
+        Path dex = Files.createDirectory(work.resolve("dex"));
+        String base = "Lfixture/contracts/Base;", contract = "Lfixture/contracts/Contract;";
+        var declaration = new ImmutableMethod(contract, "calculate0", List.of(new ImmutableMethodParameter("I", Set.of(), null)),
+                "I", 0x401, Set.of(), Set.of(), null);
+        writeClasses(dex.resolve("classes2.dex"), List.of(calculationOwner(base, "Ljava/lang/Object;", List.of(),
+                List.of(new ImmutableMethod(base, "<init>", List.of(), "V", 0x10001, Set.of(), Set.of(),
+                        new ImmutableMethodImplementation(1, List.of(new ImmutableInstruction35c(Opcode.INVOKE_DIRECT, 1, 0, 0, 0, 0, 0,
+                                new ImmutableMethodReference("Ljava/lang/Object;", "<init>", List.of(), "V")),
+                                new ImmutableInstruction10x(Opcode.RETURN_VOID)), List.of(), List.of())),
+                        new ImmutableMethod(base, "calculate0", declaration.getParameters(), "I", 1, Set.of(), Set.of(),
+                                new ImmutableMethodImplementation(2, List.of(new ImmutableInstruction11n(Opcode.CONST_4, 0, -1),
+                                        new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of())))),
+                new ImmutableClassDef(contract, 0x601, "Ljava/lang/Object;", List.of(), null, Set.of(), List.of(), List.of(declaration))));
+        byte[] contracts = Files.readAllBytes(dex.resolve("classes2.dex"));
+        List<ImmutableClassDef> selected = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            String type = "Lfixture/ui/Rules" + i + ";";
+            // 覆盖跨 DEX 父类、接口，以及包外框架父类；不依赖外部 SDK 解析继承图。
+            String parent = i == 2 ? "Landroid/app/Activity;" : base;
+            List<ImmutableMethod> methods = new ArrayList<>();
+            methods.add(new ImmutableMethod(type, "<init>", List.of(), "V", 0x10001, Set.of(), Set.of(),
+                    new ImmutableMethodImplementation(1, List.of(new ImmutableInstruction35c(Opcode.INVOKE_DIRECT, 1, 0, 0, 0, 0, 0,
+                            new ImmutableMethodReference(parent, "<init>", List.of(), "V")), new ImmutableInstruction10x(Opcode.RETURN_VOID)), List.of(), List.of())));
+            for (int j = 0; j < (i == 2 ? 2 : 6); j++) methods.add(calculation(type, "calculate" + j, j == 1 ? 4 : 1));
+            if (i == 2) methods.addAll(exceptionMethods(type));
+            selected.add(calculationOwner(type, parent, List.of(contract), methods));
+        }
+        writeClasses(dex.resolve("classes.dex"), selected);
+        Path config = work.resolve("config.json"), report = work.resolve("report.json");
+        Files.writeString(config, new JSONObject().put("schema_version", 2).put("modules", new JSONObject()
+                .put("classes.dex", "base").put("classes2.dex", "base")).put("required", new JSONArray()).toString());
+        run(dex, config, work.resolve("code.bin"), report, "Lfixture/ui/");
+        int verified = 0, initializers = 0;
+        for (Object item : new JSONObject(Files.readString(report)).getJSONArray("methods")) {
+            JSONObject row = (JSONObject)item;
+            if (row.getBoolean("artifact_verified")) verified++;
+            else { assert row.getString("reason").equals("initializer") : row; initializers++; }
+        }
+        assert verified == 18 && initializers == 3;
+        assert Arrays.equals(contracts, Files.readAllBytes(dex.resolve("classes2.dex")));
+        var rewritten = new DexBackedDexFile(Opcodes.getDefault(), Files.readAllBytes(dex.resolve("classes.dex")));
+        for (var cls : rewritten.getClasses()) {
+            var original = selected.stream().filter(c -> c.getType().equals(cls.getType())).findFirst().orElseThrow();
+            assert cls.getSuperclass().equals(original.getSuperclass()) && cls.getInterfaces().equals(original.getInterfaces());
+            for (var method : cls.getMethods()) {
+                var before = new ArrayList<ImmutableMethod>(); original.getMethods().forEach(before::add);
+                var declarationBefore = before.stream().filter(m -> Pvm2Report.descriptor(m).equals(Pvm2Report.descriptor(method))).findFirst().orElseThrow();
+                assert method.getAccessFlags() == declarationBefore.getAccessFlags();
+                assert method.getAnnotations().equals(declarationBefore.getAnnotations());
+                assert method.getParameters().equals(declarationBefore.getParameters());
+                if (!method.getName().startsWith("<")) assert TrueVmpTrampoline.matches(method, 0,
+                        rewritten.getMethodSection().indexOf(method), BRIDGE, "interpret");
+            }
+        }
+        System.out.println("继承与异常兼容：跨 DEX/包外父类/接口的 14 个虚方法、4 个异常方法全部完成转换及产物验证，3 个初始化器保留");
+    }
+
     private static void writeClasses(Path path, List<ImmutableClassDef> classes) throws Exception {
         DexPool pool = new DexPool(Opcodes.getDefault());
         for (var cls : classes) pool.internClass(cls);
@@ -285,12 +383,12 @@ public final class Pvm2ProtectionCheck {
         var staticMethod = calculation(type, "utility", 9);
         for (String parent : List.of("Landroid/app/Activity;", "Lfixture/BaseActivity;", "Lexternal/Unknown;")) {
             var cls = calculationOwner(type, parent, List.of(), List.of());
-            assert AutoVmpPolicy.exclusionReason(cls, publicMethod).equals("ui_runtime_glue:virtual_contract");
+            assert AutoVmpPolicy.exclusionReason(cls, publicMethod) == null;
             assert AutoVmpPolicy.exclusionReason(cls, privateMethod) == null;
             assert AutoVmpPolicy.exclusionReason(cls, staticMethod) == null;
         }
         var callback = calculationOwner(type, "Ljava/lang/Object;", List.of("Lexternal/Callback;"), List.of());
-        assert AutoVmpPolicy.exclusionReason(callback, publicMethod).equals("ui_runtime_glue:virtual_contract");
+        assert AutoVmpPolicy.exclusionReason(callback, publicMethod) == null;
         var plain = calculationOwner(type, "Ljava/lang/Object;", List.of(), List.of());
         for (int flags : List.of(0x29, 0x20009, 0x49, 0x1009))
             assert AutoVmpPolicy.exclusionReason(plain, calculation(type, "calculate", flags)) != null;
@@ -301,14 +399,14 @@ public final class Pvm2ProtectionCheck {
                         new ImmutableInstruction11x(Opcode.RETURN, 0), new ImmutableInstruction11x(Opcode.MOVE_EXCEPTION, 0),
                         new ImmutableInstruction11n(Opcode.CONST_4, 0, 0), new ImmutableInstruction11x(Opcode.RETURN, 0)),
                         List.of(new ImmutableTryBlock(0, 1, List.of(new ImmutableExceptionHandler(null, 2)))), List.of()));
-        assert AutoVmpPolicy.exclusionReason(plain, caught).equals("ui_runtime_glue:exception_region");
+        assert AutoVmpPolicy.exclusionReason(plain, caught) == null;
         for (String generated : List.of("Lfixture/Rules$$ExternalSyntheticLambda0;", "Lfixture/Rules$1;"))
             assert AutoVmpPolicy.exclusionReason(calculationOwner(generated, "Ljava/lang/Object;", List.of(), List.of()),
                     calculation(generated, "calculate", 9)).equals("compiler_generated_bridge");
-        // 混淆类仍直接继承已知框架类型时，生命周期和接口回调保持原执行方式。
+        // 混淆或框架继承不改变无状态方法体；入口契约由跳板保留。
         var obfuscated = calculation("Lfixture/a;", "callback", 1);
-        assert AutoVmpPolicy.exclusionReason(calculationOwner("Lfixture/a;", "Landroid/app/Activity;", List.of(), List.of()), obfuscated).equals("ui_runtime_glue:virtual_contract");
-        assert AutoVmpPolicy.exclusionReason(calculationOwner("Lfixture/a;", "Ljava/lang/Object;", List.of("Landroid/view/View$OnClickListener;"), List.of()), obfuscated).equals("ui_runtime_glue:virtual_contract");
+        assert AutoVmpPolicy.exclusionReason(calculationOwner("Lfixture/a;", "Landroid/app/Activity;", List.of(), List.of()), obfuscated) == null;
+        assert AutoVmpPolicy.exclusionReason(calculationOwner("Lfixture/a;", "Ljava/lang/Object;", List.of("Landroid/view/View$OnClickListener;"), List.of()), obfuscated) == null;
         // 字段/数组元素访问、调用和锁仍不能借叶子方法规则放行。
         var field = new ImmutableFieldReference(type, "state", "I");
         var call = new ImmutableMethodReference(type, "external", List.of(), "I");
@@ -380,10 +478,13 @@ public final class Pvm2ProtectionCheck {
         var references = new JSONObject(Files.readString(report)).getJSONArray("methods");
         assert references.length() == 84;
         for (Object value : references) assert ((JSONObject)value).getBoolean("artifact_verified") : value;
-        // 精确必保清单也必须服从同一兼容判断；声明回调不会使其自动变得安全。
+        // 精确必保清单不能绕过特殊对象方法的重入限制。
         String activity = "Lfixture/ui/ScreenActivity;";
         var sensitive = calculationOwner(activity, "Landroid/app/Activity;", List.of(),
-                List.of(calculation(activity, "callback", 1), calculation(activity, "local", 2)));
+                List.of(new ImmutableMethod(activity, "hashCode", List.of(), "I", 1, Set.of(), Set.of(),
+                        new ImmutableMethodImplementation(1, List.of(new ImmutableInstruction11n(Opcode.CONST_4, 0, 1),
+                                new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of())),
+                        calculation(activity, "local", 2)));
         writeClasses(dex.resolve("classes.dex"), List.of(sensitive));
         var captured = new java.io.ByteArrayOutputStream();
         var previous = System.out;
@@ -404,18 +505,48 @@ public final class Pvm2ProtectionCheck {
         assert kept == 1 && protectedCount == 1 : "转换成功率不能代替完整范围覆盖率";
         for (boolean safe : List.of(true, false)) {
             writeClasses(dex.resolve("classes.dex"), List.of(sensitive));
-            selection.put("required", new JSONArray(List.of("base\t" + activity + "->" + (safe ? "local" : "callback") + "(I)I")));
+            selection.put("required", new JSONArray(List.of("base\t" + activity + "->" + (safe ? "local(I)I" : "hashCode()I"))));
             Files.writeString(config, selection.toString());
             try {
                 run(dex, config, code, report, false);
-                assert safe : "回调被精确清单绕过兼容检查";
+                assert safe : "特殊对象方法被精确清单绕过兼容检查";
             } catch (InvocationTargetException failure) {
                 assert !safe && failure.getCause().getMessage().contains("关键方法未通过验证");
                 JSONObject row = new JSONObject(Files.readString(report)).getJSONArray("methods").getJSONObject(0);
                 assert !row.getBoolean("artifact_verified") && row.getString("reason").equals("ui_runtime_glue:virtual_contract");
             }
         }
-        System.out.println("方法级兼容检查通过：通用命名、独立计算、回调保留、必保约束、18 个计算方法、60 个引用叶子方法及 24 个基本类型短方法转换");
+        System.out.println("方法级兼容检查通过：通用命名、独立计算、特殊契约保留、必保约束、18 个计算方法、60 个引用叶子方法及 24 个基本类型短方法转换");
+    }
+
+    private static void checkEmptyResourceTable(Path root) throws Exception {
+        Path unpack = Files.createDirectory(root.resolve("resource-table"));
+        Path xml = Files.createDirectories(unpack.resolve("res/values")).resolve("public.xml");
+        Path dex = unpack.resolve("classes.dex");
+        fixture(dex);
+        byte[] before = Files.readAllBytes(dex);
+        for (String source : List.of("<resources/>", "<resources><!-- 无资源 --></resources>",
+                "<resources><public type=\"string\" name=\"only\" id=\"0x7f010000\"/></resources>")) {
+            Files.writeString(xml, source);
+            var result = ResourceIdRewriter.rewrite(unpack.toFile());
+            assert result.mapping.isEmpty() && result.dexFiles == 1;
+            assert Files.readString(xml).equals(source) && Arrays.equals(before, Files.readAllBytes(dex));
+        }
+        for (String source : List.of("<wrong/>", "<resources><public id=\"invalid\"/></resources>",
+                "<resources><public id=\"0x7f010000\"/><public id=\"0x7f010000\"/></resources>")) {
+            Files.writeString(xml, source);
+            try { ResourceIdRewriter.rewrite(unpack.toFile()); throw new AssertionError("未拒绝损坏资源表"); }
+            catch (java.io.IOException expected) { }
+        }
+        Files.delete(xml);
+        try { ResourceIdRewriter.rewrite(unpack.toFile()); throw new AssertionError("未拒绝缺失资源表"); }
+        catch (java.io.IOException expected) { }
+        Files.delete(xml.getParent()); Files.delete(unpack.resolve("res"));
+        assert ResourceIdRewriter.rewrite(unpack.toFile()).mapping.isEmpty();
+        Files.write(unpack.resolve("resources.arsc"), new byte[]{0});
+        try { ResourceIdRewriter.rewrite(unpack.toFile()); throw new AssertionError("未拒绝未解码资源表"); }
+        catch (java.io.IOException expected) { }
+        System.out.println("资源表检查通过：无资源、空表和单资源保持不变，损坏或未解码资源表仍拒绝");
     }
 
     private static void fixture(Path path) throws Exception {
@@ -428,7 +559,7 @@ public final class Pvm2ProtectionCheck {
         DexPool pool = new DexPool(Opcodes.getDefault());
         pool.internClass(new ImmutableClassDef(OWNER, 1, "Ljava/lang/Object;", List.of(), null, Set.of(), List.of(), methods));
         String excluded = "Lfixture/MainActivity;";
-        var unchanged = new ImmutableMethod(excluded, "value", List.of(), "I", 1, Set.of(), Set.of(),
+        var unchanged = new ImmutableMethod(excluded, "hashCode", List.of(), "I", 1, Set.of(), Set.of(),
                 new ImmutableMethodImplementation(1, List.of(new ImmutableInstruction31i(Opcode.CONST, 0, 42),
                         new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of()));
         pool.internClass(new ImmutableClassDef(excluded, 1, "Landroid/app/Activity;", List.of(), null, Set.of(), List.of(), List.of(unchanged)));

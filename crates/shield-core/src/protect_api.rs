@@ -22,7 +22,8 @@ use crate::protect::{
     },
     native_alias::verify_in_apk,
     resource_format::{
-        normalize_mislabeled_jpeg_resources, restore_original_resources, verify_original_resources,
+        normalize_empty_resource_metadata, normalize_mislabeled_jpeg_resources,
+        restore_original_resources, verify_original_resources,
     },
     runtime::{inject_runtime, read_runtime_selection},
 };
@@ -400,6 +401,9 @@ fn protect_apk_inner(
     )
     .map_err(ShieldError::from)?;
     print_success("解包完成");
+    if normalize_empty_resource_metadata(&apk_dir).map_err(ShieldError::from)? {
+        print_success("已修正无资源 APK 的资源编译元数据");
+    }
     remove_excluded(&apk_dir, &opts.excluded_abis).map_err(ShieldError::from)?;
     if !opts.excluded_abis.is_empty() {
         let message = format!("已从输出排除 ABI：{}", opts.excluded_abis.join("、"));

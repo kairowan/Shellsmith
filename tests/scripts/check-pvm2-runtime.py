@@ -24,6 +24,7 @@ static inline int __android_log_print(int, const char*, const char*, ...) { retu
     jar = ROOT / 'tools/xop-pvm2-packer.jar'
     subprocess.run([sys.executable, str(ROOT / 'scripts/build_pvm2_packer.py'), '--check'], check=True)
     subprocess.run(['javac', '--release', '17', '-cp', str(jar), '-d', str(temp),
+                    str(ROOT / 'tests/java/com/yqsh/protector/packer/Pvm2ProtectionCheck.java'),
                     str(ROOT / 'tests/java/com/yqsh/protector/packer/Pvm2RuntimeImages.java')], check=True)
     subprocess.run(['java', '-cp', str(temp) + os.pathsep + str(jar),
                     'com.yqsh.protector.packer.Pvm2RuntimeImages', str(temp)], check=True)

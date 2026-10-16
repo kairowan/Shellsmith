@@ -445,6 +445,10 @@ fn capture_resource_source(
 ) -> Result<(ResourceEntryFingerprints, u32)> {
     let file = fs::File::open(apk).context("打开待资源混淆 APK 失败")?;
     let mut archive = ZipArchive::new(file).context("解析待资源混淆 APK 失败")?;
+    // ponytail: 没有路径改写时校验器不读取资源表 CRC；无资源 APK 合法缺少该表。
+    if mapping.is_empty() {
+        return Ok((BTreeMap::new(), 0));
+    }
     let mut entries = BTreeMap::new();
     for old in mapping.keys() {
         let entry = archive
@@ -1377,5 +1381,29 @@ mod tests {
     fn empty_resource_id_mapping_is_a_valid_compatibility_noop() {
         let mapping = NamedTempFile::new().unwrap();
         assert_eq!(validate_resource_id_mapping(mapping.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn 无资源表只允许空路径映射() {
+        let apk = NamedTempFile::new().unwrap();
+        let mut archive = zip::ZipWriter::new(apk.reopen().unwrap());
+        archive
+            .start_file(
+                "res/drawable/a.bin",
+                zip::write::SimpleFileOptions::default(),
+            )
+            .unwrap();
+        archive.finish().unwrap();
+        assert_eq!(
+            capture_resource_source(apk.path(), &BTreeMap::new()).unwrap(),
+            (BTreeMap::new(), 0)
+        );
+        let mapping = BTreeMap::from([("res/drawable/a.bin".into(), "r/a.bin".into())]);
+        assert!(capture_resource_source(apk.path(), &mapping)
+            .unwrap_err()
+            .to_string()
+            .contains("resources.arsc"));
+        fs::write(apk.path(), b"invalid zip").unwrap();
+        assert!(capture_resource_source(apk.path(), &BTreeMap::new()).is_err());
     }
 }

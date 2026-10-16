@@ -8,6 +8,33 @@ use zip::{ZipArchive, ZipWriter};
 
 const JPEG_SIGNATURE: [u8; 3] = [0xFF, 0xD8, 0xFF];
 
+/// 修正 Apktool 3 对空资源表的包信息及无资源表时遗漏的 Android 框架引用。
+pub(crate) fn normalize_empty_resource_metadata(apk_dir: &Path) -> Result<bool> {
+    let path = apk_dir.join("apktool.yml");
+    let metadata = fs::read_to_string(&path).context("读取 Apktool 资源元数据失败")?;
+    // ponytail: 只修正 Apktool 3 已验证的空表输出格式；其他格式保持原样，不猜测资源 ID。
+    let mut normalized = metadata
+        .replace("resourcesInfo:\n  packageId: 0\n  packageName: \n", "")
+        .replace(
+            "resourcesInfo:\r\n  packageId: 0\r\n  packageName: \r\n",
+            "",
+        );
+    // 完全无资源表时 Apktool 不记录框架，但重编 Manifest 的 android:* 属性仍需要它。
+    if !apk_dir.join("res").exists()
+        && !apk_dir.join("resources.arsc").exists()
+        && !metadata
+            .lines()
+            .any(|line| line.starts_with("usesFramework:") || line.starts_with("resourcesInfo:"))
+    {
+        normalized.push_str("\nusesFramework:\n  ids:\n  - 1\n");
+    }
+    if normalized == metadata {
+        return Ok(false);
+    }
+    fs::write(path, normalized).context("修正 Apktool 空资源元数据失败")?;
+    Ok(true)
+}
+
 /// Apktool 必须重编 Manifest，但不能因此丢掉输入 APK 已有的资源名混淆。
 /// 用输入 APK 的原始 `resources.arsc` 和 `res/` 条目覆盖重编结果，其他受保护
 /// 条目（Manifest、Stub DEX、Native Runtime）保持不变。

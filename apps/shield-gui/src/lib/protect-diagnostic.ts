@@ -56,7 +56,7 @@ export function buildPvm2FailureDiagnostic(summary: Pvm2FailureSummary, locale: 
     data_resource_runtime_glue: ["数据/资源框架兼容规则", "Data/resource compatibility"],
     compiler_generated_bridge: ["编译器生成桥接/合成方法", "Compiler-generated bridge/synthetic method"],
     playback_compatibility: ["媒体/辅助类兼容规则", "Media/helper compatibility"],
-    compatibility_virtual_contract: ["兼容范围：继承/接口虚方法契约未验证", "Compatibility: unverified inherited/interface contract"],
+    compatibility_virtual_contract: ["兼容范围：特殊对象方法或虚方法契约未验证", "Compatibility: unverified special object method or virtual contract"],
     compatibility_synchronization: ["兼容范围：同步方法", "Compatibility: synchronized method"],
     compatibility_exception_region: ["兼容范围：含异常处理区", "Compatibility: exception region"],
     compatibility_non_leaf_instruction: ["兼容范围：含叶子方法白名单之外的指令", "Compatibility: instruction outside the leaf allowlist"],

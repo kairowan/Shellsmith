@@ -1,4 +1,7 @@
-use super::resource_format::{normalize_mislabeled_jpeg_resources, restore_original_resources};
+use super::resource_format::{
+    normalize_empty_resource_metadata, normalize_mislabeled_jpeg_resources,
+    restore_original_resources,
+};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -6,6 +9,58 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 const JPEG_PREFIX: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+
+#[test]
+fn 空资源元数据修正不影响普通资源包或共享库() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("apktool.yml");
+    for newline in ["\n", "\r\n"] {
+        for (id, name, empty) in [
+            (0, "", true),
+            (0, "shared.library", false),
+            (127, "app", false),
+        ] {
+            let prefix = "version: 3.0.3\nusesFramework:\n  ids:\n  - 1\n";
+            let suffix = "doNotCompress:\n- arsc\n";
+            let source = format!(
+                "{prefix}resourcesInfo:\n  packageId: {id}\n  packageName: {name}\n{suffix}"
+            )
+            .replace('\n', newline);
+            fs::write(&path, &source).unwrap();
+            assert_eq!(
+                normalize_empty_resource_metadata(dir.path()).unwrap(),
+                empty
+            );
+            let expected = if empty {
+                format!("{prefix}{suffix}").replace('\n', newline)
+            } else {
+                source
+            };
+            assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+            assert!(!normalize_empty_resource_metadata(dir.path()).unwrap());
+        }
+    }
+    for source in [
+        "version: 3.0.3\n",
+        "version: 3.0.3\nusesFramework:\n  ids:\n  - 2\n",
+    ] {
+        fs::write(&path, source).unwrap();
+        let missing = !source.contains("usesFramework:");
+        assert_eq!(
+            normalize_empty_resource_metadata(dir.path()).unwrap(),
+            missing
+        );
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            if missing {
+                format!("{source}\nusesFramework:\n  ids:\n  - 1\n")
+            } else {
+                source.to_string()
+            }
+        );
+        assert!(!normalize_empty_resource_metadata(dir.path()).unwrap());
+    }
+}
 
 #[test]
 fn jpeg_伪装_png_会无损改名为_jpg() {

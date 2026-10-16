@@ -81,12 +81,20 @@ public final class ResourceIdRewriter {
     }
 
     public static Result rewrite(File unpackRoot) throws Exception {
+        // Apktool 解包完全不含资源表的 APK 时不生成 res 目录。
+        if (!new File(unpackRoot, "res").exists() && !new File(unpackRoot, "resources.arsc").exists())
+            return new Result(Map.of(), 0, listDexFiles(unpackRoot).size());
         File publicXml = new File(unpackRoot, "res/values/public.xml");
         if (!publicXml.isFile()) {
             throw new IOException("resource ID reorder requires res/values/public.xml");
         }
         Document document = parseXml(publicXml);
+        if (!"resources".equals(document.getDocumentElement().getTagName())) {
+            throw new IOException("public.xml requires a resources root");
+        }
         NodeList nodes = document.getElementsByTagName("public");
+        // 无资源 APK 的合法空表无需重排；损坏或缺失的表仍须报错。
+        if (nodes.getLength() == 0) return new Result(Map.of(), 0, listDexFiles(unpackRoot).size());
         Map<Integer, Element> entries = new LinkedHashMap<>();
         Map<Integer, List<Integer>> byType = new LinkedHashMap<>();
         Set<Integer> semanticPins = new HashSet<>();
