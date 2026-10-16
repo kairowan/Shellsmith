@@ -117,7 +117,9 @@ public final class Pvm2Admission {
         if (r.contains("try ") || r.contains("tries") || r.contains("handler")) {
             return SkipReason.try_catch;
         }
-        if (r.contains("playback compatibility") || r.contains("media compatibility")) {
+        if (r.contains("playback compatibility") || r.contains("media compatibility")
+                || r.equals("playback_compatibility") || r.equals("ui_runtime_glue")
+                || r.equals("data_resource_runtime_glue") || r.equals("compiler_generated_bridge")) {
             return SkipReason.compatibility;
         }
         if (r.contains("nullable receiver") || r.contains("receiver register")) {

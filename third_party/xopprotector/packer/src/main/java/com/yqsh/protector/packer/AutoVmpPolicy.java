@@ -1,5 +1,9 @@
 package com.yqsh.protector.packer;
 
+import com.android.tools.smali.dexlib2.Opcode;
+import com.android.tools.smali.dexlib2.Opcodes;
+import com.android.tools.smali.dexlib2.iface.ClassDef;
+import com.android.tools.smali.dexlib2.iface.Method;
 import java.util.List;
 import java.util.Locale;
 
@@ -7,6 +11,7 @@ import java.util.Locale;
  * Resolve and match auto True-VMP policy per {@code doc/auto-true-vmp-contract.md}.
  */
 public final class AutoVmpPolicy {
+    private static final Opcodes OPCODES = Opcodes.getDefault();
 
     private AutoVmpPolicy() {
     }
@@ -106,9 +111,61 @@ public final class AutoVmpPolicy {
                                         boolean industryEffective,
                                         List<String> trueVmpPrefixes,
                                         String appPackagePrefix) {
-        return exclusionReason(typeDescriptor) == null
-                && matchesRequestedScope(typeDescriptor, paymentEffective, industryEffective,
+        // 类前缀只决定选择范围；兼容性必须在读取方法体后判断。
+        return matchesRequestedScope(typeDescriptor, paymentEffective, industryEffective,
                         trueVmpPrefixes, appPackagePrefix);
+    }
+
+    /** 报告与实际转换共用，精确必保清单也不能绕过方法兼容检查。 */
+    static String exclusionReason(ClassDef owner, Method method) {
+        String reason = exclusionReason(owner.getType());
+        int flags = method.getAccessFlags();
+        // 生成桥接与合成方法保持原有接收者和调用约定。
+        if ((flags & (0x40 | 0x1000)) != 0 || (owner.getAccessFlags() & 0x1000) != 0
+                || "compiler_generated_bridge".equals(reason)) return "compiler_generated_bridge";
+        // 直接父类和接口仍暴露框架契约时，混淆后的类名不能使回调漏过检查。
+        if (reason == null && owner.getSuperclass() != null)
+            reason = exclusionReason(owner.getSuperclass());
+        if (reason == null) for (String contract : owner.getInterfaces()) {
+            reason = exclusionReason(contract);
+            if (reason != null) break;
+        }
+        if (reason == null && PlaybackCompatibility.keepOnArt(owner.getType(), method.getName()))
+            reason = "playback_compatibility";
+        if (reason == null) return null;
+        return isIndependentCalculation(owner, method) ? null : reason;
+    }
+
+    private static boolean isIndependentCalculation(ClassDef owner, Method method) {
+        int flags = method.getAccessFlags();
+        var code = method.getImplementation();
+        if (code == null || method.getName().startsWith("<") || !code.getTryBlocks().isEmpty()
+                || (flags & (0x20 | 0x20000)) != 0) return false;
+        // 私有/静态方法不覆盖框架回调；其它实例方法仅放行无继承/接口契约的普通类。
+        // ponytail: 未解析外部及跨 DEX 父类的回调契约，保守保留其虚方法；扩展需完整继承图验证。
+        if ((flags & (0x2 | 0x8)) == 0 && (!"Ljava/lang/Object;".equals(owner.getSuperclass())
+                || !owner.getInterfaces().isEmpty() || method.getName().equals("hashCode")
+                || method.getName().equals("finalize"))) return false;
+        if (!primitive(method.getReturnType(), true)) return false;
+        for (CharSequence parameter : method.getParameterTypes())
+            if (!primitive(parameter.toString(), false)) return false;
+        // ponytail: 命名兼容排除仅放行无对象/字段/数组/外部调用的数值叶子方法；其余语义仍由 ART 执行。
+        // 后续扩展须先证明对象状态与框架调用语义，不能直接移除包路径或类名规则。
+        for (var instruction : code.getInstructions()) {
+            Opcode opcode = instruction.getOpcode();
+            if (opcode == Opcode.PACKED_SWITCH_PAYLOAD || opcode == Opcode.SPARSE_SWITCH_PAYLOAD) continue;
+            Short value = OPCODES.getOpcodeValue(opcode);
+            if (value == null) return false;
+            int op = Short.toUnsignedInt(value);
+            if (!(op <= 0x06 || (op >= 0x0e && op <= 0x10) || (op >= 0x12 && op <= 0x19)
+                    || (op >= 0x28 && op <= 0x3d) || (op >= 0x7b && op <= 0xe2))) return false;
+        }
+        return true;
+    }
+
+    private static boolean primitive(String type, boolean allowVoid) {
+        return type != null && type.length() == 1
+                && ((allowVoid && type.equals("V")) || "ZBSCIJFD".indexOf(type.charAt(0)) >= 0);
     }
 
     /** 兼容性排除只影响执行准入，不能从用户选择范围的覆盖率分母中消失。 */

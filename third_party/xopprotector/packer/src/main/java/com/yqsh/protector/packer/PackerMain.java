@@ -1701,6 +1701,17 @@ public class PackerMain {
         int autoIndustryTypes = 0;
         int autoIndustryMethods = 0;
         Set<String> trueVmpMethodKeys = new HashSet<>();
+        Map<String, String> pvm2Exclusions = new HashMap<>();
+        var input = new com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile(
+                com.android.tools.smali.dexlib2.Opcodes.getDefault(), data);
+        for (var cls : input.getClasses()) {
+            if (!shouldTrueVmp(cls.getType())
+                    && !(methodReport != null && methodReport.requiresType(cls.getType()))) continue;
+            for (var method : cls.getMethods()) {
+                String reason = AutoVmpPolicy.exclusionReason(cls, method);
+                if (reason != null) pvm2Exclusions.put(Pvm2Report.descriptor(method).replace("->", "#"), reason);
+            }
+        }
 
         // Phase 1: TRUE_VMP only. DexPool rebuilds the constant pool; any hollow
         // payload captured before that rewrite has stale string/type/method indices
@@ -1709,7 +1720,7 @@ public class PackerMain {
         com.android.dex.Dex dex = new com.android.dex.Dex(Files.readAllBytes(outputDex.toPath()));
         try (RandomAccessFile raf = new RandomAccessFile(outputDex, "rw")) {
             int[] typeCounters = walkDexMethods(dex, raf, aesKey, ExtractPhase.TRUE_VMP_ONLY,
-                    records, trueVmpTargets, trueVmpMethodKeys, dexIndex, null);
+                    records, trueVmpTargets, trueVmpMethodKeys, dexIndex, null, pvm2Exclusions);
             autoPaymentTypes += typeCounters[0];
             autoIndustryTypes += typeCounters[1];
             autoPaymentMethods += typeCounters[2];
@@ -1733,7 +1744,7 @@ public class PackerMain {
             dex = new com.android.dex.Dex(Files.readAllBytes(outputDex.toPath()));
             try (RandomAccessFile raf = new RandomAccessFile(outputDex, "rw")) {
                 int[] typeCounters = walkDexMethods(dex, raf, aesKey, ExtractPhase.HOLLOW_OR_VMP,
-                        records, trueVmpTargets, trueVmpMethodKeys, dexIndex, trueVmpMethodKeys);
+                        records, trueVmpTargets, trueVmpMethodKeys, dexIndex, trueVmpMethodKeys, pvm2Exclusions);
                 // Type counters already counted in phase 1 for overlapping types; only
                 // add methods newly hollowed that are payment/industry (rare).
                 autoPaymentMethods += typeCounters[2];
@@ -1759,7 +1770,7 @@ public class PackerMain {
                                  ExtractPhase phase, List<InsnRecord> records,
                                  List<TrueVmpTrampoline.Target> trueVmpTargets,
                                  Set<String> trueVmpMethodKeys, int dexIndex,
-                                 Set<String> skipMethodKeys) throws Exception {
+                                 Set<String> skipMethodKeys, Map<String, String> pvm2Exclusions) throws Exception {
         int autoPayTypes = 0;
         int autoIndustryTypes = 0;
         int autoPayMethods = 0;
@@ -1783,7 +1794,7 @@ public class PackerMain {
             com.android.dex.ClassData classData = dex.readClassData(classDef);
             for (com.android.dex.ClassData.Method method : classData.getDirectMethods()) {
                 notePvm2MethodScanned(phase);
-                InsnRecord rec = extractOne(dex, raf, method, aesKey, type, phase, skipMethodKeys);
+                InsnRecord rec = extractOne(dex, raf, method, aesKey, type, phase, skipMethodKeys, pvm2Exclusions);
                 if (rec == null) {
                     continue;
                 }
@@ -1809,7 +1820,7 @@ public class PackerMain {
             }
             for (com.android.dex.ClassData.Method method : classData.getVirtualMethods()) {
                 notePvm2MethodScanned(phase);
-                InsnRecord rec = extractOne(dex, raf, method, aesKey, type, phase, skipMethodKeys);
+                InsnRecord rec = extractOne(dex, raf, method, aesKey, type, phase, skipMethodKeys, pvm2Exclusions);
                 if (rec == null) {
                     continue;
                 }
@@ -2062,7 +2073,7 @@ public class PackerMain {
     private InsnRecord extractOne(com.android.dex.Dex dex, RandomAccessFile raf,
                                   com.android.dex.ClassData.Method method, byte[] aesKey,
                                   String typeDescriptor, ExtractPhase phase,
-                                  Set<String> skipMethodKeys) throws Exception {
+                                  Set<String> skipMethodKeys, Map<String, String> pvm2Exclusions) throws Exception {
         if (method.getCodeOffset() == 0) return null;
         // Constructors/clinit must keep invokespecial/super; returning stubs fail ART verify.
         com.android.dex.MethodId methodId = dex.methodIds().get(method.getMethodIndex());
@@ -2097,14 +2108,19 @@ public class PackerMain {
                 && !(methodReport != null && methodReport.requires(key))) {
             return null;
         }
-        if (PlaybackCompatibility.keepOnArt(typeDescriptor, methodName)) {
-            if (phase == ExtractPhase.TRUE_VMP_ONLY) {
+        if (phase == ExtractPhase.TRUE_VMP_ONLY && pvm2Exclusions.containsKey(key)) {
+            String reason = pvm2Exclusions.get(key);
+            // 保持原转换成功率口径：类兼容预筛不算编译尝试；媒体准入失败仍计入。
+            // 完整选择范围的覆盖率由逐方法报告统计，不能在这里删除跳过项。
+            if (reason.equals("playback_compatibility")) {
                 pvm2Admission.noteCandidate();
-                pvm2Admission.noteFail("playback compatibility");
-                if (methodReport != null) methodReport.skipped(key, "playback_compatibility");
-                System.out.println("TRUE_VMP skip " + typeDescriptor + "->" + methodName
-                        + ": playback compatibility");
+                pvm2Admission.noteFail(reason);
             }
+            if (methodReport != null) methodReport.skipped(key, reason);
+            System.out.println("TRUE_VMP skip " + typeDescriptor + "->" + methodName + ": " + reason);
+            return null;
+        }
+        if (phase == ExtractPhase.HOLLOW_OR_VMP && PlaybackCompatibility.keepOnArt(typeDescriptor, methodName)) {
             return null;
         }
         if (phase == ExtractPhase.HOLLOW_OR_VMP

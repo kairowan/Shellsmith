@@ -101,7 +101,7 @@ impl Pvm2SkipReason {
             Self::Initializer => "构造器/静态初始化器",
             Self::UiRuntimeGlue => "界面/生命周期兼容规则",
             Self::DataResourceRuntimeGlue => "数据/资源框架兼容规则",
-            Self::CompilerGeneratedBridge => "编译器生成桥接类",
+            Self::CompilerGeneratedBridge => "编译器生成桥接/合成方法",
             Self::PlaybackCompatibility => "媒体/辅助类兼容规则",
             Self::NullableReceiver => "接收者非空语义无法证明",
             Self::UnsupportedOpcode => "不支持的指令",

@@ -54,7 +54,7 @@ export function buildPvm2FailureDiagnostic(summary: Pvm2FailureSummary, locale: 
     initializer: ["构造器/静态初始化器", "Initializer"],
     ui_runtime_glue: ["界面/生命周期兼容规则", "UI/lifecycle compatibility"],
     data_resource_runtime_glue: ["数据/资源框架兼容规则", "Data/resource compatibility"],
-    compiler_generated_bridge: ["编译器生成桥接类", "Compiler-generated bridge"],
+    compiler_generated_bridge: ["编译器生成桥接/合成方法", "Compiler-generated bridge/synthetic method"],
     playback_compatibility: ["媒体/辅助类兼容规则", "Media/helper compatibility"],
     nullable_receiver: ["接收者非空语义无法证明", "Nullable receiver"],
     unsupported_opcode: ["不支持的指令", "Unsupported opcode"],

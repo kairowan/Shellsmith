@@ -4,6 +4,7 @@ import com.android.tools.smali.dexlib2.*;
 import com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile;
 import com.android.tools.smali.dexlib2.immutable.*;
 import com.android.tools.smali.dexlib2.immutable.instruction.*;
+import com.android.tools.smali.dexlib2.immutable.reference.*;
 import com.android.tools.smali.dexlib2.writer.io.FileDataStore;
 import com.android.tools.smali.dexlib2.writer.pool.DexPool;
 import org.json.*;
@@ -100,6 +101,7 @@ public final class Pvm2ProtectionCheck {
         assert Pvm2Safety.check(new short[]{0x0238, 4, 0x1020, 0, 0x0038, 5, 0x106e, 0, 1, 0x000e}, 3, 2, true, false) != null;
         Path root = Path.of(args[0]);
         checkZeroMethodReports(root);
+        checkMethodCompatibility(root);
         Path dex = Files.createDirectory(root.resolve("dex"));
         fixture(dex.resolve("classes.dex"));
         fixture(dex.resolve("classes3.dex"));
@@ -209,11 +211,11 @@ public final class Pvm2ProtectionCheck {
             methods.add(new ImmutableMethod(owner, "nativeCall", List.of(), "I", 0x109, Set.of(), Set.of(), null));
             methods.add(new ImmutableMethod(owner, "<clinit>", List.of(), "V", 0x10008, Set.of(), Set.of(),
                     new ImmutableMethodImplementation(0, List.of(new ImmutableInstruction10x(Opcode.RETURN_VOID)), List.of(), List.of())));
-            if (!kind.equals("native")) methods.add(new ImmutableMethod(owner, "value", List.of(), "I", 9, Set.of(), Set.of(),
+            if (!kind.equals("native")) methods.add(new ImmutableMethod(owner, "value", List.of(), "I", kind.equals("ui") ? 1 : 9, Set.of(), Set.of(),
                     new ImmutableMethodImplementation(kind.equals("registers") ? 512 : 1,
                             List.of(new ImmutableInstruction31i(Opcode.CONST, 0, 42), new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of())));
             DexPool pool = new DexPool(Opcodes.getDefault());
-            pool.internClass(new ImmutableClassDef(owner, 1, "Ljava/lang/Object;", List.of(), null, Set.of(), List.of(), methods));
+            pool.internClass(new ImmutableClassDef(owner, 1, kind.equals("ui") ? "Landroid/app/Activity;" : "Ljava/lang/Object;", List.of(), null, Set.of(), List.of(), methods));
             FileDataStore store = new FileDataStore(dex.resolve("classes.dex").toFile());
             try { pool.writeTo(store); } finally { store.close(); }
             Path config = work.resolve("config.json"), report = work.resolve("report.json");
@@ -239,6 +241,146 @@ public final class Pvm2ProtectionCheck {
         }
     }
 
+    private static ImmutableMethod calculation(String owner, String name, int flags) {
+        boolean isStatic = (flags & 8) != 0;
+        return new ImmutableMethod(owner, name, List.of(new ImmutableMethodParameter("I", Set.of(), null)),
+                "I", flags, Set.of(), Set.of(), new ImmutableMethodImplementation(isStatic ? 2 : 3,
+                List.of(new ImmutableInstruction22b(Opcode.ADD_INT_LIT8, 0, isStatic ? 1 : 2, 7),
+                        new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of()));
+    }
+
+    private static ImmutableClassDef calculationOwner(String type, String parent, List<String> interfaces, List<ImmutableMethod> methods) {
+        return new ImmutableClassDef(type, 1, parent, interfaces, null, Set.of(), List.of(), methods);
+    }
+
+    private static void writeClasses(Path path, List<ImmutableClassDef> classes) throws Exception {
+        DexPool pool = new DexPool(Opcodes.getDefault());
+        for (var cls : classes) pool.internClass(cls);
+        FileDataStore store = new FileDataStore(path.toFile());
+        try { pool.writeTo(store); } finally { store.close(); }
+    }
+
+    private static void checkMethodCompatibility(Path root) throws Exception {
+        for (String reason : List.of("ui_runtime_glue", "data_resource_runtime_glue", "compiler_generated_bridge", "playback_compatibility"))
+            assert Pvm2Admission.classify(reason) == Pvm2Admission.SkipReason.compatibility;
+        // 相同计算体不应因 UI、数据、资源、设备或媒体命名而整类消失。
+        for (String type : List.of("Lfixture/ui/Rules;", "Lfixture/navigation/Rules;", "Lfixture/MainActivity;",
+                "Lfixture/adapter/Rules;", "Lfixture/QuoteView;", "Lfixture/RouteNavigator;",
+                "Lfixture/data/Rules;", "Lfixture/QuoteRepository;", "Lfixture/PriceViewModel;",
+                "Lfixture/dao/Rules;", "Lfixture/resource/Rules;", "Lfixture/helper/Rules;",
+                "Lfixture/hepler/Rules;", "Lfixture/device/ble/Rules;", "Lfixture/PermissionManager;",
+                "Lfixture/audio/Rules;", "Lfixture/TrackRules;", "Lfixture/PlainRules;")) {
+            for (int flags : List.of(1, 2, 9)) {
+                var method = calculation(type, "calculate", flags);
+                var cls = calculationOwner(type, "Ljava/lang/Object;", List.of(), List.of(method));
+                assert AutoVmpPolicy.exclusionReason(cls, method) == null : type;
+            }
+        }
+        String type = "Lfixture/ui/Rules;";
+        var publicMethod = calculation(type, "calculate", 1);
+        var privateMethod = calculation(type, "local", 2);
+        var staticMethod = calculation(type, "utility", 9);
+        for (String parent : List.of("Landroid/app/Activity;", "Lfixture/BaseActivity;", "Lexternal/Unknown;")) {
+            var cls = calculationOwner(type, parent, List.of(), List.of());
+            assert AutoVmpPolicy.exclusionReason(cls, publicMethod).equals("ui_runtime_glue");
+            assert AutoVmpPolicy.exclusionReason(cls, privateMethod) == null;
+            assert AutoVmpPolicy.exclusionReason(cls, staticMethod) == null;
+        }
+        var callback = calculationOwner(type, "Ljava/lang/Object;", List.of("Lexternal/Callback;"), List.of());
+        assert AutoVmpPolicy.exclusionReason(callback, publicMethod).equals("ui_runtime_glue");
+        var plain = calculationOwner(type, "Ljava/lang/Object;", List.of(), List.of());
+        for (int flags : List.of(0x29, 0x20009, 0x49, 0x1009))
+            assert AutoVmpPolicy.exclusionReason(plain, calculation(type, "calculate", flags)) != null;
+        for (String generated : List.of("Lfixture/Rules$$ExternalSyntheticLambda0;", "Lfixture/Rules$1;"))
+            assert AutoVmpPolicy.exclusionReason(calculationOwner(generated, "Ljava/lang/Object;", List.of(), List.of()),
+                    calculation(generated, "calculate", 9)).equals("compiler_generated_bridge");
+        // 混淆类仍直接继承已知框架类型时，生命周期和接口回调保持原执行方式。
+        var obfuscated = calculation("Lfixture/a;", "callback", 1);
+        assert AutoVmpPolicy.exclusionReason(calculationOwner("Lfixture/a;", "Landroid/app/Activity;", List.of(), List.of()), obfuscated).equals("ui_runtime_glue");
+        assert AutoVmpPolicy.exclusionReason(calculationOwner("Lfixture/a;", "Ljava/lang/Object;", List.of("Landroid/view/View$OnClickListener;"), List.of()), obfuscated).equals("ui_runtime_glue");
+        // 原始 opcode、对象类型、字段/数组访问、调用和锁都不能借纯计算规则放行。
+        var field = new ImmutableFieldReference(type, "state", "I");
+        var call = new ImmutableMethodReference(type, "external", List.of(), "I");
+        for (var instruction : List.of(new ImmutableInstruction12x(Opcode.MOVE_OBJECT, 0, 1),
+                new ImmutableInstruction21c(Opcode.SGET, 0, field), new ImmutableInstruction22c(Opcode.IGET, 0, 1, field),
+                new ImmutableInstruction23x(Opcode.AGET, 0, 1, 2),
+                new ImmutableInstruction35c(Opcode.INVOKE_STATIC, 0, 0, 0, 0, 0, 0, call),
+                new ImmutableInstruction35c(Opcode.INVOKE_VIRTUAL, 1, 1, 0, 0, 0, 0, call),
+                new ImmutableInstruction11x(Opcode.MONITOR_ENTER, 1),
+                new ImmutableInstruction21c(Opcode.NEW_INSTANCE, 0, new ImmutableTypeReference(type)))) {
+            var method = new ImmutableMethod(type, "stateful", List.of(), "I", 9, Set.of(), Set.of(),
+                    new ImmutableMethodImplementation(3, List.of(instruction, new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of()));
+            assert AutoVmpPolicy.exclusionReason(plain, method).equals("ui_runtime_glue") : instruction.getOpcode();
+        }
+        for (String reference : List.of("Ljava/lang/Object;", "[I")) {
+            var method = new ImmutableMethod(type, "objectArgument", List.of(new ImmutableMethodParameter(reference, Set.of(), null)),
+                    "I", 9, Set.of(), Set.of(), staticMethod.getImplementation());
+            assert AutoVmpPolicy.exclusionReason(plain, method).equals("ui_runtime_glue");
+        }
+
+        Path work = Files.createDirectory(root.resolve("method-compatibility"));
+        Path dex = Files.createDirectory(work.resolve("dex"));
+        Path config = work.resolve("config.json"), code = work.resolve("code.bin"), report = work.resolve("report.json");
+        JSONObject selection = new JSONObject().put("schema_version", 2)
+                .put("modules", new JSONObject().put("classes.dex", "base")).put("required", new JSONArray());
+        Files.writeString(config, selection.toString());
+        List<ImmutableClassDef> classes = new ArrayList<>();
+        for (String owner : List.of("Lfixture/ui/PriceRules;", "Lfixture/data/BalanceRepository;", "Lfixture/player/TrackRules;")) {
+            List<ImmutableMethod> methods = new ArrayList<>();
+            methods.add(new ImmutableMethod(owner, "<clinit>", List.of(), "V", 0x10008, Set.of(), Set.of(),
+                    new ImmutableMethodImplementation(0, List.of(new ImmutableInstruction10x(Opcode.RETURN_VOID)), List.of(), List.of())));
+            for (int i = 0; i < 6; i++) methods.add(calculation(owner, "calculate" + i, List.of(1, 2, 9).get(i % 3)));
+            classes.add(calculationOwner(owner, "Ljava/lang/Object;", List.of(), methods));
+        }
+        writeClasses(dex.resolve("classes.dex"), classes);
+        run(dex, config, code, report, "Lfixture/");
+        JSONObject result = new JSONObject(Files.readString(report));
+        assert result.getJSONArray("methods").length() == 21;
+        int verified = 0, initializers = 0;
+        for (Object value : result.getJSONArray("methods")) {
+            JSONObject row = (JSONObject) value;
+            if (row.getBoolean("artifact_verified")) verified++;
+            else { assert row.getString("reason").equals("initializer"); initializers++; }
+        }
+        assert verified == 18 && initializers == 3;
+        // 精确必保清单也必须服从同一兼容判断；声明回调不会使其自动变得安全。
+        String activity = "Lfixture/ui/ScreenActivity;";
+        var sensitive = calculationOwner(activity, "Landroid/app/Activity;", List.of(),
+                List.of(calculation(activity, "callback", 1), calculation(activity, "local", 2)));
+        writeClasses(dex.resolve("classes.dex"), List.of(sensitive));
+        var captured = new java.io.ByteArrayOutputStream();
+        var previous = System.out;
+        try (var stream = new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8)) {
+            System.setOut(stream);
+            run(dex, config, code, report, "Lfixture/");
+        } finally { System.setOut(previous); }
+        assert captured.toString(java.nio.charset.StandardCharsets.UTF_8)
+                .contains("candidates=1 attempted=1 success=1 fallback=0 rate=100.0%");
+        var mixed = new JSONObject(Files.readString(report)).getJSONArray("methods");
+        assert mixed.length() == 2;
+        int kept = 0, protectedCount = 0;
+        for (Object value : mixed) {
+            var row = (JSONObject) value;
+            if (row.getBoolean("artifact_verified")) protectedCount++;
+            else { assert row.getString("reason").equals("ui_runtime_glue"); kept++; }
+        }
+        assert kept == 1 && protectedCount == 1 : "转换成功率不能代替完整范围覆盖率";
+        for (boolean safe : List.of(true, false)) {
+            writeClasses(dex.resolve("classes.dex"), List.of(sensitive));
+            selection.put("required", new JSONArray(List.of("base\t" + activity + "->" + (safe ? "local" : "callback") + "(I)I")));
+            Files.writeString(config, selection.toString());
+            try {
+                run(dex, config, code, report, false);
+                assert safe : "回调被精确清单绕过兼容检查";
+            } catch (InvocationTargetException failure) {
+                assert !safe && failure.getCause().getMessage().contains("关键方法未通过验证");
+                JSONObject row = new JSONObject(Files.readString(report)).getJSONArray("methods").getJSONObject(0);
+                assert !row.getBoolean("artifact_verified") && row.getString("reason").equals("ui_runtime_glue");
+            }
+        }
+        System.out.println("方法级兼容检查通过：通用命名、独立计算、回调保留、必保约束、3 类 21 方法中的 18 个计算方法转换");
+    }
+
     private static void fixture(Path path) throws Exception {
         List<ImmutableMethod> methods = new ArrayList<>();
         for (boolean parameter : List.of(false, true)) {
@@ -249,10 +391,10 @@ public final class Pvm2ProtectionCheck {
         DexPool pool = new DexPool(Opcodes.getDefault());
         pool.internClass(new ImmutableClassDef(OWNER, 1, "Ljava/lang/Object;", List.of(), null, Set.of(), List.of(), methods));
         String excluded = "Lfixture/MainActivity;";
-        var unchanged = new ImmutableMethod(excluded, "value", List.of(), "I", 9, Set.of(), Set.of(),
+        var unchanged = new ImmutableMethod(excluded, "value", List.of(), "I", 1, Set.of(), Set.of(),
                 new ImmutableMethodImplementation(1, List.of(new ImmutableInstruction31i(Opcode.CONST, 0, 42),
                         new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of()));
-        pool.internClass(new ImmutableClassDef(excluded, 1, "Ljava/lang/Object;", List.of(), null, Set.of(), List.of(), List.of(unchanged)));
+        pool.internClass(new ImmutableClassDef(excluded, 1, "Landroid/app/Activity;", List.of(), null, Set.of(), List.of(), List.of(unchanged)));
         FileDataStore store = new FileDataStore(path.toFile());
         try { pool.writeTo(store); } finally { store.close(); }
     }
