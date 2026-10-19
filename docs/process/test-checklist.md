@@ -29,7 +29,9 @@ ANDROID_SDK_ROOT=/本机/Android/sdk \
   python3 tests/scripts/check-pvm2-art.py --serial 目标设备序列号
 ```
 
-该脚本自建无资源 APK 和测试证书，核验 26 个转换方法及 10 个保留方法，覆盖继承/接口分派、D8 桥接、私有方法反射、引用身份、整数边界、捕获顺序、重抛与 `finally`。每次启动以独立标记确认 482 项断言；执行未加固基线、加固首次启动、再次启动、覆盖安装及基线恢复。省略 `--serial` 仅构建并检查产物；指定设备时只安装测试包，不卸载应用或清除设备日志。默认保留合法空资源表，`--without-resource-table` 补测完全无资源表的 APK。结果写入 `target/pvm2-art-checks/result.json`，模拟器通过不能代替厂商真机验收。
+该脚本自建测试 APK 和证书，核验 46 个转换方法；min API 23 时总计 53 个方法，min API 26 时为 52 个。覆盖继承/接口分派、D8 桥接、私有方法反射、引用身份、整数边界、捕获顺序、重抛与 `finally`。每次启动以独立标记确认 525 项断言；执行未加固基线、加固首次启动、再次启动、覆盖安装及基线恢复。省略 `--serial` 仅构建并检查产物；指定设备时只安装测试包，不卸载应用或清除设备日志。默认保留合法空资源表，`--without-resource-table` 补测完全无资源表的 APK。结果写入 `target/pvm2-art-checks/result.json`，模拟器通过不能代替厂商真机验收。
+
+修改发布版 Native 日志、PVM2 格式或抗分析策略后，还需执行 [REA 分层回归](../design/rea-resilience.md)。发布产物使用 `--require-private-diagnostics` 检查四 ABI，完整保留“包内材料仍可恢复”的检查结果；不得将工具错误计为防护有效。`make test-pvm2-runtime` 同时验证开发/发布模式下的 Native 语义和诊断收敛，生产 `NDEBUG` 不关闭测试断言。
 
 AAB 候选版必须验证：`bundletool validate` 通过、APKS 包含预期 base/ABI/功能或 Asset Pack split、安装后进程保持运行，并在日志中观察到 PVM2 功能代码、PAS2 资源和业务 `.so` 探针。当前本机证据覆盖 API 35/Android 15 与 API 36/Android 16 的 arm64 install-time 组合；Google Play 内测和 Play App Signing 仍是独立门禁。
 

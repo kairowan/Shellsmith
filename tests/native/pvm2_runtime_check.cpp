@@ -5,6 +5,13 @@
 #define PROTECTOR_ENCRYPT
 #include "vm/pvm2_interp.cpp"
 #include "codeitem/multi_dex_code.h"
+#ifdef NDEBUG
+static constexpr bool release_diagnostics = true;
+// 生产实现使用 NDEBUG，测试断言始终执行。
+#undef NDEBUG
+#else
+static constexpr bool release_diagnostics = false;
+#endif
 #include <cassert>
 #include <cstdio>
 #include <thread>
@@ -197,6 +204,22 @@ int main(int argc, char** argv) {
     assert(JNI_CreateJavaVM(&jvm, reinterpret_cast<void**>(&env), &args) == JNI_OK);
     jobject result = interpret(env, 2, 0, nullptr);
     assert(result && !env->ExceptionCheck());
+    auto check_error = [&](const char* type, const char* message) {
+        assert(env->ExceptionCheck());
+        jthrowable error = env->ExceptionOccurred(); env->ExceptionClear();
+        jclass cls = env->FindClass(type);
+        assert(env->IsInstanceOf(error, cls));
+        auto text = static_cast<jstring>(env->CallObjectMethod(error,
+                env->GetMethodID(cls, "getMessage", "()Ljava/lang/String;")));
+        const char* chars = env->GetStringUTFChars(text, nullptr);
+        assert(!strcmp(chars, message));
+        env->ReleaseStringUTFChars(text, chars);
+        env->DeleteLocalRef(text); env->DeleteLocalRef(cls); env->DeleteLocalRef(error);
+    };
+    assert(!interpret(env, -1, 0, nullptr));
+    check_error("java/lang/RuntimeException", release_diagnostics ? "Protection runtime error (P1)" : "VMP bad dex");
+    throw_security(env, "VMP refused by RASP");
+    check_error("java/lang/SecurityException", release_diagnostics ? "Protection policy rejected (P2)" : "VMP refused by RASP");
 #if defined(MOCIKA_PVM2_PROFILE)
     assert(g_pvm2_profile == nullptr);
     const auto& profiled = g_pvm2_profile_sums.at(uint64_t(2) << 32);

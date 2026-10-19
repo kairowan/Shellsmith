@@ -87,6 +87,7 @@ fn main() {
         rerun(&cpp.join(source));
     }
     rerun(&cpp.join("common/runtime_state.h"));
+    rerun(&cpp.join("common/log.h"));
     rerun(&cpp.join("common/secure_memory.h"));
     rerun(&cpp.join("codeitem/multi_dex_code.h"));
     rerun(&cpp.join("crypto/aes.h"));

@@ -41,8 +41,14 @@ static inline int __android_log_print(int, const char*, const char*, ...) { retu
             str(ROOT / 'shield-stub/src/main/rust/src/xop_pvm2_bridge.cpp')]
     cmd += [str(CPP / s) for s in ['common/runtime_state.cpp', 'codeitem/multi_dex_code.cpp', 'crypto/aes.cpp', 'vm/pvm2_format.cpp']]
     cmd += ['-L' + str(java / 'lib/server'), '-Wl,-rpath,' + str(java / 'lib/server'), '-ljvm', '-o', str(exe)]
-    subprocess.run(cmd, check=True)
     env = dict(os.environ, ASAN_OPTIONS='detect_leaks=0', UBSAN_OPTIONS='halt_on_error=1')
     # JVM 自有分配及进程级 JNI 类缓存不用于解释器泄漏判定；对象生命周期由断言检查。
-    subprocess.run([str(exe), 'block-before-init'], check=True, env=env)
-    subprocess.run([str(exe), str(temp)], check=True, env=env)
+    for release in (False, True):
+        subprocess.run(cmd + (['-DNDEBUG'] if release else []), check=True)
+        if release:
+            binary = exe.read_bytes()
+            for marker in (b'PVM2 bad ', b'PVM2 unknown op', b'unsupported code.bin version',
+                           b'VMP bad dex', b'VMP argument count mismatch', b'VMP refused by RASP'):
+                assert marker not in binary, '发布版仍携带内部诊断：' + marker.decode()
+        subprocess.run([str(exe), 'block-before-init'], check=True, env=env)
+        subprocess.run([str(exe), str(temp)], check=True, env=env)

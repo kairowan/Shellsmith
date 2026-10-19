@@ -948,6 +948,10 @@ static void throw_arith(JNIEnv* env, const char* msg) {
 }
 
 static void throw_runtime(JNIEnv* env, const char* msg) {
+#ifdef NDEBUG
+    // 只收敛解释器内部错误；业务抛出的异常仍按原对象传播。
+    msg = "Protection runtime error (P1)";
+#endif
     throw_cached(env, jni_cache().runtime_ex, msg);
 }
 
@@ -960,6 +964,9 @@ static void throw_cce(JNIEnv* env, const char* msg) {
 }
 
 static void throw_security(JNIEnv* env, const char* msg) {
+#ifdef NDEBUG
+    msg = "Protection policy rejected (P2)";
+#endif
     throw_cached(env, jni_cache().security_ex, msg);
 }
 

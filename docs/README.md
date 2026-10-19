@@ -41,6 +41,7 @@ Shellsmith 是 Android 与 iOS 双平台应用加固工具。Android 流程加�
 | 了解 Native 库名去品牌化与按任务别名方案 | [design/native-library-alias.md](design/native-library-alias.md) |
 | 了解 Stub DEX 最小化、能力变体与二阶段加载实验 | [design/stub-dex-minimization.md](design/stub-dex-minimization.md) |
 | 了解运行时安全、缓存认证与 Root 策略规划 | [design/runtime-security.md](design/runtime-security.md) |
+| 验证 REA 分析抵抗与 APK 离线恢复边界 | [design/rea-resilience.md](design/rea-resilience.md) |
 | 了解 API 31 以上内存 DEX 正式接入边界 | [design/memory-dex-production.md](design/memory-dex-production.md) |
 | 了解 DEX 结构与方法代码分离研究 | [design/dex-code-separation.md](design/dex-code-separation.md) |
 | 了解工具链轻量化、CI 与 Gradle 集成规划 | [design/toolchain-modernization.md](design/toolchain-modernization.md) |

@@ -5,12 +5,11 @@
 #define PROTECTOR_LOG_TAG "protector"
 
 #ifdef NDEBUG
-// Release build: strip all diagnostic logs — they leak protection internals.
+// 发布版保留故障信号，但不携带方法编号、指令或解析结构。
 #define PLOGD(...) ((void)0)
 #define PLOGI(...) ((void)0)
 #define PLOGW(...) ((void)0)
-// Keep PLOGE for crash forensics (only fires right before a crash).
-#define PLOGE(...) __android_log_print(ANDROID_LOG_ERROR, PROTECTOR_LOG_TAG, __VA_ARGS__)
+#define PLOGE(...) __android_log_print(ANDROID_LOG_ERROR, "runtime", "%s", "Protection runtime error (P1)")
 #else
 #define PLOGD(...) __android_log_print(ANDROID_LOG_DEBUG, PROTECTOR_LOG_TAG, __VA_ARGS__)
 #define PLOGI(...) __android_log_print(ANDROID_LOG_INFO, PROTECTOR_LOG_TAG, __VA_ARGS__)
