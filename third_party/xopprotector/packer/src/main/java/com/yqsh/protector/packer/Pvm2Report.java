@@ -3,6 +3,7 @@ package com.yqsh.protector.packer;
 import com.android.tools.smali.dexlib2.Opcodes;
 import com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile;
 import com.android.tools.smali.dexlib2.iface.Method;
+import com.android.tools.smali.dexlib2.iface.ClassDef;
 import com.android.tools.smali.dexlib2.iface.reference.MethodReference;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -75,10 +76,34 @@ public final class Pvm2Report {
                         .put("input_dex", file.getName()).put("transform_status", "skipped")
                         .put("reason", reason).put("artifact_verified", false)
                         .put("plaintext_policy", JSONObject.NULL);
+                if (impl != null && !method.getName().startsWith("<"))
+                    row.put("admission", admissionFacts(cls, method, exclusion));
                 if (methods.putIfAbsent(id, row) != null) throw new IllegalArgumentException("模块中存在重复方法：" + id);
             }
         }
         for (String id : required) if (!methods.containsKey(id)) throw new IllegalArgumentException("关键方法未匹配输入 DEX：" + id);
+    }
+
+    /** 记录准入事实，不将命名启发式解释为业务分类或语义已获支持。 */
+    static JSONObject admissionFacts(ClassDef owner, Method method, String exclusion) {
+        var code = method.getImplementation();
+        Map<String, Integer> opcodes = new TreeMap<>();
+        for (var instruction : code.getInstructions())
+            opcodes.merge(instruction.getOpcode().name, 1, Integer::sum);
+        String parent = owner.getSuperclass();
+        boolean coroutine = Set.of("Lkotlin/coroutines/jvm/internal/SuspendLambda;",
+                "Lkotlin/coroutines/jvm/internal/RestrictedSuspendLambda;",
+                "Lkotlin/coroutines/jvm/internal/ContinuationImpl;",
+                "Lkotlin/coroutines/jvm/internal/RestrictedContinuationImpl;").contains(parent == null ? "" : parent);
+        // ponytail: 仅记录直接父类；不从方法名推断协程，也不宣称已解析完整继承链。
+        return new JSONObject().put("policy_exclusion", exclusion == null ? JSONObject.NULL : exclusion)
+                .put("method_bridge_flag", (method.getAccessFlags() & 0x40) != 0)
+                .put("method_synthetic_flag", (method.getAccessFlags() & 0x1000) != 0)
+                .put("class_synthetic_flag", (owner.getAccessFlags() & 0x1000) != 0)
+                .put("generated_name_rule", AutoVmpPolicy.isCompilerGeneratedBridge(owner.getType()))
+                .put("direct_coroutine_base", coroutine)
+                .put("register_count", code.getRegisterCount()).put("try_blocks", code.getTryBlocks().size())
+                .put("opcodes", new JSONObject(opcodes));
     }
 
     void begin(File dex) { currentModule = modules.getOrDefault(dex.getName(), "base"); }
@@ -104,6 +129,7 @@ public final class Pvm2Report {
         verifyPolicy(image, row.getBoolean("required"));
         row.put("transform_status", "transformed").put("reason", JSONObject.NULL)
                 .put("plaintext_policy", row.getBoolean("required") ? "clear_after_use" : "bounded_cache");
+        row.remove("admission");
         images.put(id(key), sha256(image));
     }
 

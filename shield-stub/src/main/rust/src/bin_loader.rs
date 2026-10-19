@@ -22,10 +22,31 @@ pub fn extract_from_dex_tail(dex_bytes: &[u8]) -> Result<&[u8]> {
         return extract_at(dex_bytes, trailer_start);
     }
 
+    // 打包只更新 file_size 与校验和，标准 DEX 的 data_off + data_size 仍指向原末尾。
+    // 头部仅作为定位提示；必须验证完整边界，后续仍对整个载荷认证。
+    // ponytail: 仅加速 035～040 的标准小端头；容器 DEX 和旧布局继续扫描，不猜测新格式。
+    if dex_bytes.len() >= 112
+        && matches!(
+            &dex_bytes[..8],
+            b"dex\n035\0" | b"dex\n037\0" | b"dex\n038\0" | b"dex\n039\0" | b"dex\n040\0"
+        )
+        && dex_bytes[36..40] == 112u32.to_le_bytes()
+        && dex_bytes[40..44] == 0x12345678u32.to_le_bytes()
+    {
+        let size = u32::from_le_bytes(dex_bytes[104..108].try_into().unwrap()) as usize;
+        let offset = u32::from_le_bytes(dex_bytes[108..112].try_into().unwrap()) as usize;
+        if let Some(end) = offset.checked_add(size).filter(|end| *end >= 112) {
+            if validate_trailer(dex_bytes, end).is_ok() {
+                return extract_at(dex_bytes, end);
+            }
+        }
+    }
+
     let found = dex_bytes
         .windows(4)
-        .rposition(|w| w == MSHD_MAGIC)
-        .and_then(|pos| validate_trailer(dex_bytes, pos).ok().map(|_| pos));
+        .enumerate()
+        .rfind(|(pos, window)| *window == MSHD_MAGIC && validate_trailer(dex_bytes, *pos).is_ok())
+        .map(|(pos, _)| pos);
 
     let mshd_pos = found.ok_or_else(|| "classes.dex 末尾未找到有效 MSHD trailer".to_string())?;
     extract_at(dex_bytes, mshd_pos)
@@ -455,8 +476,8 @@ fn parse_entries(
 }
 
 fn decompress_entry(data: &[u8], compression_layers: u8, original_size: usize) -> Result<Vec<u8>> {
-    let mut decompressed = data.to_vec();
-    for _ in 0..compression_layers {
+    let mut decompressed = zstd::decode_all(data).map_err(|e| format!("Zstd 解压失败: {e}"))?;
+    for _ in 1..compression_layers {
         decompressed =
             zstd::decode_all(&decompressed[..]).map_err(|e| format!("Zstd 解压失败: {e}"))?;
     }
@@ -629,6 +650,9 @@ mod tests {
             native_so_key,
             crypto::derive_native_so_key(ikm, signature.as_bytes())
         );
+        *bin.last_mut().unwrap() ^= 1;
+        assert!(parse_and_decompress_payload(&bin, signature.as_bytes()).is_err());
+        assert!(parse_xop_pvm2_payload(&bin, signature.as_bytes()).is_err());
     }
 
     #[test]
@@ -706,39 +730,44 @@ mod tests {
 
     #[test]
     fn v6_multi_layer_compression_roundtrip() {
-        let ikm = b"random-ikm-32-bytes-for-testing!";
-        let build_id = [17u8; 16];
-        let wrap_nonce = [18u8; DEXB_NONCE_LEN];
-        let payload_nonce = [19u8; DEXB_NONCE_LEN];
-        let signature = "AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899";
-        let dex_data = b"dex-v6-three-layer-content";
-        let plaintext = build_plaintext_dex_with_layers("classes.dex", dex_data, 3);
-        let ciphertext =
-            build_encrypted_payload(&plaintext, ikm, payload_nonce, signature.as_bytes());
-        let envelope_key = crypto::derive_envelope_key(signature.as_bytes(), &build_id);
-        let wrapped_ikm = {
-            let cipher = ChaCha20Poly1305::new((&envelope_key).into());
-            cipher
-                .encrypt(Nonce::from_slice(&wrap_nonce), ikm.as_ref())
-                .unwrap()
-        };
+        for layers in 1..=3 {
+            let ikm = b"random-ikm-32-bytes-for-testing!";
+            let build_id = [17u8; 16];
+            let wrap_nonce = [18u8; DEXB_NONCE_LEN];
+            let payload_nonce = [19u8; DEXB_NONCE_LEN];
+            let signature = "AABBCCDDEEFF00112233445566778899AABBCCDDEEFF00112233445566778899";
+            let dex_data = b"dex-v6-three-layer-content";
+            let plaintext = build_plaintext_dex_with_layers("classes.dex", dex_data, layers);
+            let ciphertext =
+                build_encrypted_payload(&plaintext, ikm, payload_nonce, signature.as_bytes());
+            let envelope_key = crypto::derive_envelope_key(signature.as_bytes(), &build_id);
+            let wrapped_ikm = {
+                let cipher = ChaCha20Poly1305::new((&envelope_key).into());
+                cipher
+                    .encrypt(Nonce::from_slice(&wrap_nonce), ikm.as_ref())
+                    .unwrap()
+            };
 
-        let mut bin = Vec::new();
-        bin.extend_from_slice(b"DEXB");
-        bin.extend_from_slice(&6u32.to_le_bytes());
-        bin.extend_from_slice(&1u32.to_le_bytes());
-        bin.extend_from_slice(&3u32.to_le_bytes());
-        bin.push(signature.len() as u8);
-        bin.extend_from_slice(signature.as_bytes());
-        bin.extend_from_slice(&build_id);
-        bin.extend_from_slice(&wrap_nonce);
-        bin.extend_from_slice(&(wrapped_ikm.len() as u16).to_le_bytes());
-        bin.extend_from_slice(&wrapped_ikm);
-        bin.extend_from_slice(&payload_nonce);
-        bin.extend_from_slice(&ciphertext);
+            let mut bin = Vec::new();
+            bin.extend_from_slice(b"DEXB");
+            bin.extend_from_slice(&6u32.to_le_bytes());
+            bin.extend_from_slice(&1u32.to_le_bytes());
+            bin.extend_from_slice(&(layers as u32).to_le_bytes());
+            bin.push(signature.len() as u8);
+            bin.extend_from_slice(signature.as_bytes());
+            bin.extend_from_slice(&build_id);
+            bin.extend_from_slice(&wrap_nonce);
+            bin.extend_from_slice(&(wrapped_ikm.len() as u16).to_le_bytes());
+            bin.extend_from_slice(&wrapped_ikm);
+            bin.extend_from_slice(&payload_nonce);
+            bin.extend_from_slice(&ciphertext);
 
-        let (_, dex_files) = parse_and_decompress_all(&bin, signature.as_bytes()).unwrap();
-        assert_eq!(dex_files, vec![dex_data.to_vec()]);
+            let (_, dex_files) = parse_and_decompress_all(&bin, signature.as_bytes()).unwrap();
+            assert_eq!(dex_files, vec![dex_data.to_vec()]);
+            *bin.last_mut().unwrap() ^= 1;
+            assert!(parse_and_decompress_payload(&bin, signature.as_bytes()).is_err());
+            assert!(parse_xop_pvm2_payload(&bin, signature.as_bytes()).is_err());
+        }
     }
 
     #[test]
@@ -752,6 +781,42 @@ mod tests {
 
         let extracted = extract_from_dex_tail(&dex).unwrap();
         assert_eq!(extracted, payload);
+    }
+
+    #[test]
+    fn 标准头定位不受载荷内标记干扰且旧布局跳过无效标记() {
+        let payload = b"DEXB-data-MSHD\x08\x00\x00\x00decoy!!!";
+        let mut dex = vec![0u8; 128];
+        dex[36..40].copy_from_slice(&112u32.to_le_bytes());
+        dex[40..44].copy_from_slice(&0x12345678u32.to_le_bytes());
+        dex[104..108].copy_from_slice(&16u32.to_le_bytes());
+        dex[108..112].copy_from_slice(&112u32.to_le_bytes());
+        dex.extend_from_slice(b"MSHD");
+        dex.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        dex.extend_from_slice(payload);
+        for magic in [
+            b"dex\n035\0",
+            b"dex\n037\0",
+            b"dex\n038\0",
+            b"dex\n039\0",
+            b"dex\n040\0",
+        ] {
+            dex[..8].copy_from_slice(magic);
+            // 后面的诱饵也满足长度，必须优先使用已验证的 DEX 数据边界。
+            assert_eq!(extract_from_dex_tail(&dex).unwrap(), payload);
+        }
+        // 让诱饵长度无效；旧布局不能仅检查最后一个同名标记就失败。
+        let decoy_length = 136 + payload.windows(4).position(|w| w == MSHD_MAGIC).unwrap() + 4;
+        dex[decoy_length..decoy_length + 4].fill(0xff);
+        let expected = dex[136..].to_vec();
+        for field in [36, 40, 104, 108] {
+            let mut broken = dex.clone();
+            broken[field..field + 4].fill(0xff);
+            assert_eq!(extract_from_dex_tail(&broken).unwrap(), expected);
+        }
+        for end in 0..dex.len() {
+            assert!(extract_from_dex_tail(&dex[..end]).is_err());
+        }
     }
 
     #[test]

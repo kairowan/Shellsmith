@@ -55,13 +55,10 @@ impl AiResistance {
         }
     }
 
-    /// DEXB v6 的实际压缩层数，范围固定为 1..=3。
+    /// 新包只压缩一次；重复压缩不提供秘密，不随 AI 保护级别叠加启动成本。
+    /// 运行时继续兼容已有的 1～3 层载荷。
     pub fn compression_layers(self) -> u8 {
-        match self {
-            Self::Off => 1,
-            Self::Balanced => 2,
-            Self::High => 3,
-        }
+        1
     }
 }
 
@@ -199,9 +196,11 @@ mod tests {
     }
 
     #[test]
-    fn ai_resistance_selects_bounded_compression_layers() {
+    fn 压缩不随保护级别重复且严格保护能力保持开启() {
         assert_eq!(AiResistance::Off.compression_layers(), 1);
-        assert_eq!(AiResistance::Balanced.compression_layers(), 2);
-        assert_eq!(AiResistance::High.compression_layers(), 3);
+        assert_eq!(AiResistance::Balanced.compression_layers(), 1);
+        assert_eq!(AiResistance::High.compression_layers(), 1);
+        let policy = ProtectionPolicy::for_profile(ProtectionProfile::Strict, AiResistance::High);
+        assert!(policy.pvm2 && policy.string_jit && policy.native_safe && policy.memory_preferred);
     }
 }

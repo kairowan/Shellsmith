@@ -189,7 +189,7 @@ shield protect-ios \
 shield protect -i input.apk -o protected.apk
 ```
 
-保护级别和载荷压缩选项可以独立选择；后者当前沿用 `ai-resistance` 参数名：
+保护级别与 `ai-resistance` 参数可以分别指定；新包压缩层数固定为一层：
 
 ```bash
 shield protect -i input.apk -o protected.apk \
@@ -200,7 +200,7 @@ shield protect -i input.apk -o protected.apk \
 - `compat`：优先兼容 API 19–36，关闭高风险高级变换。
 - `balanced`：默认策略。未提供 Xop 参数时显示 `xop-contract-only`；显式启用嵌入式 PVM2 时显示 `xop-pvm2-embedded`。
 - `strict`：要求真实嵌入式 Xop PVM2。GUI 默认使用安装包内置的 Packer，只需提供至少一个自有业务类前缀；CLI 仍需显式传入 Packer 路径。严格模式同时启用资源路径缩短、同类型资源 ID 重排、PAS2 分块认证加密和符合安全策略的业务 ELF 函数区域选择性加密。资源 ID 若出现在 Native/opaque 数据或 packed-switch 中会自动固定；PAS2 会改写可识别的 `AssetManager.open/openFd/getAssets`，以 DEX/ELF 中的路径或目录常量覆盖常见动态拼接，并通过应用私有 overlay 支持常见 Native `AAssetManager` 读取。缺少必要条件会在变换前失败关闭。该状态为 `xop-pvm2-embedded`，不代表 Hollow、LLVM Native VMP 或完整 Xop RASP 已融合。
-- `ai-resistance` 支持 `off`、`balanced`、`high`，映射为 DEXB v6 认证载荷中的 1/2/3 层 Zstandard 压缩。层数不改变包内密钥可离线恢复的边界，也不能作为已验证的抗 AI 语义恢复能力。可选的 PVM2 方法虚拟化让成功转换的方法由 Native 解释器执行，需要单独核验覆盖范围。两者都不能替代服务端授权和密钥保护。
+- `ai-resistance` 继续接受 `off`、`balanced`、`high`，保持已有配置兼容；当前 `balanced` 与 `high` 采用相同保护决策，不再通过重复压缩区分层级，也不把 `high` 标签作为抗 AI 语义恢复能力的证明。实际能力取决于保护策略、运行时及逐方法覆盖。PVM2 让成功转换的方法由 Native 解释器执行，但不改变包内密钥可离线恢复的边界。
 
 将 Xop PVM2 嵌入 Shellsmith 单 Stub（不引入第二个 Application/JNI 壳）：
 
@@ -447,7 +447,7 @@ unzip -l protected.apk | grep -E 'lib/|classes.*\.dex'
 条目存在只能验证结构，不能代替签名验证与设备安装、启动测试。
 
 ```bash
-# 对比体积（off/balanced/high 的压缩层数会影响最终大小和首次加载成本）
+# 对比体积（压缩、方法保护和附加运行时均会影响最终大小）
 ls -lh input.apk protected.apk
 ```
 
@@ -498,7 +498,7 @@ GUI 只维护一份全局证书状态。证书页保存、删除或切换默认�
 
 ### 加固后为什么体积反而变小？
 
-DEX 文件经 Zstd 压缩后体积通常会明显减小；`high` 会再增加压缩层，实际体积和启动耗时应以目标 APK/设备实测为准。
+DEX 文件经 Zstd 压缩后体积通常会明显减小。新产物统一使用单层压缩，`high` 的其他保护策略保持有效；运行时仍兼容已有的多层载荷。实际体积和启动耗时应以目标 APK/设备实测为准。
 
 ---
 
@@ -512,8 +512,8 @@ DEX 文件经 Zstd 压缩后体积通常会明显减小；`high` 会再增加压
 | classes2.dex | 12 MB | 3.7 MB | 30% |
 | classes3.dex | 6.7 MB | 1.9 MB | 29% |
 
-- 首次启动额外耗时：取决于 AI 抵抗等级（单层/双层/三层解压、JNI 解密和缓存策略），必须用目标设备实测
-- Runtime 内存占用：约 1–2 MB
+- 首次启动额外耗时：取决于载荷大小、解密解压、方法保护与缓存策略，必须用目标设备实测
+- 运行时内存开销：随载荷与解释器方法数量变化，需对照测量 PSS 和峰值内存
 
 ## 更多界面预览
 
@@ -542,6 +542,8 @@ shield protect --input input.apk --output protected.apk \
 `protect-aab` 接受同一参数，其他 AAB 签名/工具参数保持原用法。GUI 在 PVM2 设置中选择“关键方法清单”。API19 兼容资源仍不支持 PVM2。
 
 启用 PVM2 的成功输出旁会生成 `protected.apk.protection.json` 或 `protected.aab.protection.json`。统计分别展示转换成功率、选中方法覆盖率、原始指令字节覆盖率和必保方法覆盖率；未声明必保方法时该指标为 `null`，不记为 100%。这些百分比仅针对选择范围，不代表整个应用。报告包含逐方法原因、最终索引与产物摘要，不包含密钥或明文镜像，也不进入安装包。
+
+未转换的普通方法还会记录 `admission`：原兼容排除原因、桥接/合成标志、生成类名规则、直接协程父类、寄存器数、异常区数和指令计数。成功报告与 `pvm2-failure-*.json` 都保留这些本地事实，用于区分对象状态、调用、异常、协程及寄存器限制；它们不代表方法已获支持，也不进入可分享诊断摘要。初始化器和无代码方法仍直接查看原有原因分类。
 
 选择范围在兼容性过滤**之前**统计。UI、导航和 Android 组件中的普通方法不再因包含字段、方法调用、数组元素或同步块而被叶子方法白名单整批排除；它们与普通业务类共用编译器，逐指令校验后再决定是否转换。跳板保留原声明、访问标志、参数与接收者，虚方法分派仍由 ART 完成。父类调用保留声明类的直接父类信息，接口默认实现单独按原接口调用，不能由接收者的动态类型推断。
 

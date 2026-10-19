@@ -13,6 +13,37 @@ use jni::sys::{jboolean, jint, jobject, jobjectArray, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 use jni::NativeMethod;
 
+/// 只收敛加载器内部错误；已挂起的 Java 异常（包括业务异常和 OOM）保持原样。
+fn throw_loader_error(env: &mut JNIEnv, class: &str, code: &str, detail: impl std::fmt::Display) {
+    if matches!(env.exception_check(), Ok(false)) {
+        let _ = env.throw_new(class, loader_error_message(code, detail));
+    }
+}
+
+fn loader_error_message(code: &str, detail: impl std::fmt::Display) -> String {
+    if cfg!(debug_assertions) {
+        format!("{code}: {detail}")
+    } else {
+        code.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod loader_error_tests {
+    #[test]
+    fn 加载错误仅在调试构建保留细节() {
+        let text = super::loader_error_message("L10", "算法、偏移与本机路径");
+        assert_eq!(
+            text,
+            if cfg!(debug_assertions) {
+                "L10: 算法、偏移与本机路径"
+            } else {
+                "L10"
+            }
+        );
+    }
+}
+
 /// 动态注册 native 方法，使 Rust 函数名不出现在 .dynsym，切断符号可读性。
 ///
 /// # Safety
@@ -117,7 +148,7 @@ extern "C" fn f8(mut env: JNIEnv, _class: JClass, blob: JByteArray) -> jobjectAr
     match result {
         Ok(array) => array,
         Err(error) => {
-            let _ = env.throw_new("java/io/IOException", error);
+            throw_loader_error(&mut env, "java/io/IOException", "N51", error);
             std::ptr::null_mut()
         }
     }
@@ -140,7 +171,7 @@ extern "C" fn f9(mut env: JNIEnv, _class: JClass, name: JString, encrypted: JByt
     match result {
         Ok(array) => array,
         Err(error) => {
-            let _ = env.throw_new("java/io/IOException", error);
+            throw_loader_error(&mut env, "java/io/IOException", "N52", error);
             std::ptr::null_mut()
         }
     }
@@ -173,7 +204,7 @@ extern "C" fn f7(mut env: JNIEnv, _class: JClass, chunk: JByteArray) -> jobject 
     match result {
         Ok(array) => array,
         Err(error) => {
-            let _ = env.throw_new("java/io/IOException", error);
+            throw_loader_error(&mut env, "java/io/IOException", "A10", error);
             std::ptr::null_mut()
         }
     }
@@ -218,7 +249,7 @@ extern "C" fn f1(
     match f1_impl(&mut env, class_loader, dex_paths, opt_dir_path) {
         Ok(()) => JNI_TRUE,
         Err(e) => {
-            android_log_warn(&mut env, &format!("注入失败，降级到 Java 反射：{}", e));
+            android_log_warn(&mut env, &loader_error_message("L14", e));
             JNI_FALSE
         }
     }
@@ -432,14 +463,13 @@ extern "C" fn f2(
 ) -> jobjectArray {
     // 反调试检测：先于所有解密动作，检测到调试器或 Frida 注入则立即拒绝。
     if anti_debug::check() {
-        android_log_warn(&mut env, "dbg");
-        let _ = env.throw_new("java/lang/RuntimeException", "dbg");
+        throw_loader_error(&mut env, "java/lang/RuntimeException", "S01", "dbg");
         return std::ptr::null_mut();
     }
     let decoded = match decrypt_dex_files(&mut env, &ctx, &dex_data) {
         Ok(files) => files,
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", e);
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L10", e);
             return std::ptr::null_mut();
         }
     };
@@ -447,10 +477,7 @@ extern "C" fn f2(
     let byte_array_class = match env.find_class("[B") {
         Ok(cls) => cls,
         Err(e) => {
-            let _ = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("查找 byte[] 类失败: {}", e),
-            );
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L12", e);
             return std::ptr::null_mut();
         }
     };
@@ -458,14 +485,19 @@ extern "C" fn f2(
     let dex_count = match i32::try_from(decoded.dex_files.len()) {
         Ok(n) => n,
         Err(_) => {
-            let _ = env.throw_new("java/lang/RuntimeException", "DEX 数量超过 i32 上限");
+            throw_loader_error(
+                &mut env,
+                "java/lang/RuntimeException",
+                "L12",
+                "DEX 数量超过 i32 上限",
+            );
             return std::ptr::null_mut();
         }
     };
     let result_array = match env.new_object_array(dex_count, &byte_array_class, JObject::null()) {
         Ok(arr) => arr,
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("创建数组失败: {}", e));
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L12", e);
             return std::ptr::null_mut();
         }
     };
@@ -474,18 +506,12 @@ extern "C" fn f2(
         let byte_array = match env.byte_array_from_slice(dex_data) {
             Ok(arr) => arr,
             Err(e) => {
-                let _ = env.throw_new(
-                    "java/lang/RuntimeException",
-                    format!("创建 byte[] 失败: {}", e),
-                );
+                throw_loader_error(&mut env, "java/lang/RuntimeException", "L12", e);
                 return std::ptr::null_mut();
             }
         };
         if let Err(e) = env.set_object_array_element(&result_array, i as i32, byte_array) {
-            let _ = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("设置数组元素失败: {}", e),
-            );
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L12", e);
             return std::ptr::null_mut();
         }
     }
@@ -524,7 +550,7 @@ extern "C" fn f6(mut env: JNIEnv, _class: JClass, ctx: JObject, dex_data: JByteA
     match result {
         Ok(()) => JNI_TRUE,
         Err(error) => {
-            let _ = env.throw_new("java/lang/RuntimeException", error);
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L11", error);
             JNI_FALSE
         }
     }
@@ -538,21 +564,20 @@ extern "C" fn f4(
     dex_data: JByteArray,
 ) -> jobjectArray {
     if anti_debug::check() {
-        android_log_warn(&mut env, "dbg");
-        let _ = env.throw_new("java/lang/RuntimeException", "dbg");
+        throw_loader_error(&mut env, "java/lang/RuntimeException", "S01", "dbg");
         return std::ptr::null_mut();
     }
     let decoded = match decrypt_dex_files(&mut env, &ctx, &dex_data) {
         Ok(files) => files,
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", e);
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L10", e);
             return std::ptr::null_mut();
         }
     };
     let buffer_class = match env.find_class("java/nio/ByteBuffer") {
         Ok(class) => class,
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("b1: {e}"));
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L13", e);
             return std::ptr::null_mut();
         }
     };
@@ -563,7 +588,7 @@ extern "C" fn f4(
     ) {
         Ok(array) => array,
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("b2: {e}"));
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L13", e);
             return std::ptr::null_mut();
         }
     };
@@ -579,7 +604,7 @@ extern "C" fn f4(
         {
             Ok(object) => object,
             Err(e) => {
-                let _ = env.throw_new("java/lang/RuntimeException", format!("b3: {e}"));
+                throw_loader_error(&mut env, "java/lang/RuntimeException", "L13", e);
                 return std::ptr::null_mut();
             }
         };
@@ -587,13 +612,13 @@ extern "C" fn f4(
         let address = match env.get_direct_buffer_address(&buffer) {
             Ok(address) => address,
             Err(e) => {
-                let _ = env.throw_new("java/lang/RuntimeException", format!("b4: {e}"));
+                throw_loader_error(&mut env, "java/lang/RuntimeException", "L13", e);
                 return std::ptr::null_mut();
             }
         };
         unsafe { std::ptr::copy_nonoverlapping(dex.as_ptr(), address, dex.len()) };
         if let Err(e) = env.set_object_array_element(&result, index as i32, &buffer) {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("b5: {e}"));
+            throw_loader_error(&mut env, "java/lang/RuntimeException", "L13", e);
             return std::ptr::null_mut();
         }
     }

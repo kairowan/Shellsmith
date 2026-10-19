@@ -50,6 +50,8 @@ public final class Pvm2ProtectionCheck {
                 assert row.isNull("plaintext_policy"); skipped++;
                 if (row.getString("descriptor").startsWith("Lfixture/MainActivity;")) {
                     assert row.getString("reason").equals("ui_runtime_glue:virtual_contract"); excluded++;
+                    assert row.getJSONObject("admission").getString("policy_exclusion").equals(row.getString("reason"));
+                    assert row.getJSONObject("admission").getJSONObject("opcodes").getInt("return") == 1;
                 } else assert row.getString("reason").equals("no_code");
             }
         }
@@ -391,6 +393,14 @@ public final class Pvm2ProtectionCheck {
                         new ImmutableInstruction11n(Opcode.CONST_4, 0, 0), new ImmutableInstruction11x(Opcode.RETURN, 0)),
                         List.of(new ImmutableTryBlock(0, 1, List.of(new ImmutableExceptionHandler(null, 2)))), List.of()));
         assert AutoVmpPolicy.exclusionReason(plain, caught) == null;
+        var facts = Pvm2Report.admissionFacts(plain, caught, "仅用于事实检查");
+        assert facts.getInt("try_blocks") == 1 && facts.getInt("register_count") == 1;
+        assert facts.getJSONObject("opcodes").getInt("return") == 2;
+        assert !facts.getBoolean("direct_coroutine_base") && !facts.getBoolean("generated_name_rule");
+        var coroutine = calculationOwner("Lfixture/Rules$1;", "Lkotlin/coroutines/jvm/internal/SuspendLambda;", List.of(), List.of());
+        facts = Pvm2Report.admissionFacts(coroutine, calculation(type, "invokeSuspend", 0x1041), "compiler_generated_bridge");
+        assert facts.getBoolean("direct_coroutine_base") && facts.getBoolean("generated_name_rule");
+        assert facts.getBoolean("method_bridge_flag") && facts.getBoolean("method_synthetic_flag");
         for (String generated : List.of("Lfixture/Rules$$ExternalSyntheticLambda0;", "Lfixture/Rules$1;"))
             assert AutoVmpPolicy.exclusionReason(calculationOwner(generated, "Ljava/lang/Object;", List.of(), List.of()),
                     calculation(generated, "calculate", 9)).equals("compiler_generated_bridge");

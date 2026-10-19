@@ -20,6 +20,9 @@ pub(crate) struct MethodRecord {
     plaintext_policy: Option<String>,
     final_dex_index: Option<u32>,
     final_method_index: Option<u32>,
+    /// 本地准入事实只用于排查，不参与转换成功或覆盖率判定。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    admission: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -792,7 +795,8 @@ mod tests {
             detail.methods.push(serde_json::from_value(serde_json::json!({
                 "module": "base", "descriptor": format!("Lprivate/Secret;->method{i}()V"), "required": false,
                 "input_instruction_bytes": 0, "input_dex": "classes.dex", "transform_status": "skipped",
-                "reason": reason, "artifact_verified": false, "plaintext_policy": null
+                "reason": reason, "artifact_verified": false, "plaintext_policy": null,
+                "admission": {"policy_exclusion": reason, "opcodes": {"invoke-virtual": 1}, "private_fact": "private"}
             })).unwrap());
         }
         for image in [7, 8, 9, 10] {
@@ -828,6 +832,10 @@ mod tests {
         assert_eq!(stored["build"]["status"], "failed");
         assert_eq!(stored["build"]["failure_code"], "PVM2_ZERO_METHODS");
         assert_eq!(stored["methods"].as_array().unwrap().len(), cases.len());
+        assert_eq!(
+            stored["methods"][0]["admission"]["opcodes"]["invoke-virtual"],
+            1
+        );
         assert!(!output.path().join("final.aab").exists());
         assert!(!report_path(&output.path().join("final.aab")).exists());
         #[cfg(unix)]

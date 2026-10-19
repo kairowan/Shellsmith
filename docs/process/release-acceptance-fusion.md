@@ -25,7 +25,7 @@
 ## 安全和 AI 成本评测
 
 - DEXB v6 头部不直接保存 IKM。
-- `ai-resistance=off|balanced|high` 分别写入 DEXB v6 的 1/2/3 层压缩标志，运行时逐层认证解压；旧 v6 `flags=0` 必须保持单层兼容。
+- `ai-resistance=off|balanced|high` 的新产物统一写入单层压缩标志，不通过重复压缩区分保护级别；运行时仍须通过旧 v6 的 1/2/3 层读取回归，`flags=0` 保持单层兼容。压缩调整不得跳过载荷认证。
 - 新包默认不使用旧 DEXB v5。
 - 关键字符串不集中以明文出现在 DEX 中。
 - PVM2/Hollow 的跳过和回退原因可诊断。

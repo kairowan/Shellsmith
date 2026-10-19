@@ -364,7 +364,7 @@ pub(crate) struct ProtectArgs {
     /// 保护级别：compat、balanced 或 strict。
     #[arg(long, value_enum)]
     pub profile: Option<ProtectionProfileArg>,
-    /// AI 静态分析抵抗等级；实际映射为 DEXB v6 的 1/2/3 层压缩。
+    /// 额外保护策略等级；新包统一单层压缩，效果以逐方法覆盖和产物验证为准。
     #[arg(long, value_enum)]
     pub ai_resistance: Option<AiResistanceArg>,
     /// Xop transform-only Packer JAR；仅嵌入 PVM2，不引入第二个 Application/JNI 壳。
