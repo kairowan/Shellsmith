@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
         if (i >= 98) {
             std::ifstream input(std::string(argv[1]) + "/image" + std::to_string(i - 98) + ".bin", std::ios::binary);
             bytes.assign(std::istreambuf_iterator<char>(input), {});
-            assert(bytes.size() > 18 && bytes[4] == PVM2_VERSION_V8 && bytes[15] == (i - 98) % 3 && bytes[18] == (i >= 101 ? 1 : 0));
+            assert(bytes.size() > 18 && bytes[4] == PVM2_VERSION_V9 && bytes[15] == (i - 98) % 3 && bytes[18] == (i >= 101 ? 1 : 0));
         }
         if (i == 97) { bytes[16] = 1; } // 认证成功、字符串池截断
         auto enc = record(bytes, key, i);
@@ -437,6 +437,8 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> policy_image(std::istreambuf_iterator<char>(policy_input), {});
     assert(parse_pvm2(policy_image.data(), policy_image.size(), &parsed) && parsed.clear_after_use);
     auto legacy = policy_image;
+    legacy[4] = 8;
+    assert(parse_pvm2(legacy.data(), legacy.size(), &parsed) && parsed.clear_after_use);
     // 此样本参数为空，类型表在虚拟指令前只有一个 count 字节。
     size_t args_offset = legacy.size() - (size_t(legacy[12]) | (size_t(legacy[13]) << 8)) - 1;
     legacy.erase(legacy.begin() + args_offset);
@@ -448,7 +450,7 @@ int main(int argc, char** argv) {
         auto broken = policy_image;
         if (fault == 0) broken[18] = 2;
         if (fault == 1) broken.resize(18);
-        if (fault == 2) broken[4] = 9;
+        if (fault == 2) broken[4] = PVM2_VERSION_V9 + 1;
         assert(!parse_pvm2(broken.data(), broken.size(), &parsed));
         assert(!parsed.valid && !parsed.clear_after_use && parsed.code.capacity() == 0);
     }

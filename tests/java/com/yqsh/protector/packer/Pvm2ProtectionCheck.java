@@ -19,87 +19,8 @@ public final class Pvm2ProtectionCheck {
     private static final String KEY = "000102030405060708090a0b0c0d0e0f";
 
     public static void main(String[] args) throws Exception {
-        // if-ne 的相等落空边、if-eq 的相等跳转边均可继承 this 的非空事实。
-        short[] equalFallthrough = {0x1033, 5, 0x106e, 0, 1, 0x000e};
-        assert Pvm2Safety.check(equalFallthrough, 2, 2, false, false) == null;
-        assert Pvm2Safety.check(new short[]{0x1032, 3, 0x000e, 0x106e, 0, 1, 0x000e}, 2, 2, false, false) == null;
-        short[] unequalFallthrough = equalFallthrough.clone(); unequalFallthrough[0] = 0x1032;
-        assert Pvm2Safety.check(unequalFallthrough, 2, 2, false, false) != null;
-        assert Pvm2Safety.check(equalFallthrough, 2, 2, true, false) != null;
-        assert Pvm2Safety.check(new short[]{0x1033, 6, 0x0112, 0x106e, 0, 1, 0x000e}, 2, 2, false, false) != null;
-        // 首次调用可能抛 NPE，但正常边之后的控制流可以复用同一接收者。
-        short[] repeated = {0x106e, 0, 1, 0x0038, 5, 0x106e, 0, 1, 0x000e};
-        assert Pvm2Safety.check(repeated, 2, 2, true, false) == null;
-        assert Pvm2Safety.check(repeated, 2, 2, true, true) != null;
-        // 字段/数组正常边可证明对象非空，但读取结果、写入值和异常边不能继承该事实。
-        for (short[] access : List.of(new short[]{0x1021}, new short[]{0x1052, 0},
-                new short[]{0x1054, 0}, new short[]{0x1059, 0},
-                new short[]{0x0044, 0x0201}, new short[]{0x004b, 0x0201})) {
-            short[] flow = Arrays.copyOf(access, access.length + 6);
-            short[] tail = {0x0238, 5, 0x106e, 0, 1, 0x000e};
-            System.arraycopy(tail, 0, flow, access.length, tail.length);
-            assert Pvm2Safety.check(flow, 3, 3, true, false) == null;
-            flow[access.length + 4] = 0; // v0 的字段值/数组元素仍可能为空。
-            assert Pvm2Safety.check(flow, 3, 3, true, false) != null;
-        }
-        assert Pvm2Safety.check(new short[]{0x1154, 0, 0x0238, 5, 0x106e, 0, 1, 0x000e}, 3, 3, true, false) != null;
-        assert Pvm2Safety.check(new short[]{0x0146, 0x0201, 0x0238, 5, 0x106e, 0, 1, 0x000e}, 3, 3, true, false) != null;
-        // 一条路径绕过解引用时，汇合点仍按未知处理。
-        assert Pvm2Safety.check(new short[]{0x0238, 4, 0x1052, 0, 0x106e, 0, 1, 0x000e}, 3, 3, true, false) != null;
-        // wide 写入必须清掉第二格，不能继续相信原来的非空值。
-        for (short[] write : List.of(new short[]{0x0004}, new short[]{0x0005, 0},
-                new short[]{0x0006, 0, 0}, new short[]{0x000b}, new short[]{0x0016, 0},
-                new short[]{0x0017, 0, 0}, new short[]{0x0018, 0, 0, 0, 0}, new short[]{0x0019, 0},
-                new short[]{0x0045, 0}, new short[]{0x0053, 0}, new short[]{0x0061, 0},
-                new short[]{0x007d}, new short[]{0x0081}, new short[]{0x0083}, new short[]{0x0086},
-                new short[]{0x009b, 0}, new short[]{0x00ab, 0}, new short[]{0x00bb}, new short[]{0x00cb})) {
-            short[] flow = new short[write.length + 8];
-            flow[0] = 0x011a;
-            System.arraycopy(write, 0, flow, 2, write.length);
-            short[] tail = {0x0238, 5, 0x106e, 0, 1, 0x000e};
-            System.arraycopy(tail, 0, flow, 2 + write.length, tail.length);
-            assert Pvm2Safety.check(flow, 3, 0, true, false) != null;
-        }
-        // lit8 的目标 v16 不能被错误解码为 v0；对象自移动和 check-cast 保留事实。
-        assert Pvm2Safety.check(new short[]{0x101a, 0, 0x10d8, 0, 0x0038, 5, 0x0174, 0, 16, 0x000e}, 17, 0, true, false) != null;
-        assert Pvm2Safety.check(new short[]{0x011a, 0, 0x1107, 0x011f, 0, 0x0038, 5, 0x106e, 0, 1, 0x000e}, 2, 0, true, false) == null;
-        // this 寄存器在 try 前被覆盖后，catch 不能重新把它当成入口时的非空 this。
-        var tryConstructor = com.android.dex.Code.Try.class.getDeclaredConstructor(int.class, int.class, int.class);
-        tryConstructor.setAccessible(true);
-        var caught = new com.android.dex.Code(2, 2, 1, 0,
-                new short[]{0x1007, 0x001f, 0, 0x000e, 0x010d, 0x106e, 0, 0, 0x000e},
-                new com.android.dex.Code.Try[]{tryConstructor.newInstance(1, 2, 0)},
-                new com.android.dex.Code.CatchHandler[]{new com.android.dex.Code.CatchHandler(new int[0], new int[0], 4, 0)});
-        assert Pvm2Safety.check(caught, false) != null;
-        // 未改写的 this 可以沿真实抛异常边进入 catch；只有正常边建立的事实不可沿异常边传播。
-        for (boolean preserved : new boolean[]{true, false}) {
-            short[] instructions = {preserved ? (short)0x0000 : (short)0x1007,
-                    0x001f, 0, 0x000e, 0x010d, 0x106e, 0, 0, 0x000e};
-            var precise = new com.android.dex.Code(2, 2, 1, 0, instructions,
-                    new com.android.dex.Code.Try[]{tryConstructor.newInstance(1, 2, 0)}, caught.getCatchHandlers());
-            assert (Pvm2Safety.check(precise, false) == null) == preserved;
-        }
-        // 两条抛异常路径汇合，任一边覆盖 this 都必须拒绝；不抛异常的覆盖不污染 catch。
-        for (boolean secondThrow : new boolean[]{false, true}) {
-            short[] instructions = {0x001f, 0, 0x1007, secondThrow ? (short)0x001f : (short)0x0000,
-                    0, 0x000e, 0x010d, 0x106e, 0, 0, 0x000e};
-            var merged = new com.android.dex.Code(2, 2, 1, 0, instructions,
-                    new com.android.dex.Code.Try[]{tryConstructor.newInstance(0, 5, 0)},
-                    new com.android.dex.Code.CatchHandler[]{new com.android.dex.Code.CatchHandler(new int[0], new int[0], 6, 0)});
-            assert (Pvm2Safety.check(merged, false) == null) == !secondThrow;
-        }
-        // instanceof 的真假边、覆盖及汇合：仅为真且关系仍有效时可证明接收者。
-        assert Pvm2Safety.check(new short[]{0x1020, 0, 0x0038, 5, 0x106e, 0, 1, 0x000e}, 2, 1, true, false) == null;
-        assert Pvm2Safety.check(new short[]{0x1020, 0, 0x0039, 3, 0x000e, 0x106e, 0, 1, 0x000e}, 2, 1, true, false) == null;
-        assert Pvm2Safety.check(new short[]{0x1020, 0, 0x0039, 5, 0x106e, 0, 1, 0x000e}, 2, 1, true, false) != null;
-        for (short write : new short[]{0x0112, 0x0012, 0x0016}) {
-            short[] overwritten = write == 0x0016
-                ? new short[]{0x1020, 0, write, 0, 0x0038, 5, 0x106e, 0, 1, 0x000e}
-                : new short[]{0x1020, 0, write, 0x0038, 5, 0x106e, 0, 1, 0x000e};
-            assert Pvm2Safety.check(overwritten, 2, 1, true, false) != null;
-        }
-        assert Pvm2Safety.check(new short[]{0x0238, 4, 0x1020, 0, 0x0038, 5, 0x106e, 0, 1, 0x000e}, 3, 2, true, false) != null;
         Path root = Path.of(args[0]);
+        checkInstructionBoundaries(root);
         checkEmptyResourceTable(root);
         checkZeroMethodReports(root);
         checkMethodCompatibility(root);
@@ -358,6 +279,76 @@ public final class Pvm2ProtectionCheck {
         try { pool.writeTo(store); } finally { store.close(); }
     }
 
+    private static void checkInstructionBoundaries(Path root) throws Exception {
+        // 分支后的可空调用是合法程序；空值及 catch/finally 的结果由 ART 整包回归验证。
+        for (short[] instructions : List.of(new short[]{0x1033, 5, 0x106e, 0, 1, 0x000e},
+                new short[]{0x1032, 5, 0x106e, 0, 1, 0x000e},
+                new short[]{0x0238, 4, 0x1052, 0, 0x106e, 0, 1, 0x000e})) {
+            var code = new com.android.dex.Code(3, 2, 1, 0, instructions,
+                    new com.android.dex.Code.Try[0], new com.android.dex.Code.CatchHandler[0]);
+            assert Pvm2Safety.check(code) == null;
+        }
+        for (short[] malformed : List.of(new short[]{0x106e}, // 截断指令
+                new short[]{0x0228, 0x106e, 0, 1, 0x000e}, // 跳入指令中间
+                new short[]{0x1028}, // 跳出方法
+                new short[]{0x006e, 0, 0, 0x000e}, // 实例调用缺接收者
+                new short[]{0x606e, 0, 0, 0x000e}, // 35c 超过五格
+                new short[]{0x106e, 0, 3, 0x000e}, // 接收者越界
+                new short[]{0x2074, 0, 2, 0x000e}, // range 尾寄存器越界
+                new short[]{0x002b, 4, 0, 0, 0x0100, 1, 0, 0, 1, 0})) { // case 跳入指令中间
+            var code = new com.android.dex.Code(3, 2, 1, 0, malformed,
+                    new com.android.dex.Code.Try[0], new com.android.dex.Code.CatchHandler[0]);
+            assert Pvm2Safety.check(code) != null : Arrays.toString(malformed);
+        }
+        var constructor = com.android.dex.Code.Try.class.getDeclaredConstructor(int.class, int.class, int.class);
+        constructor.setAccessible(true);
+        for (int start : new int[]{0, 1}) for (int handler : new int[]{1, 4}) {
+            var code = new com.android.dex.Code(2, 2, 1, 0,
+                    new short[]{0x106e, 0, 1, 0x000e, 0x000d, 0x000e},
+                    new com.android.dex.Code.Try[]{constructor.newInstance(start, 3 - start, 0)},
+                    new com.android.dex.Code.CatchHandler[]{new com.android.dex.Code.CatchHandler(new int[0], new int[0], handler, 0)});
+            assert (Pvm2Safety.check(code) == null) == (start == 0 && handler == 4);
+        }
+        // 字符串可包含空字符和代理对，但不能在 UTF-8 编码时静默替换孤立代理项。
+        for (String text : List.of("中文\u0000\ud83d\ude00", new String(new char[]{0xd800}), "a".repeat(65536))) {
+            var method = new ImmutableMethod(OWNER, "text", List.of(), "Ljava/lang/String;", 9, Set.of(), Set.of(),
+                    new ImmutableMethodImplementation(1, List.of(
+                            new ImmutableInstruction21c(Opcode.CONST_STRING, 0, new ImmutableStringReference(text)),
+                            new ImmutableInstruction11x(Opcode.RETURN_OBJECT, 0)), List.of(), List.of()));
+            Path path = root.resolve("string-boundary.dex");
+            writeClasses(path, List.of(calculationOwner(OWNER, "Ljava/lang/Object;", List.of(), List.of(method))));
+            var dex = new com.android.dex.Dex(Files.readAllBytes(path));
+            var cls = dex.classDefs().iterator().next();
+            var code = dex.readCode(dex.readClassData(cls).getDirectMethods()[0]);
+            var result = Pvm2Compiler.tryCompile(dex, code, "Ljava/lang/String;", true);
+            if (text.length() == 1) assert result.failReason.equals("unpaired UTF-16 surrogate");
+            else if (text.length() > 65535) assert result.failReason.equals("string too long");
+            else assert result.isOk() : result.failReason;
+        }
+        var superCall = new com.android.dex.Code(2, 2, 2, 0,
+                new short[]{0x206f, 0, 0x0010, 0x000a, 0x000f},
+                new com.android.dex.Code.Try[0], new com.android.dex.Code.CatchHandler[0]);
+        assert Pvm2Compiler.tryCompile(null, superCall, "I", false, null, false, new String[]{"I"})
+                .failReason.equals("invoke-super requires declaring class context");
+        // 数组载荷展开不能溢出镜像的 u16 代码长度字段。
+        short[] expanded = new short[4010];
+        expanded[0] = 0x0026; expanded[1] = 6; expanded[3] = 0x000e;
+        expanded[6] = 0x0300; expanded[7] = 1; expanded[8] = 8000;
+        var expandedCode = new com.android.dex.Code(1, 1, 0, 0, expanded,
+                new com.android.dex.Code.Try[0], new com.android.dex.Code.CatchHandler[0]);
+        assert Pvm2Compiler.tryCompile(null, expandedCode, "V", true, null, false, new String[]{"[B"})
+                .failReason.equals("compiled code too large");
+        // 长度上限在编译前生效，零寄存器静态 void 合法。
+        for (int size : new int[]{1, 4096, 4097}) {
+            short[] units = new short[size]; units[size - 1] = 0x000e;
+            var code = new com.android.dex.Code(0, 0, 0, 0, units,
+                    new com.android.dex.Code.Try[0], new com.android.dex.Code.CatchHandler[0]);
+            var result = Pvm2Compiler.tryCompile(null, code, "V", true);
+            assert result.isOk() == (size <= 4096) : result.failReason;
+            if (size > 4096) assert result.failReason.equals("too large");
+        }
+    }
+
     private static void checkMethodCompatibility(Path root) throws Exception {
         for (String reason : List.of("ui_runtime_glue", "data_resource_runtime_glue", "compiler_generated_bridge", "playback_compatibility")) {
             assert Pvm2Admission.classify(reason) == Pvm2Admission.SkipReason.compatibility;
@@ -407,7 +398,7 @@ public final class Pvm2ProtectionCheck {
         var obfuscated = calculation("Lfixture/a;", "callback", 1);
         assert AutoVmpPolicy.exclusionReason(calculationOwner("Lfixture/a;", "Landroid/app/Activity;", List.of(), List.of()), obfuscated) == null;
         assert AutoVmpPolicy.exclusionReason(calculationOwner("Lfixture/a;", "Ljava/lang/Object;", List.of("Landroid/view/View$OnClickListener;"), List.of()), obfuscated) == null;
-        // 字段/数组元素访问、调用和锁仍不能借叶子方法规则放行。
+        // 组件转交共用编译器逐指令验证；数据与媒体框架仍保留专用兼容边界。
         var field = new ImmutableFieldReference(type, "state", "I");
         var call = new ImmutableMethodReference(type, "external", List.of(), "I");
         for (var instruction : List.of(new ImmutableInstruction21c(Opcode.SGET, 0, field), new ImmutableInstruction22c(Opcode.IGET, 0, 1, field),
@@ -418,7 +409,9 @@ public final class Pvm2ProtectionCheck {
                 new ImmutableInstruction21c(Opcode.NEW_INSTANCE, 0, new ImmutableTypeReference(type)))) {
             var method = new ImmutableMethod(type, "stateful", List.of(), "I", 9, Set.of(), Set.of(),
                     new ImmutableMethodImplementation(3, List.of(instruction, new ImmutableInstruction11x(Opcode.RETURN, 0)), List.of(), List.of()));
-            assert AutoVmpPolicy.exclusionReason(plain, method).equals("ui_runtime_glue:non_leaf_instruction") : instruction.getOpcode();
+            assert AutoVmpPolicy.exclusionReason(plain, method) == null : instruction.getOpcode();
+            for (String owner : List.of("Lfixture/data/Rules;", "Lfixture/audio/Rules;"))
+                assert AutoVmpPolicy.exclusionReason(calculationOwner(owner, "Ljava/lang/Object;", List.of(), List.of()), method) != null;
         }
 
         Path work = Files.createDirectory(root.resolve("method-compatibility"));

@@ -20,6 +20,7 @@ constexpr uint16_t PVM2_VERSION_V5 = 5;
 constexpr uint16_t PVM2_VERSION_V6 = 6;
 constexpr uint16_t PVM2_VERSION_V7 = 7;
 constexpr uint16_t PVM2_VERSION_V8 = 8;
+constexpr uint16_t PVM2_VERSION_V9 = 9;
 
 /** Morph table size for v3 images. */
 constexpr uint8_t PVM2_OP_COUNT_V3 = 40;

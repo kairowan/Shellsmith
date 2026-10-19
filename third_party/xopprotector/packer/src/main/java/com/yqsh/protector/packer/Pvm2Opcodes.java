@@ -6,7 +6,7 @@ public final class Pvm2Opcodes {
     }
 
     /** Per-build opcode/immediate/register/handler morph (v6). */
-    public static final int VERSION = 8;
+    public static final int VERSION = 9;
 
     public static final int RET_V = 0;
     public static final int RET_I = 1;

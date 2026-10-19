@@ -27,7 +27,10 @@ public class CompatibilityActivity extends Activity {
         int compute(int value);
         default int defaultValue(int value) { return value * 3; }
     }
-    public static class Base { public int compute(int value) { return -1; } }
+    public static class Base {
+        public int compute(int value) { return -1; }
+        public int sum(int a, int b, int c, int d, int e, int f) { return -2; }
+    }
     public static class RulesView extends Base implements Contract {
         @Override public int compute(int value) { return value + 7; }
         public long compute(long value) { return value ^ 0x123456789abcdefL; }
@@ -97,10 +100,79 @@ public class CompatibilityActivity extends Activity {
             }
         }
         public double floating(double value) { return value * 1.5d + 2.0d; }
+        private Object state;
+        private int count;
+        private long wide;
+        private double decimal;
+        private float fraction;
+        private boolean enabled;
+        private byte small;
+        private short medium;
+        private char character;
+        private static Object shared;
+        public Object fields(Object value) {
+            state = value; shared = value; count++; wide = -1234567890123L;
+            decimal = -3.25d; fraction = 1.5f; enabled = true; small = -7; medium = -1234; character = '\ufffe';
+            if (wide != -1234567890123L || decimal != -3.25d || fraction != 1.5f || !enabled
+                    || small != -7 || medium != -1234 || character != '\ufffe' || shared != value)
+                throw new AssertionError("字段损坏");
+            return state;
+        }
+        public String text() { return "中文\u0000\ud83d\ude00"; }
+        public Object construct(Object value) { return new Holder(value).get(); }
+        public int calls(Contract other, int value) {
+            return other.compute(value) + privateValue(value) + staticValue(value) + Math.abs(value);
+        }
+        public String nullable(Object value, boolean clear) {
+            if (clear) value = null;
+            try { return value.toString(); } catch (NullPointerException error) { return "null"; }
+        }
+        public int invokeCatch(Holder value) {
+            try { return value.fail(); } catch (IllegalArgumentException error) { return 91; }
+            catch (NullPointerException error) { return 92; } finally { count++; }
+        }
+        public Object lockedBlock(Object lock, Object value, boolean fail) {
+            synchronized (lock) {
+                state = value; count++;
+                if (fail) throw new IllegalStateException("测试异常");
+                return state;
+            }
+        }
+        public Object[] arrays(Object value) {
+            Object[] result = new Object[]{value, this, null};
+            int[] numbers = new int[]{1, 2, 3};
+            numbers[1] += numbers[0];
+            result[2] = Integer.valueOf(numbers[1]);
+            return result;
+        }
+        public Object framework(android.content.Context context) {
+            android.widget.TextView view = new android.widget.TextView(context);
+            view.setText(text()); view.setTag(this);
+            return view;
+        }
+        public long invokeWide(Holder value, long a, double b, float c) { return value.wide(a, b, c); }
+        public int recursive(int value) { return value <= 0 ? 1 : value * recursive(value - 1); }
+        public int interfaceDefault(Contract value) { return value.defaultValue(11); }
+        public int defaultSuper(int value) { return Contract.super.defaultValue(value); }
+        @Override public int sum(int a, int b, int c, int d, int e, int f) { return a+b+c+d+e+f; }
+        /* LARGE_METHOD */
+
+    }
+    public static class Holder {
+        final Object value;
+        Holder(Object value) { this.value = value; }
+        Object get() { return value; }
+        int fail() { throw new IllegalArgumentException("测试异常"); }
+        long wide(long a, double b, float c) { return a + (long)b + (long)c; }
     }
     public static class ChildView extends RulesView {
         @Override public int compute(int value) { return value + 17; }
         @Override public Object self() { return this; }
+        public int parentCompute(int value) { return super.compute(value); }
+        public int parentMany(int a, int b, int c, int d, int e, int f) { return super.sum(a,b,c,d,e,f); }
+    }
+    public static class GrandChild extends ChildView {
+        @Override public int compute(int value) { return value + 100; }
     }
     public static class RejectedView extends Base {
         private int counter;
@@ -178,9 +250,52 @@ public class CompatibilityActivity extends Activity {
             }
             for (double value : new double[]{-Double.MAX_VALUE, -0.0d, 0.0d, Double.NaN, Double.POSITIVE_INFINITY, 3.25d})
                 check(Double.doubleToLongBits(parent.floating(value)) == Double.doubleToLongBits(value * 1.5d + 2.0d), "浮点特殊值");
+
+            for (Object input : new Object[]{null, first, array, parent}) {
+                check(parent.fields(input) == input && parent.construct(input) == input, "对象状态与构造");
+                Object[] values = parent.arrays(input);
+                check(values[0] == input && values[1] == parent && values[2].equals(3), "对象和整数数组");
+                check(parent.nullable(input, true).equals("null"), "分支空接收者捕获");
+            }
+            check(parent.text() == "中文\u0000\ud83d\ude00", "字符串编码与驻留身份");
+            check(parent.text().length() == 5 && parent.text().charAt(2) == 0, "字符串空字符和代理对");
+            check(parent.calls(child, 7) == (24 + (7 ^ 0x5a) - 4 + 7), "接口私有静态嵌套调用");
+            check(parent.nullable("value", false).equals("value") && parent.nullable(null, false).equals("null"), "调用异常语义");
+            check(parent.invokeCatch(new Holder(first)) == 91 && parent.invokeCatch(null) == 92, "调用异常传播及清理");
+            check(parent.invokeWide(new Holder(first), Long.MIN_VALUE, 12.75d, -2.5f) == Long.MIN_VALUE + 10, "宽参数调用");
+            check(parent.recursive(6) == 720 && parent.interfaceDefault(child) == 33, "递归与默认接口调用");
+            check(child.parentCompute(5) == 12, "父类非虚分派");
+            for (int value : ints) {
+                int expected = value;
+                for (int i = 0; i < 160; i++) expected = (expected * 31) ^ i;
+                check(parent.large(value) == expected, "超过旧代码长度上限的方法");
+            }
+            Object lock = new Object();
+            check(parent.lockedBlock(lock, first, false) == first, "锁内对象状态");
+            try { parent.lockedBlock(lock, other, true); throw new AssertionError("异常丢失"); }
+            catch (IllegalStateException expected) { check(parent.fields(first) == first, "锁异常传播"); }
+            Thread contender = new Thread(() -> { synchronized (lock) { } });
+            contender.start(); contender.join(2000); check(!contender.isAlive(), "异常退出释放锁");
+            try { parent.lockedBlock(null, first, false); throw new AssertionError("空锁未抛出"); }
+            catch (NullPointerException expected) { check(true, "空锁异常"); }
+            java.lang.reflect.Field counter = RulesView.class.getDeclaredField("count");
+            counter.setAccessible(true);
+            int before = counter.getInt(parent);
+            Thread[] workers = new Thread[4];
+            for (int i = 0; i < workers.length; i++) {
+                workers[i] = new Thread(() -> { for (int j = 0; j < 200; j++) parent.lockedBlock(lock, first, false); });
+                workers[i].start();
+            }
+            for (Thread worker : workers) { worker.join(5000); check(!worker.isAlive(), "竞争线程完成"); }
+            check(counter.getInt(parent) == before + 800, "跨线程同步块状态一致");
+            android.widget.TextView widget = (android.widget.TextView)parent.framework(this);
+            check(widget.getTag() == parent && widget.getText().toString().equals(parent.text()), "真实框架对象调用");
             RejectedView rejected = new RejectedView();
             check(rejected.stateful() == 1 && rejected.stateful() == 2 && rejected.callOther(-3) == 3, "状态和调用保留");
             check(rejected.superCompute(5) == -1 && rejected.locked() == 5 && rejected.hashCode() == 13, "super 同步与对象契约保留");
+            check(new GrandChild().parentCompute(5) == 12, "祖先引用按声明父类分派");
+            check(new GrandChild().parentMany(1,2,3,4,5,6) == 21, "range 父类调用");
+            check(parent.defaultSuper(7) == 21, "接口默认父实现");
             Log.e("Pvm2Regression", "PVM2_REGRESSION_OK token=" + getIntent().getStringExtra("run_token")
                     + " checks=" + checks + " pages=" + android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE));
         } catch (Throwable error) { throw new AssertionError("PVM2 回归失败 checks=" + checks, error); }
@@ -188,9 +303,12 @@ public class CompatibilityActivity extends Activity {
 }
 '''
 
+SOURCE = SOURCE.replace('/* LARGE_METHOD */', 'public int large(int value) {\n' + '\n'.join('value = (value * 31) ^ ' + str(i) + ';' for i in range(160)) + '\nreturn value; }')
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--serial', action='append', default=[], help='明确指定本轮有权测试的设备，可重复传入；省略只构建和检查覆盖')
 parser.add_argument('--output', type=Path, default=ROOT / 'target/pvm2-art-checks')
+parser.add_argument('--min-api', type=int, choices=[23, 26], default=23, help='23 验证 D8 脱糖，26 验证原生接口默认方法')
 parser.add_argument('--without-resource-table', action='store_true', help='生成完全不带 resources.arsc 的 APK，默认保留合法空表')
 args = parser.parse_args()
 work = args.output.resolve()
@@ -220,7 +338,51 @@ package = 'dev.mocika.shield.pvm2regression'
 run([bt / 'aapt2', 'link', '-o', work / 'base.apk', '--manifest', work / 'AndroidManifest.xml', '-I', android])
 run(['javac', '--release', '8', '-cp', android, '-d', work / 'classes', work / 'CompatibilityActivity.java'])
 run(['jar', 'cf', work / 'classes.jar', '-C', work / 'classes', '.'])
-run([bt / 'd8', '--release', '--lib', android, '--min-api', '23', '--output', work / 'dex', work / 'classes.jar'])
+run([bt / 'd8', '--release', '--lib', android, '--min-api', str(args.min_api), '--output', work / 'dex', work / 'classes.jar'])
+# 将合法 super 引用规范到祖先，覆盖混淆器可能产生的引用；基线也使用同一 DEX。
+(work / 'RewriteSuper.java').write_text(r'''import java.nio.file.*;
+import java.util.*;
+import com.android.tools.smali.dexlib2.*;
+import com.android.tools.smali.dexlib2.dexbacked.*;
+import com.android.tools.smali.dexlib2.iface.*;
+import com.android.tools.smali.dexlib2.iface.instruction.*;
+import com.android.tools.smali.dexlib2.iface.instruction.formats.*;
+import com.android.tools.smali.dexlib2.immutable.instruction.*;
+import com.android.tools.smali.dexlib2.immutable.reference.*;
+import com.android.tools.smali.dexlib2.rewriter.*;
+import com.android.tools.smali.dexlib2.writer.pool.*;
+import com.android.tools.smali.dexlib2.writer.io.*;
+public class RewriteSuper {
+  public static void main(String[] args) throws Exception {
+    var dex = new DexBackedDexFile(Opcodes.getDefault(), Files.readAllBytes(Path.of(args[0])));
+    int[] changed = {0, 0};
+    var rewriter = new DexRewriter(new RewriterModule() {
+      public Rewriter<Instruction> getInstructionRewriter(Rewriters rewriters) {
+        return instruction -> {
+          if (instruction.getOpcode() == Opcode.INVOKE_SUPER || instruction.getOpcode() == Opcode.INVOKE_SUPER_RANGE) {
+            var method = (com.android.tools.smali.dexlib2.iface.reference.MethodReference)((ReferenceInstruction)instruction).getReference();
+            if (method.getDefiningClass().endsWith("$RulesView;")) {
+              var ref = new ImmutableMethodReference(method.getDefiningClass().replace("$RulesView;", "$Base;"), method.getName(), method.getParameterTypes(), method.getReturnType());
+              if (instruction instanceof Instruction35c i) {
+                changed[0]++;
+                return new ImmutableInstruction35c(i.getOpcode(), i.getRegisterCount(), i.getRegisterC(), i.getRegisterD(), i.getRegisterE(), i.getRegisterF(), i.getRegisterG(), ref);
+              }
+              var i = (Instruction3rc)instruction; changed[1]++;
+              return new ImmutableInstruction3rc(i.getOpcode(), i.getStartRegister(), i.getRegisterCount(), ref);
+            }
+          }
+          return instruction;
+        };
+      }
+    });
+    var pool = new DexPool(Opcodes.getDefault());
+    for (var cls : rewriter.getDexFileRewriter().rewrite(dex).getClasses()) pool.internClass(cls);
+    assert changed[0] > 0 && changed[1] > 0 : Arrays.toString(changed);
+    var output = new FileDataStore(Path.of(args[0]).toFile()); try { pool.writeTo(output); } finally { output.close(); }
+  }
+}''')
+run(['javac', '--release', '17', '-cp', ROOT / 'tools/xop-pvm2-packer.jar', '-d', work, work / 'RewriteSuper.java'])
+run(['java', '-ea', '-cp', str(work) + os.pathsep + str(ROOT / 'tools/xop-pvm2-packer.jar'), 'RewriteSuper', work / 'dex/classes.dex'])
 with zipfile.ZipFile(work / 'base.apk') as base, zipfile.ZipFile(work / 'input-unsigned.apk', 'w') as archive:
     for entry in base.infolist():
         if not args.without_resource_table or entry.filename != 'resources.arsc':
@@ -243,6 +405,7 @@ run(protect)
 sign('protected.apk', 'protected-signed.apk')
 report = json.loads((work / 'protected-signed.apk.protection.json').read_text())
 assert report['output_sha256'] == hashlib.sha256((work / 'protected-signed.apk').read_bytes()).hexdigest()
+assert any(row['descriptor'].endswith('->large(I)I') and row['input_instruction_bytes'] > 1024 and row['artifact_verified'] for row in report['methods'])
 counts = Counter()
 for row in report['methods']:
     if '-><' in row['descriptor']:
@@ -250,20 +413,19 @@ for row in report['methods']:
     elif row['descriptor'].endswith('$RulesView;->defaultValue(I)I'):
         # D8 为默认接口方法生成转发桥；它应留在 ART，运行时仍须验证接口调用结果。
         assert not row['artifact_verified'] and row['reason'] == 'compiler_generated_bridge', row
-    elif '$RejectedView;' in row['descriptor']:
+    elif '$RejectedView;' in row['descriptor'] and row['descriptor'].split('->')[1].split('(')[0] not in ['stateful', 'callOther', 'superCompute']:
         assert not row['artifact_verified'], row
-        expected = {'stateful': 'ui_runtime_glue:non_leaf_instruction', 'callOther': 'ui_runtime_glue:non_leaf_instruction',
-                    'superCompute': 'ui_runtime_glue:non_leaf_instruction', 'locked': 'ui_runtime_glue:synchronization',
+        expected = {'locked': 'ui_runtime_glue:synchronization',
                     'hashCode': 'ui_runtime_glue:virtual_contract', 'nativeCall': 'no_code'}
         name = row['descriptor'].split('->')[1].split('(')[0]
         assert row['reason'] == expected[name], row
     else:
         assert row['artifact_verified'], row
     counts['verified' if row['artifact_verified'] else row['reason']] += 1
-assert counts['verified'] == 26 and len(report['methods']) == 36, counts
-print('Java/D8 整包：26 个方法验证通过，3 个初始化方法、1 个 D8 桥接方法和 6 个明确不支持的方法保留。', flush=True)
+assert counts['verified'] == 46 and len(report['methods']) == (53 if args.min_api == 23 else 52), counts
+print('Java/D8 整包：46 个方法验证通过，初始化、桥接、同步声明和特殊对象契约保留。', flush=True)
 results = {'coverage': dict(counts), 'apk_sha256': report['output_sha256'],
-           'resource_table': 'absent' if args.without_resource_table else 'empty',
+           'resource_table': 'absent' if args.without_resource_table else 'empty', 'min_api': args.min_api,
            'source_sha256': hashlib.sha256(SOURCE.encode()).hexdigest(), 'devices': []}
 (work / 'result.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n')
 for serial in args.serial:
@@ -291,7 +453,7 @@ for serial in args.serial:
         match = re.search(re.escape(marker) + r'(\d+) pages=(\d+)', logs)
         assert match and 'FATAL EXCEPTION' not in logs, str(path)
         checks = int(match.group(1))
-        assert checks == 482, checks
+        assert checks == 525, checks
         device['page_size'] = int(match.group(2))
         assert run(adb + ['shell', 'pidof', package]).strip(), str(path)
         device['scenarios'].append({'name': scenario, 'checks': checks})

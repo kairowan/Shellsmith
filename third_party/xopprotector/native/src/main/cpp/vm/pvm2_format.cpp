@@ -118,7 +118,7 @@ bool parse_pvm2(const uint8_t* data, size_t size, Pvm2Image* out) {
     if (out->version != PVM2_VERSION_V1 && out->version != PVM2_VERSION_V2
             && out->version != PVM2_VERSION_V3 && out->version != PVM2_VERSION_V4
             && out->version != PVM2_VERSION_V5 && out->version != PVM2_VERSION_V6
-            && out->version != PVM2_VERSION_V7 && out->version != PVM2_VERSION_V8) {
+            && out->version != PVM2_VERSION_V7 && out->version != PVM2_VERSION_V8 && out->version != PVM2_VERSION_V9) {
         PLOGE("PVM2 unsupported version %u", out->version);
         return false;
     }

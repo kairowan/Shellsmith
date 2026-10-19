@@ -831,6 +831,31 @@ static bool ensure_well_known_classes(JNIEnv* env) {
     return true;
 }
 
+static jstring string_from_utf8(JNIEnv* env, const std::string& value) {
+    // 镜像使用标准 UTF-8，NewStringUTF 接受的却是 JNI 修改版 UTF-8。
+    // 复用 Java 解码器保留内嵌空字符和代理对；const-string 必须维持 ART 的驻留身份。
+    JniLocalFrame frame(env, 8);
+    if (!frame.active) return nullptr;
+    jclass cls = cache_global_class(env, "java/lang/String");
+    if (cls == nullptr) return nullptr;
+    jmethodID ctor = env->GetMethodID(cls, "<init>", "([BLjava/lang/String;)V");
+    if (ctor == nullptr) return nullptr;
+    jmethodID intern = env->GetMethodID(cls, "intern", "()Ljava/lang/String;");
+    if (intern == nullptr) return nullptr;
+    jbyteArray bytes = env->NewByteArray(static_cast<jsize>(value.size()));
+    if (bytes == nullptr) return nullptr;
+    env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(value.size()),
+                           reinterpret_cast<const jbyte*>(value.data()));
+    if (env->ExceptionCheck()) return nullptr;
+    jstring encoding = env->NewStringUTF("UTF-8");
+    if (encoding == nullptr) return nullptr;
+    jobject text = env->NewObject(cls, ctor, bytes, encoding);
+    if (env->ExceptionCheck() || text == nullptr) return nullptr;
+    jobject result = env->CallObjectMethod(text, intern);
+    if (env->ExceptionCheck()) return nullptr;
+    return reinterpret_cast<jstring>(frame.pop(result));
+}
+
 /**
  * Resolve payload classes through the loader installed by the single-stub runtime.
  *
@@ -878,7 +903,7 @@ static jclass find_class_desc(JNIEnv* env, const std::string& desc) {
                         "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;")
                 : nullptr;
         const std::string binary_name = descriptor_to_binary_name(desc);
-        jstring name = env->NewStringUTF(binary_name.c_str());
+        jstring name = string_from_utf8(env, binary_name);
         if (for_name != nullptr && name != nullptr) {
             local = reinterpret_cast<jclass>(env->CallStaticObjectMethod(
                     class_cls, for_name, name, JNI_FALSE, loader));
@@ -1170,7 +1195,7 @@ static bool fill_jargs(const char* sig, const uint8_t* arg_regs, uint8_t argc,
 
 static bool invoke_method(JNIEnv* env, uint8_t op, const std::string& desc,
                           const uint8_t* arg_regs, uint8_t argc,
-                          const std::vector<Reg>& regs, PendingResult& pending) {
+                          const std::vector<Reg>& regs, PendingResult& pending, uint16_t version) {
     // Outer locals (pending/regs) must be DeleteLocalRef'd ONLY while no inner
     // PushLocalFrame is active — otherwise ART reports
     // "Attempt to remove index outside index area" / DeleteLocalRef failed.
@@ -1186,9 +1211,26 @@ static bool invoke_method(JNIEnv* env, uint8_t op, const std::string& desc,
         if (!parse_member_ref(desc, &owner, &name, &sig)) {
             return false;
         }
+        std::string direct_super;
+        if (op == OP_INVOKE_SUPER && version >= PVM2_VERSION_V9) {
+            size_t separator = owner.find('|');
+            if (separator == std::string::npos || separator == 0 || separator + 1 == owner.size()) return false;
+            direct_super = owner.substr(0, separator);
+            owner.erase(0, separator + 1);
+        }
         cls = find_class_desc(env, owner);
-        if (cls == nullptr) {
-            return false;
+        if (cls == nullptr) return false;
+        if (!direct_super.empty()) {
+            // 类 super 从声明者的直接父类分派；接口 super 必须保持原接口的默认实现。
+            // 不能从 thiz 的动态类型取父类，否则派生实例会调用错误的实现或递归。
+            jclass class_class = cache_global_class(env, "java/lang/Class");
+            if (class_class == nullptr) return false;
+            jmethodID is_interface = env->GetMethodID(class_class, "isInterface", "()Z");
+            if (is_interface == nullptr) return false;
+            jboolean interface_owner = env->CallBooleanMethod(cls, is_interface);
+            if (env->ExceptionCheck()) return false;
+            if (!interface_owner) cls = find_class_desc(env, direct_super);
+            if (cls == nullptr) return false;
         }
         mid = (op == OP_INVOKE_STATIC)
                 ? env->GetStaticMethodID(cls, name.c_str(), sig.c_str())
@@ -2450,7 +2492,11 @@ PROTECTOR_ENCRYPT static jobject interpret_body(JNIEnv* env, int dex_index, uint
                 uint16_t idx = read_u16(code + pc);
                 pc += 2;
                 if (!reg_bounds(dst, regs.size()) || idx >= img.strings.size()) goto fail;
-                reg_take_o(env, &regs[dst], env->NewStringUTF(img.strings[idx].c_str()));
+                reg_take_o(env, &regs[dst], string_from_utf8(env, img.strings[idx]));
+                if (env->ExceptionCheck()) {
+                    if (dispatch_exception(env, img, fault_pc, &pc, &stashed_exception)) break;
+                    goto fail;
+                }
                 break;
             }
             case OP_MOVE: {
@@ -2851,7 +2897,7 @@ PROTECTOR_ENCRYPT static jobject interpret_body(JNIEnv* env, int dex_index, uint
                 if (mid >= img.methods.size()) goto fail;
                 const uint8_t* arg_regs = code + pc;
                 pc += argc;
-                if (!invoke_method(env, op, img.methods[mid], arg_regs, argc, regs, pending)) {
+                if (!invoke_method(env, op, img.methods[mid], arg_regs, argc, regs, pending, img.version)) {
                     if (env->ExceptionCheck()) {
                         if (dispatch_exception(env, img, fault_pc, &pc, &stashed_exception)) {
                             break;

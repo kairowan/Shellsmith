@@ -1778,6 +1778,7 @@ public class PackerMain {
         for (com.android.dex.ClassDef classDef : dex.classDefs()) {
             if (classDef.getClassDataOffset() == 0) continue;
             String type = dex.typeNames().get(classDef.getTypeIndex());
+            String directSuperclass = classDef.getSupertypeIndex() < 0 ? null : dex.typeNames().get(classDef.getSupertypeIndex());
             if (!shouldProcessType(type)) continue;
             boolean autoPay = paymentAutoVmpEffective && PaymentVmpRules.matches(type);
             boolean autoIndustry = !autoPay && industryAutoVmpEffective
@@ -1794,7 +1795,7 @@ public class PackerMain {
             com.android.dex.ClassData classData = dex.readClassData(classDef);
             for (com.android.dex.ClassData.Method method : classData.getDirectMethods()) {
                 notePvm2MethodScanned(phase);
-                InsnRecord rec = extractOne(dex, raf, method, aesKey, type, phase, skipMethodKeys, pvm2Exclusions);
+                InsnRecord rec = extractOne(dex, raf, method, aesKey, type, directSuperclass, phase, skipMethodKeys, pvm2Exclusions);
                 if (rec == null) {
                     continue;
                 }
@@ -1820,7 +1821,7 @@ public class PackerMain {
             }
             for (com.android.dex.ClassData.Method method : classData.getVirtualMethods()) {
                 notePvm2MethodScanned(phase);
-                InsnRecord rec = extractOne(dex, raf, method, aesKey, type, phase, skipMethodKeys, pvm2Exclusions);
+                InsnRecord rec = extractOne(dex, raf, method, aesKey, type, directSuperclass, phase, skipMethodKeys, pvm2Exclusions);
                 if (rec == null) {
                     continue;
                 }
@@ -2072,7 +2073,7 @@ public class PackerMain {
 
     private InsnRecord extractOne(com.android.dex.Dex dex, RandomAccessFile raf,
                                   com.android.dex.ClassData.Method method, byte[] aesKey,
-                                  String typeDescriptor, ExtractPhase phase,
+                                  String typeDescriptor, String directSuperclass, ExtractPhase phase,
                                   Set<String> skipMethodKeys, Map<String, String> pvm2Exclusions) throws Exception {
         if (method.getCodeOffset() == 0) return null;
         // Constructors/clinit must keep invokespecial/super; returning stubs fail ART verify.
@@ -2160,7 +2161,7 @@ public class PackerMain {
             pvm2Admission.noteCandidate();
             Pvm2Compiler.Result compiled =
                     Pvm2Compiler.tryCompile(dex, code, returnType, isStatic, pvm2Morph,
-                            methodReport != null && methodReport.requires(key), paramTypes);
+                            methodReport != null && methodReport.requires(key), paramTypes, directSuperclass);
             if (!compiled.isOk()) {
                 pvm2Admission.noteFail(compiled.failReason);
                 if (methodReport != null) methodReport.skipped(key, compiled.failReason);

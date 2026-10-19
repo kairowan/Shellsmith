@@ -167,7 +167,7 @@ impl Pvm2Failure {
         ensure!(
             report.schema_version == 2
                 && report.code_version == 4
-                && matches!(report.image_version, 7 | 8),
+                && matches!(report.image_version, 7..=9),
             "方法失败报告协议无效"
         );
         let mut classes = BTreeSet::new();
@@ -453,7 +453,7 @@ impl MethodReport {
         ensure!(
             self.schema_version == 2
                 && self.code_version == 4
-                && matches!(self.image_version, 7 | 8),
+                && matches!(self.image_version, 7..=9),
             "方法报告协议版本不受支持"
         );
         ensure!(
@@ -795,6 +795,12 @@ mod tests {
                 "reason": reason, "artifact_verified": false, "plaintext_policy": null
             })).unwrap());
         }
+        for image in [7, 8, 9, 10] {
+            detail.image_version = image;
+            detail.write(&path).unwrap();
+            assert_eq!(Pvm2Failure::zero_methods(&path).is_ok(), image <= 9);
+        }
+        detail.image_version = 9;
         detail.write(&path).unwrap();
         let failure = Pvm2Failure::zero_methods(&path).unwrap();
         assert_eq!(failure.summary.selected_classes, 1);
@@ -995,14 +1001,14 @@ mod tests {
                 );
             }
         }
-        for image in [7, 8] {
+        for image in [7, 8, 9] {
             let mut candidate: MethodReport = serde_json::from_value(data.clone()).unwrap();
             candidate.image_version = image;
             assert!(candidate
                 .validate(dir.path(), &code, &modules, &BTreeSet::new(), 1, &inputs)
                 .is_ok());
         }
-        for (schema, image) in [(1, 7), (2, 6), (2, 9)] {
+        for (schema, image) in [(1, 7), (2, 6), (2, 10)] {
             let mut candidate: MethodReport = serde_json::from_value(data.clone()).unwrap();
             candidate.schema_version = schema;
             candidate.image_version = image;

@@ -20,7 +20,7 @@ import java.util.Map;
  */
 public final class Pvm2Compiler {
     private static final int MAX_REGS = 32;
-    private static final int MAX_CODE_UNITS = 512;
+    private static final int MAX_CODE_UNITS = 4096;
     private static final int PACKED_SWITCH_IDENT = 0x0100;
     private static final int SPARSE_SWITCH_IDENT = 0x0200;
     private static final int FILL_ARRAY_DATA_IDENT = 0x0300;
@@ -66,6 +66,12 @@ public final class Pvm2Compiler {
 
     public static Result tryCompile(Dex dex, Code code, String returnType, boolean isStatic,
                                     Pvm2Morph morph, boolean clearAfterUse, String[] parameterTypes) {
+        return tryCompile(dex, code, returnType, isStatic, morph, clearAfterUse, parameterTypes, null);
+    }
+
+    public static Result tryCompile(Dex dex, Code code, String returnType, boolean isStatic,
+                                    Pvm2Morph morph, boolean clearAfterUse, String[] parameterTypes,
+                                    String directSuperclass) {
         if (code == null) return Result.fail("no code");
         if (code.getRegistersSize() > MAX_REGS) return Result.fail("too many regs");
         short[] units = code.getInstructions();
@@ -90,7 +96,7 @@ public final class Pvm2Compiler {
         }
         if (arguments.length > 255 || argumentSlots != code.getInsSize()) return Result.fail("argument types do not match register frame");
 
-        String safetyFailure = Pvm2Safety.check(code, isStatic);
+        String safetyFailure = Pvm2Safety.check(code);
         if (safetyFailure != null) return Result.fail(safetyFailure);
 
         // Extra scratch: lit* / packed-switch use +1; fill-array-data needs +2 (index+value),
@@ -118,7 +124,7 @@ public final class Pvm2Compiler {
             dalvikPcToEmitIndex.put(pc, emits.size());
             int op = units[pc] & 0xff;
             try {
-                int advance = translateOne(dex, units, pc, op, scratchReg, totalRegs, strings,
+                int advance = translateOne(dex, units, pc, op, directSuperclass, scratchReg, totalRegs, strings,
                         methodPool, fieldPool, typePool, emits, fixups);
                 if (advance <= 0) {
                     return Result.fail("bad advance at pc=" + pc + " op=0x" + Integer.toHexString(op));
@@ -142,6 +148,7 @@ public final class Pvm2Compiler {
             return Result.fail(e.getMessage());
         }
         byte[] codeBytes = codeBuf.toByteArray();
+        if (codeBytes.length > 0xffff) return Result.fail("compiled code too large");
 
         for (Fixup f : fixups) {
             Integer targetEmit = dalvikPcToEmitIndex.get(f.targetDalvikPc);
@@ -303,7 +310,7 @@ public final class Pvm2Compiler {
         }
     }
 
-    private static int translateOne(Dex dex, short[] units, int pc, int op,
+    private static int translateOne(Dex dex, short[] units, int pc, int op, String directSuperclass,
                                     int scratchReg, int totalRegs,
                                     List<String> strings,
                                     List<Integer> methodPool,
@@ -596,10 +603,10 @@ public final class Pvm2Compiler {
                 return 2;
             }
             case 0x6e: case 0x6f: case 0x70: case 0x71: case 0x72: {
-                return translateInvoke35(dex, units, pc, op, strings, methodPool, emits);
+                return translateInvoke35(dex, units, pc, op, directSuperclass, strings, methodPool, emits);
             }
             case 0x74: case 0x75: case 0x76: case 0x77: case 0x78: {
-                return translateInvoke3r(dex, units, pc, op, strings, methodPool, emits);
+                return translateInvoke3r(dex, units, pc, op, directSuperclass, strings, methodPool, emits);
             }
             case 0x7b: { // neg-int
                 emits.add(Emit.of(Pvm2Opcodes.OP_NEG, (u0 >> 8) & 0x0f, (u0 >> 12) & 0x0f));
@@ -1013,7 +1020,7 @@ public final class Pvm2Compiler {
         return (units[index] & 0xffff) | ((units[index + 1] & 0xffff) << 16);
     }
 
-    private static int translateInvoke35(Dex dex, short[] units, int pc, int op,
+    private static int translateInvoke35(Dex dex, short[] units, int pc, int op, String directSuperclass,
                                          List<String> strings, List<Integer> methodPool,
                                          List<Emit> emits) {
         int pvmOp = invokeOp(op);
@@ -1025,7 +1032,10 @@ public final class Pvm2Compiler {
         int e = (c >> 8) & 0x0f;
         int d = (c >> 4) & 0x0f;
         int cc = c & 0x0f;
-        int mid = internMethod(dex, methodPool, strings, methodIdx);
+        if (pvmOp == Pvm2Opcodes.OP_INVOKE_SUPER && directSuperclass == null)
+            throw new UnsupportedOperationException("invoke-super requires declaring class context");
+        int mid = internMethod(dex, methodPool, strings, methodIdx,
+                pvmOp == Pvm2Opcodes.OP_INVOKE_SUPER ? directSuperclass : null);
         int[] regs = new int[argCount];
         if (argCount > 0) regs[0] = cc;
         if (argCount > 1) regs[1] = d;
@@ -1036,7 +1046,7 @@ public final class Pvm2Compiler {
         return 3;
     }
 
-    private static int translateInvoke3r(Dex dex, short[] units, int pc, int op,
+    private static int translateInvoke3r(Dex dex, short[] units, int pc, int op, String directSuperclass,
                                          List<String> strings, List<Integer> methodPool,
                                          List<Emit> emits) {
         int pvmOp = invokeOpRange(op);
@@ -1044,7 +1054,10 @@ public final class Pvm2Compiler {
         int argCount = (u0 >> 8) & 0xff;
         int methodIdx = units[pc + 1] & 0xffff;
         int first = units[pc + 2] & 0xffff;
-        int mid = internMethod(dex, methodPool, strings, methodIdx);
+        if (pvmOp == Pvm2Opcodes.OP_INVOKE_SUPER && directSuperclass == null)
+            throw new UnsupportedOperationException("invoke-super requires declaring class context");
+        int mid = internMethod(dex, methodPool, strings, methodIdx,
+                pvmOp == Pvm2Opcodes.OP_INVOKE_SUPER ? directSuperclass : null);
         int[] regs = new int[argCount];
         for (int i = 0; i < argCount; i++) regs[i] = first + i;
         emits.add(Emit.invoke(pvmOp, mid, regs));
@@ -1362,13 +1375,15 @@ public final class Pvm2Compiler {
         return typePool.size() - 1;
     }
 
-    private static int internMethod(Dex dex, List<Integer> methodPool, List<String> strings, int methodIdx) {
+    private static int internMethod(Dex dex, List<Integer> methodPool, List<String> strings, int methodIdx, String directSuperclass) {
         MethodId mid = dex.methodIds().get(methodIdx);
         String owner = dex.typeNames().get(mid.getDeclaringClassIndex());
         String name = dex.strings().get(mid.getNameIndex());
         com.android.dex.ProtoId proto = dex.protoIds().get(mid.getProtoIndex());
         String ret = dex.typeNames().get(proto.getReturnTypeIndex());
         StringBuilder sb = new StringBuilder();
+        // v9 super 引用同时保留调用者的直接父类与原引用类型；运行时区分类与接口。
+        if (directSuperclass != null) sb.append(directSuperclass).append('|');
         sb.append(owner).append("->").append(name).append('(');
         if (proto.getParametersOffset() != 0) {
             short[] types = dex.readTypeList(proto.getParametersOffset()).getTypes();
@@ -1431,6 +1446,7 @@ public final class Pvm2Compiler {
         // v7：清理策略随镜像一起认证，不能由外部报告或未认证标志覆盖。
         out.writeByte(clearAfterUse ? 1 : 0);
         for (String s : strings) {
+            if (!StandardCharsets.UTF_8.newEncoder().canEncode(s)) throw new IOException("unpaired UTF-16 surrogate");
             byte[] utf = s.getBytes(StandardCharsets.UTF_8);
             if (utf.length > 0xffff) throw new IOException("string too long");
             writeU16(out, utf.length);

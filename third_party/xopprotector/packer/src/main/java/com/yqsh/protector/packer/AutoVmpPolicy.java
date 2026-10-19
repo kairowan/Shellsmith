@@ -134,18 +134,21 @@ public final class AutoVmpPolicy {
             reason = "playback_compatibility";
         if (reason == null) return null;
         if (method.getImplementation() == null || method.getName().startsWith("<")) return reason;
-        String restriction = independentMethodRestriction(method);
+        String restriction = independentMethodRestriction(method, "ui_runtime_glue".equals(reason));
         return restriction == null ? null : reason + ":" + restriction;
     }
 
-    private static String independentMethodRestriction(Method method) {
+    private static String independentMethodRestriction(Method method, boolean component) {
         int flags = method.getAccessFlags();
         var code = method.getImplementation();
         if ((flags & (0x20 | 0x20000)) != 0) return "synchronization";
-        // 跳板保留原声明、访问标志和 this，虚分派仍由 ART 完成；继承/接口本身不改变叶子方法语义。
+        // 跳板保留原声明、访问标志和 this，虚分派仍由 ART 完成；继承/接口本身不构成拒绝理由。
         // ponytail: hashCode/finalize 仍留在 ART，避免运行时重入；扩展需单独验证 GC 与内部对象操作。
         if ((flags & (0x2 | 0x8)) == 0 && (method.getName().equals("hashCode")
                 || method.getName().equals("finalize"))) return "virtual_contract";
+        // 组件的字段、调用、数组与异常统一交给共用编译器校验；跳板保留 ART 入口与 this。
+        // ponytail: 媒体及数据框架的专用兼容规则仍只放行叶子方法，扩展须有对应框架回归。
+        if (component) return null;
         // 异常表交给 Pvm2Safety 和编译器校验；move-exception/throw 支持捕获、finally 和重新抛出。
         // ponytail: 仅放行无状态访问、外部调用的叶子方法；引用和异常复用已有类型化运行时。
         // 字段、数组元素、调用等仍留在 ART；扩展需验证对象状态与框架语义，不能直接移除命名规则。
@@ -176,8 +179,7 @@ public final class AutoVmpPolicy {
         if (isDataAndResourceRuntimeGlue(typeDescriptor)) {
             return "data_resource_runtime_glue";
         }
-        // UI and navigation glue is callback/lifecycle driven. It contributes little
-        // protection value and must keep Android/AndroidX receiver semantics on ART.
+        // 组件分类用于保留特殊契约；普通方法继续进入共用编译器，不按名称限制为叶子方法。
         if (isUiRuntimeGlue(typeDescriptor)) {
             return "ui_runtime_glue";
         }
