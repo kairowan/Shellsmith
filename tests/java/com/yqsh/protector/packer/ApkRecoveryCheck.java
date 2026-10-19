@@ -285,20 +285,27 @@ public final class ApkRecoveryCheck {
             JSONObject report = new JSONObject(Files.readString(Path.of(args[3])));
             if (!hash(Files.readAllBytes(apk)).equals(report.getString("output_sha256"))) throw new IllegalStateException("报告与 APK 不匹配");
             JSONObject selection = report.getJSONObject("build").getJSONObject("selection");
+            Map<String, Map<String, com.android.tools.smali.dexlib2.iface.Method>> dexMethods = new HashMap<>();
             for (Object entry : report.getJSONArray("methods")) {
                 JSONObject row = (JSONObject) entry;
                 if (!row.getBoolean("artifact_verified")) continue;
                 String name = row.getString("input_dex");
-                DexBackedDexFile file = new DexBackedDexFile(Opcodes.getDefault(), Files.readAllBytes(root.resolve(name)));
-                boolean found = false;
-                for (var cls : file.getClasses()) for (var method : cls.getMethods()) {
-                    if (!Pvm2Report.descriptor(method).equals(row.getString("descriptor"))) continue;
-                    int index = row.getInt("final_method_index"), dexIndex = row.getInt("final_dex_index");
-                    if (!TrueVmpTrampoline.matches(method, dexIndex, index, selection.getString("bridge"), selection.getString("bridge_method"))
-                            || !recovered.containsKey(dexIndex + ":" + index)) throw new IllegalStateException("跳板与镜像不一致");
-                    found = true; trampolines++;
+                if (!name.matches("classes[0-9]*\\.dex") || !hashes.has(name)) throw new IllegalArgumentException("报告引用了未恢复的 DEX");
+                if (!dexMethods.containsKey(name)) {
+                    // 每个 DEX 只清点一次；真实应用的上万条报告不能反复扫描整份 DEX。
+                    DexBackedDexFile file = new DexBackedDexFile(Opcodes.getDefault(), Files.readAllBytes(root.resolve(name)));
+                    Map<String, com.android.tools.smali.dexlib2.iface.Method> methods = new HashMap<>();
+                    for (var cls : file.getClasses()) for (var method : cls.getMethods()) {
+                        if (methods.put(Pvm2Report.descriptor(method), method) != null) throw new IllegalStateException("DEX 方法签名重复");
+                    }
+                    dexMethods.put(name, methods);
                 }
-                if (!found) throw new IllegalStateException("恢复 DEX 中缺少方法");
+                var method = dexMethods.get(name).get(row.getString("descriptor"));
+                if (method == null) throw new IllegalStateException("恢复 DEX 中缺少方法");
+                int index = row.getInt("final_method_index"), dexIndex = row.getInt("final_dex_index");
+                if (!TrueVmpTrampoline.matches(method, dexIndex, index, selection.getString("bridge"), selection.getString("bridge_method"))
+                        || !recovered.containsKey(dexIndex + ":" + index)) throw new IllegalStateException("跳板与镜像不一致");
+                trampolines++;
             }
         }
         JSONObject nativeFiles = recoverNative(apk, root, cert, ikm);
