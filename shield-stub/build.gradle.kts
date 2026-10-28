@@ -111,7 +111,7 @@ tasks.named("preBuild") {
 }
 
 dependencies {
-    if (byosPlay) implementation("com.google.android.play:integrity:1.4.0")
+    if (byosPlay) implementation("com.google.android.play:integrity:1.6.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.junit)
 }
