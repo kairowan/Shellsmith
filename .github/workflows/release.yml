@@ -128,7 +128,7 @@ jobs:
           packages: platform-tools
 
       - name: 配置 Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -326,7 +326,7 @@ jobs:
           packages: platform-tools
 
       - name: 配置 Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -422,7 +422,7 @@ jobs:
           packages: platform-tools
 
       - name: 配置 Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
