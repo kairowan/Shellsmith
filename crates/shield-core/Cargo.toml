@@ -12,7 +12,7 @@ anyhow = "1.0"
 thiserror = "2.0"
 log = "0.4"
 walkdir = "2.5"
-zip = { version = "2.4", default-features = false, features = ["deflate"] }
+zip = { version = "4.6", default-features = false, features = ["deflate"] }
 zstd = { workspace = true }
 which = "8.0"
 colored = "3.1"

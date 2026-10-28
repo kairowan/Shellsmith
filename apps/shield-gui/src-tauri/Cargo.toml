@@ -24,7 +24,7 @@ semver = "1"
 shield-core = { path = "../../../crates/shield-core" }
 shield-cli = { path = "../../shield-cli" }
 shield-ios = { path = "../../../crates/shield-ios" }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "4", default-features = false, features = ["deflate"] }
 which = "8"
 dunce = "1"
 url = "2"
