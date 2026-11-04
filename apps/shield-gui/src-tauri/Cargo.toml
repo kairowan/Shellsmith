@@ -28,7 +28,7 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 which = "8"
 dunce = "1"
 url = "2"
-toml = "0.8"
+toml = "1.1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 sha2 = { workspace = true }

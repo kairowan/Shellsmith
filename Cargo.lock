@@ -2220,7 +2220,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "tokio",
- "toml 0.8.2",
+ "toml 1.1.2+spec-1.1.0",
  "url",
  "uuid",
  "which",
@@ -3661,7 +3661,7 @@ dependencies = [
  "shield-core",
  "shield-ios",
  "tempfile",
- "toml 0.8.2",
+ "toml 1.1.2+spec-1.1.0",
  "zip 9.3.0",
 ]
 
@@ -3702,7 +3702,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
- "toml 0.8.2",
+ "toml 1.1.2+spec-1.1.0",
  "zip 9.3.0",
 ]
 
