@@ -191,19 +191,26 @@ pub fn extract_keystore_cert_fingerprint(
     let keytool =
         find_keytool().map_err(|err| Diagnostic::new(FailureCode::ToolNotFound).attach(err))?;
 
+    let pass_dir = crate::utils::create_temp_dir("keytool-pass-")?;
+    let pass_file = crate::signing::write_password_file(pass_dir.path(), "store.pass", ks_pass)?;
     let mut args = vec![
-        "-list",
-        "-v",
-        "-keystore",
-        ks.to_str().unwrap_or(""),
-        "-alias",
-        alias,
-        "-storepass",
-        ks_pass,
+        "-list".to_string(),
+        "-v".to_string(),
+        "-keystore".to_string(),
+        ks.to_str()
+            .context("keystore 路径包含非法字符")?
+            .to_string(),
+        "-alias".to_string(),
+        alias.to_string(),
+        "-storepass:file".to_string(),
+        pass_file
+            .to_str()
+            .context("密码文件路径包含非法字符")?
+            .to_string(),
     ];
     if let Some(kind) = ks_type {
-        args.push("-storetype");
-        args.push(kind);
+        args.push("-storetype".to_string());
+        args.push(kind.to_string());
     }
 
     let output = keytool_command(&keytool)

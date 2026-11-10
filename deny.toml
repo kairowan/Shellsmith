@@ -1,7 +1,27 @@
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
-ignore = []
+# 2026-11-10 基线：以下公告来自当前锁定的 Tauri 更新器、SQLite 和 urlpattern 传递依赖。
+# 复查日期：2027-02-10。升级对应上游依赖或上游修复后应立即移除对应豁免；
+# 新出现的公告不在豁免范围内，会阻断 CI。
+ignore = [
+  # proc-macro-error 仅用于构建期宏展开，运行时不处理外部输入。
+  "RUSTSEC-2024-0370",
+  # rust-unic 系列由 Tauri urlpattern 传递引入，当前无安全公告。
+  "RUSTSEC-2025-0075",
+  "RUSTSEC-2025-0080",
+  "RUSTSEC-2025-0081",
+  "RUSTSEC-2025-0098",
+  "RUSTSEC-2025-0100",
+  # zip 4.x 仅由 tauri-plugin-updater 使用；更新包在解压前必须通过 minisign 验签。
+  # 不把该豁免扩展到业务 APK/AAB 的 ZIP 处理路径。
+  "RUSTSEC-2026-0367",
+  "RUSTSEC-2026-0368",
+  "RUSTSEC-2026-0369",
+  "RUSTSEC-2026-0429",
+  # 本地单用户 SQLite；不加载不可信数据库或执行外部 SQL。
+  "RUSTSEC-2026-0459",
+]
 
 [bans]
 multiple-versions = "warn"

@@ -4,8 +4,10 @@ use crate::cert_store::CertificateRecord;
 use crate::failure_diagnostic::ExecutionFailure;
 use shield_core::diagnostic::{Diagnostic, FailureCode, ToolName};
 use shield_core::{
-    keytool::keytool_command, sign_apk_with_progress as shield_sign_apk, utils::find_keytool,
-    KeystoreType, SignOptions, SigningProgressStep, SigningVersions,
+    keytool::keytool_command,
+    sign_apk_with_progress as shield_sign_apk,
+    utils::{create_temp_dir, find_keytool},
+    write_password_file, KeystoreType, SignOptions, SigningProgressStep, SigningVersions,
 };
 use std::path::PathBuf;
 
@@ -69,6 +71,19 @@ pub(crate) fn query_keystore_aliases(
     let keytool = find_keytool().map_err(|err| {
         ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::ToolNotFound))
     })?;
+    let pass_dir = create_temp_dir("keytool-pass-").map_err(|err| {
+        ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::Unknown))
+    })?;
+    let pass_file =
+        write_password_file(pass_dir.path(), "store.pass", &ks_pass).map_err(|err| {
+            ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::Unknown))
+        })?;
+    let pass_file = pass_file.to_str().ok_or_else(|| {
+        ExecutionFailure::preflight(
+            "密码文件路径包含非法字符".to_string(),
+            Diagnostic::new(FailureCode::Unknown),
+        )
+    })?;
     let output = keytool_command(&keytool)
         .args([
             "-list",
@@ -76,8 +91,8 @@ pub(crate) fn query_keystore_aliases(
             &keystore_path,
             "-storetype",
             ks_type_str,
-            "-storepass",
-            &ks_pass,
+            "-storepass:file",
+            pass_file,
         ])
         .output()
         .map_err(|e| {

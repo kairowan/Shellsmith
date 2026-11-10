@@ -125,7 +125,6 @@ export function useSignWorkflow({
         certificateId: certificate.id,
         sharing: sharingChoice,
       });
-      await api.deleteFile(`${outputPath}.idsig`).catch(() => undefined);
       setFinishedAt((previous) => previous ?? Date.now());
       setState("done");
       notifySuccess(t(locale, "signDone"));

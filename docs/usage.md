@@ -369,7 +369,9 @@ shield sign \
   --key-alias release
 ```
 
-未设置 `MOCIKA_SHIELD_KEY_PASS` 时，Key 密码默认沿用 Keystore 密码。也可以使用 `--ks-pass` 和 `--key-pass` 显式传入，但自动化环境优先使用环境变量，避免密码直接出现在命令历史中。
+未设置 `MOCIKA_SHIELD_KEY_PASS` 时，Key 密码默认沿用 Keystore 密码。也可以使用 `--ks-pass` 和 `--key-pass` 显式传入，但自动化环境优先使用环境变量，避免密码直接出现在命令历史中。应用内部调用 keytool、jarsigner、apksigner 和 bundletool 时，会把密码写入当前任务的私有临时文件，通过工具自带的 `file:` / `:file` 参数传递；密码文件不会进入最终产物目录。
+
+启用 V4 时，签名成功后会保留与 APK 同名的 `<输出>.idsig`，用于增量安装；关闭 V4 时不会留下旧 `.idsig`。如果输出文件已存在，签名器会先写暂存文件，成功后再替换；签名、附件验证或最终替换失败时，旧 APK、旧保护报告和旧 `.idsig` 保持不变。输出文件不能是符号链接，遇到链接时会提示选择实际文件。
 
 ### CLI 配置文件
 
