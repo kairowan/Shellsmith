@@ -585,25 +585,34 @@ fn advance_conditional_depth(
     to: usize,
     depth: &mut i32,
 ) {
-    let bytes = content.as_bytes();
     while *from < to {
-        let index = *from;
-        if mask[index] && bytes[index] == b'#' {
-            let line_start = content[..index].rfind('\n').map_or(0, |value| value + 1);
-            if content[line_start..index]
-                .chars()
-                .all(|value| value == ' ' || value == '\t')
-            {
-                let rest = &content[index..to];
-                if rest.starts_with("#if") {
-                    *depth += 1;
-                } else if rest.starts_with("#endif") {
-                    *depth = depth.saturating_sub(1);
-                }
-            }
-        }
+        *depth = (*depth + swift_conditional_delta(content, mask, *from)).max(0);
         *from += 1;
     }
+}
+
+/// 只把代码屏蔽后的有效 `#if` / `#endif` 计入条件层级。
+/// Swift 允许注释或 `{` 出现在同一行指令前，因此不能依赖原始行首空白。
+fn swift_conditional_delta(content: &str, mask: &[bool], index: usize) -> i32 {
+    if !mask[index] || content.as_bytes()[index] != b'#' {
+        return 0;
+    }
+    let rest = &content[index..];
+    if starts_swift_directive(rest, "#endif") {
+        -1
+    } else if starts_swift_directive(rest, "#if") {
+        1
+    } else {
+        0
+    }
+}
+
+fn starts_swift_directive(rest: &str, directive: &str) -> bool {
+    rest.starts_with(directive)
+        && rest
+            .as_bytes()
+            .get(directive.len())
+            .is_none_or(|byte| !is_identifier(*byte))
 }
 
 fn masked_code_text(content: &str, mask: &[bool], start: usize, end: usize) -> String {
@@ -628,20 +637,8 @@ fn start_call_state(content: &str, start: usize, end: usize) -> StartCallState {
             index += 1;
             continue;
         }
-        if bytes[index] == b'#' {
-            let line_start = content[..index].rfind('\n').map_or(0, |value| value + 1);
-            if content[line_start..index]
-                .chars()
-                .all(|value| value == ' ' || value == '\t')
-            {
-                let rest = &content[index..end];
-                if rest.starts_with("#if") {
-                    conditional_depth += 1;
-                } else if rest.starts_with("#endif") {
-                    conditional_depth = conditional_depth.saturating_sub(1);
-                }
-            }
-        }
+        conditional_depth =
+            (conditional_depth + swift_conditional_delta(content, &mask, index)).max(0);
         if bytes[index..end].starts_with(needle)
             && mask[index..index + needle.len()].iter().all(|value| *value)
         {
@@ -683,20 +680,8 @@ fn find_swiftui_noarg_initializer(
             index += 1;
             continue;
         }
-        if bytes[index] == b'#' {
-            let line_start = content[..index].rfind('\n').map_or(0, |value| value + 1);
-            if content[line_start..index]
-                .chars()
-                .all(|value| value == ' ' || value == '\t')
-            {
-                let rest = &content[index..close];
-                if rest.starts_with("#if") {
-                    conditional_depth += 1;
-                } else if rest.starts_with("#endif") {
-                    conditional_depth = conditional_depth.saturating_sub(1);
-                }
-            }
-        }
+        conditional_depth =
+            (conditional_depth + swift_conditional_delta(content, &mask, index)).max(0);
 
         match bytes[index] {
             b'{' => depth += 1,
@@ -1563,6 +1548,38 @@ mod tests {
         fs::write(temp.path(), source).unwrap();
         assert!(patch_swift_entrypoint(temp.path()).is_err());
         assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_注释前缀的条件编译同样被拒绝() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate {\n/* 启动说明 */ #if DEBUG\n    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n#endif\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_行内条件编译同样被拒绝() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate { #if DEBUG\n    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n#endif\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_字符串里的伪条件指令不影响正常回调() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate {\n    let marker = \"#if DEBUG\"\n    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        assert_eq!(content.matches("func application(").count(), 1);
+        assert_eq!(content.matches("ShellsmithProtection.start()").count(), 1);
     }
 
     #[test]

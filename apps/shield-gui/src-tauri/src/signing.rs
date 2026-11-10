@@ -58,12 +58,11 @@ pub(crate) fn execute_sign_apk(
     };
     let mut cancelled_at_commit = false;
     let result = shield_sign_apk(&opts, |step| {
-        if step == SigningProgressStep::Commit
-            && cancel.is_some_and(|flag| flag.load(Ordering::Relaxed))
-        {
+        let (cancelled_at_checkpoint, progress) = signing_step_progress(step, cancel);
+        if cancelled_at_checkpoint {
             cancelled_at_commit = true;
         }
-        let (step, message) = signing_step_progress(step, cancel)?;
+        let (step, message) = progress?;
         on_progress(step, message)
     });
     match result {
@@ -92,18 +91,20 @@ fn map_signing_failure(
 fn signing_step_progress(
     step: SigningProgressStep,
     cancel: Option<&AtomicBool>,
-) -> Result<(&'static str, &'static str), String> {
-    Ok(match step {
-        SigningProgressStep::Prepare => ("PrepareSign", "准备签名参数"),
-        SigningProgressStep::Align => ("AlignApk", "对齐待签名 APK"),
-        SigningProgressStep::Sign => ("SignApk", "调用 apksigner 执行签名"),
+) -> (bool, Result<(&'static str, &'static str), String>) {
+    match step {
+        SigningProgressStep::Prepare => (false, Ok(("PrepareSign", "准备签名参数"))),
+        SigningProgressStep::Align => (false, Ok(("AlignApk", "对齐待签名 APK"))),
+        SigningProgressStep::Sign => (false, Ok(("SignApk", "调用 apksigner 执行签名"))),
         SigningProgressStep::Commit => {
+            // 只在同一次读取中决定是否取消并返回错误，避免两次读取之间的竞态。
             if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-                return Err("签名任务已取消".to_string());
+                (true, Err("签名任务已取消".to_string()))
+            } else {
+                (false, Ok(("CommitSign", "提交签名产物")))
             }
-            ("CommitSign", "提交签名产物")
         }
-    })
+    }
 }
 
 pub(crate) fn query_keystore_aliases(
@@ -251,14 +252,18 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     #[test]
-    fn 提交检查点在取消标志置位时失败() {
+    fn 提交检查点在同一次取消读取中中止() {
         let cancel = AtomicBool::new(true);
-        assert!(signing_step_progress(SigningProgressStep::Commit, Some(&cancel)).is_err());
+        let (cancelled, progress) =
+            signing_step_progress(SigningProgressStep::Commit, Some(&cancel));
+        assert!(cancelled);
+        assert!(progress.is_err());
+
         let cancel = AtomicBool::new(false);
-        assert_eq!(
-            signing_step_progress(SigningProgressStep::Commit, Some(&cancel)).unwrap(),
-            ("CommitSign", "提交签名产物")
-        );
+        let (cancelled, progress) =
+            signing_step_progress(SigningProgressStep::Commit, Some(&cancel));
+        assert!(!cancelled);
+        assert_eq!(progress.unwrap(), ("CommitSign", "提交签名产物"));
     }
 
     #[test]
