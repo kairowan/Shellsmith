@@ -56,19 +56,36 @@ pub(crate) fn execute_sign_apk(
             v4: certificate.sign_v4,
         },
     };
+    let mut cancelled_at_commit = false;
     let result = shield_sign_apk(&opts, |step| {
+        if step == SigningProgressStep::Commit
+            && cancel.is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            cancelled_at_commit = true;
+        }
         let (step, message) = signing_step_progress(step, cancel)?;
         on_progress(step, message)
     });
     match result {
         Ok(()) => Ok(()),
-        Err(_) if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) => {
-            Err(ExecutionFailure::from_shield(ShieldError::Cancelled))
-        }
-        Err(error) => Err(ExecutionFailure::diagnosed(
+        // 只有提交检查点主动中止才算取消；迟到的取消标志不能覆盖提交或恢复失败。
+        Err(error) => Err(map_signing_failure(
             error.to_string(),
             Diagnostic::from_error(&error),
+            cancelled_at_commit,
         )),
+    }
+}
+
+fn map_signing_failure(
+    message: String,
+    diagnostic: Diagnostic,
+    cancelled_at_commit: bool,
+) -> ExecutionFailure {
+    if cancelled_at_commit {
+        ExecutionFailure::from_shield(ShieldError::Cancelled)
+    } else {
+        ExecutionFailure::diagnosed(message, diagnostic)
     }
 }
 
@@ -226,7 +243,10 @@ fn classify_keytool_error(stderr: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_keytool_error, parse_keytool_aliases, signing_step_progress};
+    use super::{
+        classify_keytool_error, map_signing_failure, parse_keytool_aliases, signing_step_progress,
+    };
+    use shield_core::diagnostic::{Diagnostic, FailureCode};
     use shield_core::SigningProgressStep;
     use std::sync::atomic::AtomicBool;
 
@@ -239,6 +259,25 @@ mod tests {
             signing_step_progress(SigningProgressStep::Commit, Some(&cancel)).unwrap(),
             ("CommitSign", "提交签名产物")
         );
+    }
+
+    #[test]
+    fn 迟到取消不覆盖提交或恢复错误() {
+        let mapped = map_signing_failure(
+            "提交签名产物失败；恢复旧附件也失败。恢复副本保留在 /tmp/review-recovery".to_string(),
+            Diagnostic::new(FailureCode::Unknown),
+            false,
+        );
+        assert!(!mapped.cancelled);
+        assert!(mapped.message.contains("review-recovery"));
+
+        let mapped = map_signing_failure(
+            "提交失败".to_string(),
+            Diagnostic::new(FailureCode::Unknown),
+            true,
+        );
+        assert!(mapped.cancelled);
+        assert_eq!(mapped.message, "已取消");
     }
 
     #[test]

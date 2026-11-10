@@ -483,7 +483,7 @@ fn patch_swift_entrypoint(path: &Path) -> Result<()> {
             );
         }
     } else if code_contains_conformance(&content, main_index, type_close, "UIApplicationDelegate") {
-        if let Some(callback_open) = find_swift_launch_callback(&content, main_index, type_close) {
+        if let Some(callback_open) = find_swift_launch_callback(&content, main_index, type_close)? {
             let callback_close =
                 matching_brace(&content, callback_open).context("UIKit 启动回调大括号不完整")?;
             match start_call_state(&content, callback_open + 1, callback_close) {
@@ -526,13 +526,23 @@ fn patch_swift_entrypoint(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn find_swift_launch_callback(content: &str, start: usize, end: usize) -> Option<usize> {
+fn find_swift_launch_callback(content: &str, start: usize, end: usize) -> Result<Option<usize>> {
     let mask = swift_code_mask(content);
     let bytes = content.as_bytes();
     let mut cursor = start;
+    let mut scanned = 0usize;
+    let mut conditional_depth = 0i32;
+    let mut candidates = Vec::new();
     while let Some(callback) =
         find_code_word(content, &mask, "didFinishLaunchingWithOptions", cursor, end)
     {
+        advance_conditional_depth(
+            content,
+            &mask,
+            &mut scanned,
+            callback,
+            &mut conditional_depth,
+        );
         cursor = callback + "didFinishLaunchingWithOptions".len();
         let before = (0..callback)
             .rev()
@@ -554,11 +564,46 @@ fn find_swift_launch_callback(content: &str, start: usize, end: usize) -> Option
         }
         if let Some(open) = find_code_char(content, callback, end, b'{') {
             if matching_brace(content, open).is_some() {
-                return Some(open);
+                candidates.push((open, conditional_depth > 0));
             }
         }
     }
-    None
+
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [(open, false)] => Ok(Some(*open)),
+        _ => anyhow::bail!(
+            "UIKit 启动回调位于条件编译或存在多个候选，无法确认 Release 构建一定执行保护调用；请在配置中指定稳定的启动入口"
+        ),
+    }
+}
+
+fn advance_conditional_depth(
+    content: &str,
+    mask: &[bool],
+    from: &mut usize,
+    to: usize,
+    depth: &mut i32,
+) {
+    let bytes = content.as_bytes();
+    while *from < to {
+        let index = *from;
+        if mask[index] && bytes[index] == b'#' {
+            let line_start = content[..index].rfind('\n').map_or(0, |value| value + 1);
+            if content[line_start..index]
+                .chars()
+                .all(|value| value == ' ' || value == '\t')
+            {
+                let rest = &content[index..to];
+                if rest.starts_with("#if") {
+                    *depth += 1;
+                } else if rest.starts_with("#endif") {
+                    *depth = depth.saturating_sub(1);
+                }
+            }
+        }
+        *from += 1;
+    }
 }
 
 fn masked_code_text(content: &str, mask: &[bool], start: usize, end: usize) -> String {
@@ -1506,6 +1551,15 @@ mod tests {
     fn swiftui_条件编译的无参_init_不被猜测() {
         let temp = tempfile::NamedTempFile::new().unwrap();
         let source = "import SwiftUI\n@main\nstruct DemoApp: App {\n#if DEBUG\n    init() { print(\"DEBUG\") }\n#endif\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_条件编译包裹启动回调时拒绝自动接入() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate {\n#if DEBUG\n    func application(_ application: UIApplication,\n                     didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n#endif\n}\n";
         fs::write(temp.path(), source).unwrap();
         assert!(patch_swift_entrypoint(temp.path()).is_err());
         assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
