@@ -360,7 +360,7 @@ export function useProtectWorkflow({
 
   const effectiveAutoSign = taskAutoSign ?? autoSignReady;
   const steps = effectiveAutoSign
-    ? ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk", "PrepareSign", "SignApk", "Cleanup"]
+    ? ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk", "PrepareSign", "SignApk", "CommitSign", "Cleanup"]
     : ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk"];
 
   return {

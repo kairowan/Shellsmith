@@ -7,9 +7,11 @@ use shield_core::{
     keytool::keytool_command,
     sign_apk_with_progress as shield_sign_apk,
     utils::{create_temp_dir, find_keytool},
-    write_password_file, KeystoreType, SignOptions, SigningProgressStep, SigningVersions,
+    write_password_file, KeystoreType, ShieldError, SignOptions, SigningProgressStep,
+    SigningVersions,
 };
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) fn execute_sign_apk(
     app: &tauri::AppHandle,
@@ -17,8 +19,12 @@ pub(crate) fn execute_sign_apk(
     output_path: Option<String>,
     apksigner_path: Option<String>,
     certificate: CertificateRecord,
+    cancel: Option<&AtomicBool>,
     mut on_progress: impl FnMut(&str, &str) -> Result<(), String>,
 ) -> Result<(), ExecutionFailure> {
+    if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        return Err(ExecutionFailure::from_shield(ShieldError::Cancelled));
+    }
     let resolved_apksigner = apksigner_path
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
@@ -50,16 +56,37 @@ pub(crate) fn execute_sign_apk(
             v4: certificate.sign_v4,
         },
     };
-    shield_sign_apk(&opts, |step| {
-        let (step, message) = match step {
-            SigningProgressStep::Prepare => ("PrepareSign", "准备签名参数"),
-            SigningProgressStep::Align => ("AlignApk", "对齐待签名 APK"),
-            SigningProgressStep::Sign => ("SignApk", "调用 apksigner 执行签名"),
-        };
+    let result = shield_sign_apk(&opts, |step| {
+        let (step, message) = signing_step_progress(step, cancel)?;
         on_progress(step, message)
+    });
+    match result {
+        Ok(()) => Ok(()),
+        Err(_) if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) => {
+            Err(ExecutionFailure::from_shield(ShieldError::Cancelled))
+        }
+        Err(error) => Err(ExecutionFailure::diagnosed(
+            error.to_string(),
+            Diagnostic::from_error(&error),
+        )),
+    }
+}
+
+fn signing_step_progress(
+    step: SigningProgressStep,
+    cancel: Option<&AtomicBool>,
+) -> Result<(&'static str, &'static str), String> {
+    Ok(match step {
+        SigningProgressStep::Prepare => ("PrepareSign", "准备签名参数"),
+        SigningProgressStep::Align => ("AlignApk", "对齐待签名 APK"),
+        SigningProgressStep::Sign => ("SignApk", "调用 apksigner 执行签名"),
+        SigningProgressStep::Commit => {
+            if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                return Err("签名任务已取消".to_string());
+            }
+            ("CommitSign", "提交签名产物")
+        }
     })
-    .map_err(|e| ExecutionFailure::diagnosed(e.to_string(), Diagnostic::from_error(&e)))?;
-    Ok(())
 }
 
 pub(crate) fn query_keystore_aliases(
@@ -199,7 +226,20 @@ fn classify_keytool_error(stderr: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_keytool_error, parse_keytool_aliases};
+    use super::{classify_keytool_error, parse_keytool_aliases, signing_step_progress};
+    use shield_core::SigningProgressStep;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn 提交检查点在取消标志置位时失败() {
+        let cancel = AtomicBool::new(true);
+        assert!(signing_step_progress(SigningProgressStep::Commit, Some(&cancel)).is_err());
+        let cancel = AtomicBool::new(false);
+        assert_eq!(
+            signing_step_progress(SigningProgressStep::Commit, Some(&cancel)).unwrap(),
+            ("CommitSign", "提交签名产物")
+        );
+    }
 
     #[test]
     fn keytool_密码错误提示更明确() {

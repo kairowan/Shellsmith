@@ -196,6 +196,8 @@ cargo test -p mocika-shield 中文证书真实 -- --ignored --nocapture
 - 输出目录位于源码目录内、非空或含逃逸符号链接时失败关闭
 - 指向源码内部的绝对符号链接（Swift、Objective-C、`project.pbxproj`）复制后只指向工作副本；原工程内容和链接值不变。CocoaPods 相对头文件链接继续可用，外部/断链明确失败
 - SwiftUI `@main` 与 UIKit AppDelegate 启动入口各验证一次，重复执行不会重复插入启动代码
+- SwiftUI 同时存在带参 `init` 和无参 `init()` 时只修改无参启动路径；只有带参 `init` 或初始化方法位于条件编译时明确失败
+- UIKit 回调前存在文档注释、参数换行或签名中注释时仍能识别原方法，不会生成重复的 `application` 方法
 - 注释、普通字符串、多行字符串和原始字符串中的 `ShellsmithProtection.start(` 不会阻止真实注入；无关辅助方法中的同名调用也不能证明启动入口已接入
 - 启动调用位于条件编译、条件分支或嵌套作用域时明确失败且不修改原文件，不能把文本命中当作保护已生效
 - 如提供 `confidential.yml`，Swift Confidential 主包和插件固定为相同精确版本；未提供时不接入该可选层。freeRASP 固定为审查版本

@@ -379,6 +379,7 @@ async fn sign_apk(
             request.output_path,
             request.apksigner_path,
             certificate,
+            None,
             |step, message| {
                 if step == "AlignApk" || step == "SignApk" {
                     app.state::<application_sharing::SharingState>()

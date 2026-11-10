@@ -312,6 +312,7 @@ pub(crate) async fn execute_protect_apk(
                 Some(final_output.clone()),
                 None,
                 certificate,
+                Some(cancel.as_ref()),
                 |step, message| {
                     task_manager.progress(&progress_window, &progress_task_id, step, message)
                 },

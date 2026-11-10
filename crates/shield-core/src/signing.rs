@@ -67,6 +67,7 @@ pub enum SigningProgressStep {
     Prepare,
     Align,
     Sign,
+    Commit,
 }
 
 pub fn sign_apk(opts: &SignOptions) -> Result<()> {
@@ -75,7 +76,16 @@ pub fn sign_apk(opts: &SignOptions) -> Result<()> {
 
 pub fn sign_apk_with_progress(
     opts: &SignOptions,
+    on_progress: impl FnMut(SigningProgressStep) -> std::result::Result<(), String>,
+) -> Result<()> {
+    let java = find_java().map_err(|err| Diagnostic::new(FailureCode::ToolNotFound).attach(err))?;
+    sign_apk_with_java(opts, on_progress, &java)
+}
+
+fn sign_apk_with_java(
+    opts: &SignOptions,
     mut on_progress: impl FnMut(SigningProgressStep) -> std::result::Result<(), String>,
+    java: &Path,
 ) -> Result<()> {
     validate_signing_versions(&opts.signing_versions)?;
     on_progress(SigningProgressStep::Prepare).map_err(anyhow::Error::msg)?;
@@ -108,7 +118,6 @@ pub fn sign_apk_with_progress(
         None => find_apksigner()
             .map_err(|err| Diagnostic::new(FailureCode::ToolNotFound).attach(err))?,
     };
-    let java = find_java().map_err(|err| Diagnostic::new(FailureCode::ToolNotFound).attach(err))?;
 
     // 口令经文件传递：写在命令行上的口令对同机其他进程可见（ps、/proc/<pid>/cmdline）。
     // 临时目录随本轮操作结束清理，口令文件另收紧到 0600。
@@ -142,19 +151,9 @@ pub fn sign_apk_with_progress(
                 .attach(err)
         })?;
 
-    // 暂存 APK 始终位于最终输出目录，确保最终替换发生在同一文件系统。
-    let staged_output = tempfile::Builder::new()
-        .prefix("shield-signed-")
-        .suffix(".apk")
-        .tempfile_in(&output_parent)
-        .with_context(|| {
-            format!(
-                "创建签名暂存文件失败，请确认输出目录可写: {}",
-                output_parent.display()
-            )
-        })?;
+    // 暂存 APK 和 V4 附件由同一个任务目录持有；任何提前返回都会把两者一起清理。
+    let (staging_dir, staged_output, staged_idsig) = create_signing_stage(&output_parent)?;
     let staged_path = staged_output.path().to_path_buf();
-    let staged_idsig = idsig_path(&staged_path);
 
     let aligned_input_str = java_path(&aligned_input)?;
     let staged_output_str = java_path(&staged_path)?;
@@ -186,7 +185,7 @@ pub fn sign_apk_with_progress(
     ];
 
     on_progress(SigningProgressStep::Sign).map_err(anyhow::Error::msg)?;
-    let output = no_window_command(&java)
+    let output = no_window_command(java)
         .args(&cmd_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -233,6 +232,7 @@ pub fn sign_apk_with_progress(
         None
     };
 
+    on_progress(SigningProgressStep::Commit).map_err(anyhow::Error::msg)?;
     let final_report = crate::protection_report::report_path(&final_output);
     let final_idsig = idsig_path(&final_output);
     let staged_idsig = opts.signing_versions.v4.then_some(staged_idsig);
@@ -245,6 +245,7 @@ pub fn sign_apk_with_progress(
         &final_report,
         &final_idsig,
     )?;
+    drop(staging_dir);
 
     Ok(())
 }
@@ -317,6 +318,25 @@ fn ensure_nonempty_file(path: &Path, message: &str) -> Result<()> {
         path.display()
     );
     Ok(())
+}
+
+fn create_signing_stage(parent: &Path) -> Result<(TempDir, NamedTempFile, PathBuf)> {
+    let staging_dir = tempfile::Builder::new()
+        .prefix("shield-signed-")
+        .tempdir_in(parent)
+        .with_context(|| {
+            format!(
+                "创建签名暂存目录失败，请确认输出目录可写: {}",
+                parent.display()
+            )
+        })?;
+    let staged_apk = tempfile::Builder::new()
+        .prefix("signed-")
+        .suffix(".apk")
+        .tempfile_in(staging_dir.path())
+        .context("创建签名暂存 APK 失败")?;
+    let staged_idsig = idsig_path(staged_apk.path());
+    Ok((staging_dir, staged_apk, staged_idsig))
 }
 
 fn write_staged_report(
@@ -594,6 +614,148 @@ fn sanitize_tool_output(raw: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn write_test_apk(path: &Path) {
+        use std::io::Write;
+        let file = fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("classes.dex", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"dex").unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[cfg(unix)]
+    fn fake_java(dir: &Path, fail_after_write: bool) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(if fail_after_write {
+            "java-fail"
+        } else {
+            "java-success"
+        });
+        let tail = if fail_after_write {
+            "exit 2\n"
+        } else {
+            "exit 0\n"
+        };
+        let script = format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = \"-version\" ]; then\n\
+               echo 'openjdk version \"17.0.0\"' >&2\n\
+               exit 0\n\
+             fi\n\
+             out=\"\"\n\
+             input=\"\"\n\
+             prev=\"\"\n\
+             v4=0\n\
+             for arg in \"$@\"; do\n\
+               if [ \"$prev\" = \"--out\" ]; then out=\"$arg\"; fi\n\
+               if [ \"$prev\" = \"--v4-signing-enabled\" ] && [ \"$arg\" = \"true\" ]; then v4=1; fi\n\
+               input=\"$arg\"\n\
+               prev=\"$arg\"\n\
+             done\n\
+             cp \"$input\" \"$out\" || exit 3\n\
+             if [ \"$v4\" = \"1\" ]; then echo fake > \"$out.idsig\"; fi\n\
+             {tail}"
+        );
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    fn signing_options(root: &Path, output: PathBuf) -> SignOptions {
+        SignOptions {
+            apk_path: root.join("input.apk"),
+            output_path: Some(output),
+            keystore_path: root.join("fake.jks"),
+            key_alias: "test".into(),
+            keystore_password: "synthetic-pass".into(),
+            key_password: "synthetic-pass".into(),
+            apksigner_path: Some(root.join("apksigner.jar")),
+            keystore_type: KeystoreType::Jks,
+            signing_versions: SigningVersions {
+                v1: true,
+                v2: true,
+                v3: true,
+                v4: true,
+            },
+        }
+    }
+
+    #[cfg(unix)]
+    fn staging_entries(root: &Path) -> usize {
+        fs::read_dir(root)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("shield-signed-")
+            })
+            .count()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 提交前取消保留旧产物并清理暂存目录() {
+        let root = tempfile::tempdir().unwrap();
+        write_test_apk(&root.path().join("input.apk"));
+        fs::write(root.path().join("fake.jks"), b"fake").unwrap();
+        fs::write(root.path().join("apksigner.jar"), b"fake").unwrap();
+        let output = root.path().join("release.apk");
+        fs::write(&output, b"old-apk").unwrap();
+        fs::write(root.path().join("release.apk.idsig"), b"old-idsig").unwrap();
+        let java = fake_java(root.path(), false);
+
+        let result = sign_apk_with_java(
+            &signing_options(root.path(), output.clone()),
+            |step| {
+                if step == SigningProgressStep::Commit {
+                    Err("cancelled".into())
+                } else {
+                    Ok(())
+                }
+            },
+            &java,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fs::read(&output).unwrap(), b"old-apk");
+        assert_eq!(
+            fs::read(root.path().join("release.apk.idsig")).unwrap(),
+            b"old-idsig"
+        );
+        assert_eq!(staging_entries(root.path()), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 签名器写出后失败不遗留暂存附件() {
+        let root = tempfile::tempdir().unwrap();
+        write_test_apk(&root.path().join("input.apk"));
+        fs::write(root.path().join("fake.jks"), b"fake").unwrap();
+        fs::write(root.path().join("apksigner.jar"), b"fake").unwrap();
+        let output = root.path().join("failed.apk");
+        fs::write(&output, b"old-apk").unwrap();
+        fs::write(root.path().join("failed.apk.idsig"), b"old-idsig").unwrap();
+        let java = fake_java(root.path(), true);
+
+        assert!(sign_apk_with_java(
+            &signing_options(root.path(), output.clone()),
+            |_| Ok(()),
+            &java,
+        )
+        .is_err());
+        assert_eq!(fs::read(&output).unwrap(), b"old-apk");
+        assert_eq!(
+            fs::read(root.path().join("failed.apk.idsig")).unwrap(),
+            b"old-idsig"
+        );
+        assert_eq!(staging_entries(root.path()), 0);
+    }
+
     fn temp_file(dir: &Path, name: &str, content: &[u8]) -> PathBuf {
         let path = dir.join(name);
         fs::write(&path, content).unwrap();
@@ -671,6 +833,20 @@ mod tests {
         }
         assert!(write_password_file(dir.path(), "bad.pass", "line1\nline2").is_err());
         assert!(write_password_file(dir.path(), "bad.pass", "line1\rline2").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 签名暂存目录会同时清理_apk_和_idsig() {
+        let dir = tempfile::tempdir().unwrap();
+        let (staging, staged_apk, staged_idsig) = create_signing_stage(dir.path()).unwrap();
+        let apk_path = staged_apk.path().to_path_buf();
+        fs::write(&apk_path, b"staged-apk").unwrap();
+        fs::write(&staged_idsig, b"staged-idsig").unwrap();
+        drop(staging);
+        assert!(!apk_path.exists());
+        assert!(!staged_idsig.exists());
+        assert!(fs::read_dir(dir.path()).unwrap().next().is_none());
     }
 
     #[test]

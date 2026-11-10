@@ -97,7 +97,7 @@ pub(crate) fn protect_failure_stage(step: &str, signing_started: bool) -> Failur
         return match step {
             "PrepareSign" => FailureStage::ProtectSign,
             "AlignApk" => FailureStage::ProtectSign,
-            "SignApk" | "Cleanup" => FailureStage::ProtectSign,
+            "SignApk" | "CommitSign" | "Cleanup" => FailureStage::ProtectSign,
             _ => FailureStage::TaskUnknown,
         };
     }
@@ -115,7 +115,7 @@ pub(crate) fn sign_failure_stage(step: &str) -> FailureStage {
     match step {
         "PrepareSign" => FailureStage::SignPrepare,
         "AlignApk" => FailureStage::SignAlign,
-        "SignApk" => FailureStage::SignExecute,
+        "SignApk" | "CommitSign" => FailureStage::SignExecute,
         _ => FailureStage::TaskUnknown,
     }
 }

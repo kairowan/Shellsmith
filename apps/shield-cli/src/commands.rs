@@ -1362,7 +1362,7 @@ fn sign_aab_with_jarsigner(
         input.to_str().unwrap(),
         alias,
     ];
-    let result = shield_core::utils::no_window_command(&jarsigner)
+    let result = shield_core::keytool::java_tool_command(&jarsigner)
         .args(args)
         .output()?;
     if !result.status.success() {
@@ -1417,6 +1417,7 @@ fn signing_step_name(step: SigningProgressStep) -> &'static str {
         SigningProgressStep::Prepare => "prepare",
         SigningProgressStep::Align => "align",
         SigningProgressStep::Sign => "sign",
+        SigningProgressStep::Commit => "commit",
     }
 }
 
@@ -1425,6 +1426,7 @@ fn signing_step_message(step: SigningProgressStep) -> &'static str {
         SigningProgressStep::Prepare => "准备签名环境",
         SigningProgressStep::Align => "对齐 APK",
         SigningProgressStep::Sign => "写入 APK 签名",
+        SigningProgressStep::Commit => "提交签名产物",
     }
 }
 

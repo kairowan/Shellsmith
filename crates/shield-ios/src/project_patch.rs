@@ -464,7 +464,7 @@ fn patch_swift_entrypoint(path: &Path) -> Result<()> {
         "// Shellsmith 自动生成：应用启动时尽早启用保护。\n        ShellsmithProtection.start()\n";
 
     if code_contains_conformance(&content, main_index, type_open, "App") {
-        if let Some(init_open) = find_top_level_initializer(&content, type_open, type_close) {
+        if let Some(init_open) = find_swiftui_noarg_initializer(&content, type_open, type_close)? {
             let init_close =
                 matching_brace(&content, init_open).context("SwiftUI App 的 init 大括号不完整")?;
             match start_call_state(&content, init_open + 1, init_close) {
@@ -538,11 +538,18 @@ fn find_swift_launch_callback(content: &str, start: usize, end: usize) -> Option
             .rev()
             .find(|index| mask[*index] && matches!(bytes[*index], b';' | b'{' | b'}'))
             .map_or(start, |index| index + 1);
-        let signature = &content[before..callback];
-        if !signature.contains("func application")
-            || !signature.contains("UIApplication")
-            || !mask[before..callback].iter().all(|value| *value)
-        {
+        let mut func_start = None;
+        let mut search = before;
+        while let Some(found) = find_code_word(content, &mask, "func", search, callback) {
+            func_start = Some(found);
+            search = found + "func".len();
+        }
+        let Some(func_start) = func_start else {
+            continue;
+        };
+        let signature = masked_code_text(content, &mask, func_start, callback);
+        let compact = signature.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !compact.contains("func application") || !compact.contains("UIApplication") {
             continue;
         }
         if let Some(open) = find_code_char(content, callback, end, b'{') {
@@ -552,6 +559,15 @@ fn find_swift_launch_callback(content: &str, start: usize, end: usize) -> Option
         }
     }
     None
+}
+
+fn masked_code_text(content: &str, mask: &[bool], start: usize, end: usize) -> String {
+    let bytes = content.as_bytes();
+    let mut text = Vec::with_capacity(end.saturating_sub(start));
+    for index in start..end {
+        text.push(if mask[index] { bytes[index] } else { b' ' });
+    }
+    String::from_utf8_lossy(&text).into_owned()
 }
 
 fn start_call_state(content: &str, start: usize, end: usize) -> StartCallState {
@@ -603,29 +619,138 @@ fn start_call_state(content: &str, start: usize, end: usize) -> StartCallState {
     }
 }
 
-fn find_top_level_initializer(content: &str, open: usize, close: usize) -> Option<usize> {
+/// 只定位参与 SwiftUI 启动的无参 `init()`。参数化重载和其他自定义初始化方法不能
+/// 证明应用启动时执行过保护调用；存在多个或条件编译候选时拒绝猜测。
+fn find_swiftui_noarg_initializer(
+    content: &str,
+    open: usize,
+    close: usize,
+) -> Result<Option<usize>> {
     let bytes = content.as_bytes();
     let mask = swift_code_mask(content);
     let mut depth = 1usize;
+    let mut conditional_depth = 0i32;
+    let mut candidates = Vec::new();
+    let mut saw_init = false;
     let mut index = open + 1;
     while index < close {
         if !mask[index] {
             index += 1;
             continue;
         }
+        if bytes[index] == b'#' {
+            let line_start = content[..index].rfind('\n').map_or(0, |value| value + 1);
+            if content[line_start..index]
+                .chars()
+                .all(|value| value == ' ' || value == '\t')
+            {
+                let rest = &content[index..close];
+                if rest.starts_with("#if") {
+                    conditional_depth += 1;
+                } else if rest.starts_with("#endif") {
+                    conditional_depth = conditional_depth.saturating_sub(1);
+                }
+            }
+        }
+
         match bytes[index] {
             b'{' => depth += 1,
             b'}' => depth = depth.saturating_sub(1),
-            b'i' if depth == 1 && content[index..close].starts_with("init") => {
-                let before_ok = index == 0 || !is_identifier(bytes[index - 1]);
-                let after = bytes.get(index + 4).copied();
-                if before_ok && matches!(after, Some(b'(' | b' ' | b'\t' | b'\n')) {
-                    if let Some(brace) = find_code_char(content, index, close, b'{') {
-                        return Some(brace);
-                    }
+            b'i' if depth == 1
+                && content[index..close].starts_with("init")
+                && (index == 0 || !is_identifier(bytes[index - 1]))
+                && bytes
+                    .get(index + 4)
+                    .is_none_or(|byte| !is_identifier(*byte)) =>
+            {
+                let previous = content[..index]
+                    .chars()
+                    .rev()
+                    .find(|value| !value.is_whitespace());
+                if previous == Some('.') {
+                    index += 4;
+                    continue;
                 }
+                saw_init = true;
+                let cursor = skip_swift_trivia(content, &mask, index + 4, close);
+                if cursor < close && matches!(bytes[cursor], b'?' | b'!') {
+                    index += 4;
+                    continue;
+                }
+                if cursor >= close || bytes[cursor] != b'(' {
+                    index += 4;
+                    continue;
+                }
+                let Some(close_paren) = matching_paren(content, &mask, cursor, close) else {
+                    index += 4;
+                    continue;
+                };
+                let has_parameters = content[cursor + 1..close_paren]
+                    .bytes()
+                    .enumerate()
+                    .any(|(offset, byte)| mask[cursor + 1 + offset] && !byte.is_ascii_whitespace());
+                if has_parameters {
+                    index = close_paren + 1;
+                    continue;
+                }
+                let body_open = skip_swift_trivia(content, &mask, close_paren + 1, close);
+                let Some(body_open) = find_code_char(content, body_open, close, b'{') else {
+                    index = close_paren + 1;
+                    continue;
+                };
+                if content[close_paren + 1..body_open]
+                    .bytes()
+                    .enumerate()
+                    .any(|(offset, byte)| mask[close_paren + 1 + offset] && byte == b';')
+                {
+                    index = close_paren + 1;
+                    continue;
+                }
+                let body_close = matching_brace(content, body_open)
+                    .context("SwiftUI App 的无参 init 大括号不完整")?;
+                candidates.push((body_open, conditional_depth > 0));
+                index = body_close + 1;
+                continue;
             }
             _ => {}
+        }
+        index += 1;
+    }
+
+    match candidates.as_slice() {
+        [] if saw_init => anyhow::bail!(
+            "@main 类型存在自定义 init，但没有可唯一确认的无参 init()；请手动接入 ShellsmithProtection.start()"
+        ),
+        [] => Ok(None),
+        [(body_open, false)] => Ok(Some(*body_open)),
+        _ => anyhow::bail!(
+            "@main 类型存在多个或条件编译的无参 init()，无法唯一确定启动路径；请手动接入 ShellsmithProtection.start()"
+        ),
+    }
+}
+
+fn skip_swift_trivia(content: &str, mask: &[bool], mut index: usize, end: usize) -> usize {
+    while index < end && (content.as_bytes()[index].is_ascii_whitespace() || !mask[index]) {
+        index += 1;
+    }
+    index
+}
+
+fn matching_paren(content: &str, mask: &[bool], open: usize, end: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut index = open;
+    while index < end {
+        if mask[index] {
+            match content.as_bytes()[index] {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                _ => {}
+            }
         }
         index += 1;
     }
@@ -1349,6 +1474,57 @@ mod tests {
         let start = content.find("ShellsmithProtection.start()").unwrap();
         let returns = content.find("return true").unwrap();
         assert!(start < returns);
+    }
+
+    #[test]
+    fn swiftui_选择无参_init_而不是带参重载() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import SwiftUI\n@main\nstruct DemoApp: App {\n    init(preview: Bool) { print(\"PREVIEW\") }\n    init() { print(\"REAL STARTUP\") }\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        let noarg = content.find("init() {").unwrap();
+        let call = content.find("ShellsmithProtection.start()").unwrap();
+        let startup = content.find("REAL STARTUP").unwrap();
+        assert!(noarg < call && call < startup);
+        assert_eq!(content.matches("ShellsmithProtection.start()").count(), 1);
+    }
+
+    #[test]
+    fn swiftui_只有带参_init_时明确拒绝() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import SwiftUI\n@main\nstruct DemoApp: App {\n    init(preview: Bool) { print(preview) }\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn swiftui_条件编译的无参_init_不被猜测() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import SwiftUI\n@main\nstruct DemoApp: App {\n#if DEBUG\n    init() { print(\"DEBUG\") }\n#endif\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_回调前的注释不会导致重复方法() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate {\n    // 启动设置\n    func application(_ application: UIApplication,\n                     didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        assert_eq!(content.matches("func application(").count(), 1);
+        let call = content.find("ShellsmithProtection.start()").unwrap();
+        let returns = content.find("return true").unwrap();
+        assert!(call < returns);
     }
 
     #[test]
