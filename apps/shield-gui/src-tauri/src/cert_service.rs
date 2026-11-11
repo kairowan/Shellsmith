@@ -6,7 +6,9 @@ use crate::cert_store::{
 use crate::failure_diagnostic::ExecutionFailure;
 use crate::signing::query_keystore_aliases;
 use shield_core::diagnostic::{Diagnostic, FailureCode, ToolName};
-use shield_core::{keytool::keytool_command, utils::find_keytool};
+use shield_core::{
+    keytool::keytool_command, utils::create_temp_dir, utils::find_keytool, write_password_file,
+};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -216,6 +218,31 @@ pub(crate) fn create_managed_certificate(
         input.key_password.clone()
     };
 
+    let pass_dir = create_temp_dir("keytool-create-pass-").map_err(|err| {
+        ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::Unknown))
+    })?;
+    let store_pass_file =
+        write_password_file(pass_dir.path(), "store.pass", &input.keystore_password).map_err(
+            |err| {
+                ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::Unknown))
+            },
+        )?;
+    let key_pass_file = write_password_file(pass_dir.path(), "key.pass", &effective_key_password)
+        .map_err(|err| {
+        ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::Unknown))
+    })?;
+    let store_pass_file = store_pass_file.to_str().ok_or_else(|| {
+        ExecutionFailure::preflight(
+            "密码文件路径包含非法字符".to_string(),
+            Diagnostic::new(FailureCode::Unknown),
+        )
+    })?;
+    let key_pass_file = key_pass_file.to_str().ok_or_else(|| {
+        ExecutionFailure::preflight(
+            "密码文件路径包含非法字符".to_string(),
+            Diagnostic::new(FailureCode::Unknown),
+        )
+    })?;
     let output = keytool_command(&keytool)
         .args([
             "-genkeypair",
@@ -223,12 +250,12 @@ pub(crate) fn create_managed_certificate(
             keystore_path.to_string_lossy().as_ref(),
             "-storetype",
             &ks_type,
-            "-storepass",
-            &input.keystore_password,
+            "-storepass:file",
+            store_pass_file,
             "-alias",
             &input.key_alias,
-            "-keypass",
-            &effective_key_password,
+            "-keypass:file",
+            key_pass_file,
             "-dname",
             input.dname.trim(),
             "-validity",

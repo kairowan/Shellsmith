@@ -95,7 +95,10 @@ cargo test -p mocika-shield 中文证书真实 -- --ignored --nocapture
 - 签名页选择 APK 后能识别文件名、大小和签名状态
 - 加固页和签名页在任务开始前均可修改输出路径，任务开始后输出路径保持固化
 - 选择证书后可完成签名，生成 `{name}_signed.apk`
-- 签名输出会自动清理同名 `.idsig`
+- 启用 V4 时签名输出保留 `<输出>.idsig`；关闭 V4 时不留下旧 `.idsig`。签名失败时旧 APK、旧报告和旧 `.idsig` 的摘要保持不变
+- 输出文件已存在时可覆盖；输出文件是符号链接时明确拒绝；大小写不同、中文和带空格路径的附件名与实际 APK 全路径一致
+- 自动签名不再在输出目录留下固定的 `_protected.apk` / `_unsigned.apk`；连续执行两个任务时中间目录不同，失败诊断报告在中间目录清理后仍可打开
+- keytool、jarsigner、apksigner、bundletool 子进程参数不含应用传入的明文密码；密码文件权限为 `0600`，包含 CR/LF 的密码被明确拒绝
 - 签名成功后主操作区只保留“继续签名”入口
 - 签名开始后 APK、证书和输出路径保持固化，完成或失败后仍不可修改；点击“继续签名”后恢复可编辑状态
 - 使用错误证书或错误密码时能给出明确失败提示
@@ -191,7 +194,13 @@ cargo test -p mocika-shield 中文证书真实 -- --ignored --nocapture
 - `cargo test -p shield-ios` 通过，生成的 `Package.swift` 能被 `swift package dump-package` 解析
 - `check-ios` 在没有完整 Xcode时返回静态报告和明确阻断，不修改工程
 - 输出目录位于源码目录内、非空或含逃逸符号链接时失败关闭
+- 指向源码内部的绝对符号链接（Swift、Objective-C、`project.pbxproj`）复制后只指向工作副本；原工程内容和链接值不变。CocoaPods 相对头文件链接继续可用，外部/断链明确失败
 - SwiftUI `@main` 与 UIKit AppDelegate 启动入口各验证一次，重复执行不会重复插入启动代码
+- SwiftUI 同时存在带参 `init` 和无参 `init()` 时只修改无参启动路径；只有带参 `init` 或初始化方法位于条件编译时明确失败
+- UIKit 回调前存在文档注释、参数换行或签名中注释时仍能识别原方法，不会生成重复的 `application` 方法
+- UIKit 整个启动回调被 `#if DEBUG` 等条件编译包裹时明确拒绝自动接入，包括独占一行、注释前缀和 `{ #if` 行内写法；不能把保护调用只写进可能被 Release 移除的分支
+- 注释、普通字符串、多行字符串和原始字符串中的 `ShellsmithProtection.start(` 不会阻止真实注入；无关辅助方法中的同名调用也不能证明启动入口已接入
+- 启动调用位于条件编译、条件分支或嵌套作用域时明确失败且不修改原文件，不能把文本命中当作保护已生效
 - 如提供 `confidential.yml`，Swift Confidential 主包和插件固定为相同精确版本；未提供时不接入该可选层。freeRASP 固定为审查版本
 - `watcherMail` 可为空；为空时仍验证 freeRASP 本地威胁检测和事件分发
 - framework/XCFramework target、`BUILD_LIBRARY_FOR_DISTRIBUTION` 错误接法与已有 `SecurityThreatHandler` 冲突被阻断

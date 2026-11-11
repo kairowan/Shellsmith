@@ -175,6 +175,19 @@ pub(crate) async fn execute_protect_apk(
     let progress_task_id = request.task_id;
 
     let task_result = tokio::task::spawn_blocking(move || {
+        let auto_sign = request.signing_certificate.is_some() && request.signed_output.is_some();
+        let final_output = request
+            .signed_output
+            .clone()
+            .unwrap_or_else(|| request.output.clone());
+        // 自动签名时，加固核心只写任务私有目录；最终输出和附件由签名核心统一提交。
+        let (protect_output, _task_temp) = if auto_sign {
+            let task_temp = shield_core::utils::create_temp_dir("shield-protect-")
+                .map_err(|err| ExecutionFailure::from(err.to_string()))?;
+            (task_temp.path().join("unsigned.apk"), Some(task_temp))
+        } else {
+            (PathBuf::from(&request.output), None)
+        };
         let expected_output_cert_fingerprint = request
             .signing_certificate
             .as_ref()
@@ -203,7 +216,7 @@ pub(crate) async fn execute_protect_apk(
             ui_packer_path: ui_packer,
             excluded_abis: request.excluded_abis,
             input: strip_unc_prefix(PathBuf::from(request.input)),
-            output: strip_unc_prefix(PathBuf::from(request.output)),
+            output: strip_unc_prefix(protect_output.clone()),
             apktool_path: resolved_apktool,
             resources_path: resolved_resources,
             apksigner_path: resolved_apksigner,
@@ -267,43 +280,50 @@ pub(crate) async fn execute_protect_apk(
             },
             cancel_for_protect,
         )
-        .map_err(ExecutionFailure::from_shield)?;
+        .map_err(|mut error| {
+            // 中间目录会随任务结束销毁；先把 PVM2 逐方法报告保留到最终输出目录。
+            shield_core::protection_report::Pvm2Failure::preserve(
+                &mut error,
+                std::path::Path::new(&final_output),
+            );
+            ExecutionFailure::from_shield(error)
+        })?;
 
         let sharing = app.state::<crate::application_sharing::SharingState>();
         sharing.protected(&progress_task_id);
         sharing.verify_input(&progress_task_id);
 
-        task_manager.protected(
-            &progress_task_id,
-            request.signing_certificate.is_some() && request.signed_output.is_some(),
-        )?;
+        task_manager.protected(&progress_task_id, auto_sign)?;
 
-        if let (Some(certificate), Some(final_output)) =
-            (request.signing_certificate, request.signed_output)
-        {
+        if auto_sign {
             if cancel.load(Ordering::Relaxed) {
                 return Err(ExecutionFailure::from_shield(ShieldError::Cancelled));
             }
+            let certificate = request.signing_certificate.ok_or_else(|| {
+                ExecutionFailure::preflight(
+                    "自动签名证书缺失".to_string(),
+                    Diagnostic::new(FailureCode::Unknown),
+                )
+            })?;
             let unsigned_output = opts.output.to_string_lossy().to_string();
             execute_sign_apk(
                 &app,
-                unsigned_output.clone(),
+                unsigned_output,
                 Some(final_output.clone()),
                 None,
                 certificate,
+                Some(cancel.as_ref()),
                 |step, message| {
                     task_manager.progress(&progress_window, &progress_task_id, step, message)
                 },
             )?;
-            let _ = std::fs::remove_file(shield_core::protection_report::report_path(&opts.output));
-            let _ = std::fs::remove_file(format!("{final_output}.idsig"));
-            let _ = std::fs::remove_file(unsigned_output);
-            task_manager.progress(
+            // 末尾进度事件失败不能把已经提交成功的产物误报为失败。
+            let _ = task_manager.progress(
                 &progress_window,
                 &progress_task_id,
                 "Cleanup",
-                "已清理中间产物",
-            )?;
+                "已清理任务中间文件",
+            );
         }
         Ok(())
     })

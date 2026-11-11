@@ -4,10 +4,14 @@ use crate::cert_store::CertificateRecord;
 use crate::failure_diagnostic::ExecutionFailure;
 use shield_core::diagnostic::{Diagnostic, FailureCode, ToolName};
 use shield_core::{
-    keytool::keytool_command, sign_apk_with_progress as shield_sign_apk, utils::find_keytool,
-    KeystoreType, SignOptions, SigningProgressStep, SigningVersions,
+    keytool::keytool_command,
+    sign_apk_with_progress as shield_sign_apk,
+    utils::{create_temp_dir, find_keytool},
+    write_password_file, KeystoreType, ShieldError, SignOptions, SigningProgressStep,
+    SigningVersions,
 };
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub(crate) fn execute_sign_apk(
     app: &tauri::AppHandle,
@@ -15,8 +19,12 @@ pub(crate) fn execute_sign_apk(
     output_path: Option<String>,
     apksigner_path: Option<String>,
     certificate: CertificateRecord,
+    cancel: Option<&AtomicBool>,
     mut on_progress: impl FnMut(&str, &str) -> Result<(), String>,
 ) -> Result<(), ExecutionFailure> {
+    if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+        return Err(ExecutionFailure::from_shield(ShieldError::Cancelled));
+    }
     let resolved_apksigner = apksigner_path
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
@@ -48,16 +56,55 @@ pub(crate) fn execute_sign_apk(
             v4: certificate.sign_v4,
         },
     };
-    shield_sign_apk(&opts, |step| {
-        let (step, message) = match step {
-            SigningProgressStep::Prepare => ("PrepareSign", "准备签名参数"),
-            SigningProgressStep::Align => ("AlignApk", "对齐待签名 APK"),
-            SigningProgressStep::Sign => ("SignApk", "调用 apksigner 执行签名"),
-        };
+    let mut cancelled_at_commit = false;
+    let result = shield_sign_apk(&opts, |step| {
+        let (cancelled_at_checkpoint, progress) = signing_step_progress(step, cancel);
+        if cancelled_at_checkpoint {
+            cancelled_at_commit = true;
+        }
+        let (step, message) = progress?;
         on_progress(step, message)
-    })
-    .map_err(|e| ExecutionFailure::diagnosed(e.to_string(), Diagnostic::from_error(&e)))?;
-    Ok(())
+    });
+    match result {
+        Ok(()) => Ok(()),
+        // 只有提交检查点主动中止才算取消；迟到的取消标志不能覆盖提交或恢复失败。
+        Err(error) => Err(map_signing_failure(
+            error.to_string(),
+            Diagnostic::from_error(&error),
+            cancelled_at_commit,
+        )),
+    }
+}
+
+fn map_signing_failure(
+    message: String,
+    diagnostic: Diagnostic,
+    cancelled_at_commit: bool,
+) -> ExecutionFailure {
+    if cancelled_at_commit {
+        ExecutionFailure::from_shield(ShieldError::Cancelled)
+    } else {
+        ExecutionFailure::diagnosed(message, diagnostic)
+    }
+}
+
+fn signing_step_progress(
+    step: SigningProgressStep,
+    cancel: Option<&AtomicBool>,
+) -> (bool, Result<(&'static str, &'static str), String>) {
+    match step {
+        SigningProgressStep::Prepare => (false, Ok(("PrepareSign", "准备签名参数"))),
+        SigningProgressStep::Align => (false, Ok(("AlignApk", "对齐待签名 APK"))),
+        SigningProgressStep::Sign => (false, Ok(("SignApk", "调用 apksigner 执行签名"))),
+        SigningProgressStep::Commit => {
+            // 只在同一次读取中决定是否取消并返回错误，避免两次读取之间的竞态。
+            if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+                (true, Err("签名任务已取消".to_string()))
+            } else {
+                (false, Ok(("CommitSign", "提交签名产物")))
+            }
+        }
+    }
 }
 
 pub(crate) fn query_keystore_aliases(
@@ -69,6 +116,19 @@ pub(crate) fn query_keystore_aliases(
     let keytool = find_keytool().map_err(|err| {
         ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::ToolNotFound))
     })?;
+    let pass_dir = create_temp_dir("keytool-pass-").map_err(|err| {
+        ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::Unknown))
+    })?;
+    let pass_file =
+        write_password_file(pass_dir.path(), "store.pass", &ks_pass).map_err(|err| {
+            ExecutionFailure::diagnosed(err.to_string(), Diagnostic::new(FailureCode::Unknown))
+        })?;
+    let pass_file = pass_file.to_str().ok_or_else(|| {
+        ExecutionFailure::preflight(
+            "密码文件路径包含非法字符".to_string(),
+            Diagnostic::new(FailureCode::Unknown),
+        )
+    })?;
     let output = keytool_command(&keytool)
         .args([
             "-list",
@@ -76,8 +136,8 @@ pub(crate) fn query_keystore_aliases(
             &keystore_path,
             "-storetype",
             ks_type_str,
-            "-storepass",
-            &ks_pass,
+            "-storepass:file",
+            pass_file,
         ])
         .output()
         .map_err(|e| {
@@ -184,7 +244,46 @@ fn classify_keytool_error(stderr: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_keytool_error, parse_keytool_aliases};
+    use super::{
+        classify_keytool_error, map_signing_failure, parse_keytool_aliases, signing_step_progress,
+    };
+    use shield_core::diagnostic::{Diagnostic, FailureCode};
+    use shield_core::SigningProgressStep;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn 提交检查点在同一次取消读取中中止() {
+        let cancel = AtomicBool::new(true);
+        let (cancelled, progress) =
+            signing_step_progress(SigningProgressStep::Commit, Some(&cancel));
+        assert!(cancelled);
+        assert!(progress.is_err());
+
+        let cancel = AtomicBool::new(false);
+        let (cancelled, progress) =
+            signing_step_progress(SigningProgressStep::Commit, Some(&cancel));
+        assert!(!cancelled);
+        assert_eq!(progress.unwrap(), ("CommitSign", "提交签名产物"));
+    }
+
+    #[test]
+    fn 迟到取消不覆盖提交或恢复错误() {
+        let mapped = map_signing_failure(
+            "提交签名产物失败；恢复旧附件也失败。恢复副本保留在 /tmp/review-recovery".to_string(),
+            Diagnostic::new(FailureCode::Unknown),
+            false,
+        );
+        assert!(!mapped.cancelled);
+        assert!(mapped.message.contains("review-recovery"));
+
+        let mapped = map_signing_failure(
+            "提交失败".to_string(),
+            Diagnostic::new(FailureCode::Unknown),
+            true,
+        );
+        assert!(mapped.cancelled);
+        assert_eq!(mapped.message, "已取消");
+    }
 
     #[test]
     fn keytool_密码错误提示更明确() {

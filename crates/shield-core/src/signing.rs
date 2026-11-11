@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use tempfile::TempDir;
+use tempfile::{NamedTempFile, TempDir};
 
 use crate::diagnostic::{Diagnostic, FailureCode, ToolName};
 use crate::utils::{find_java, no_window_command};
@@ -66,6 +67,7 @@ pub enum SigningProgressStep {
     Prepare,
     Align,
     Sign,
+    Commit,
 }
 
 pub fn sign_apk(opts: &SignOptions) -> Result<()> {
@@ -74,9 +76,29 @@ pub fn sign_apk(opts: &SignOptions) -> Result<()> {
 
 pub fn sign_apk_with_progress(
     opts: &SignOptions,
-    mut on_progress: impl FnMut(SigningProgressStep) -> std::result::Result<(), String>,
+    on_progress: impl FnMut(SigningProgressStep) -> std::result::Result<(), String>,
 ) -> Result<()> {
+    let java = find_java().map_err(|err| Diagnostic::new(FailureCode::ToolNotFound).attach(err))?;
+    sign_apk_with_java(opts, on_progress, &java)
+}
+
+fn sign_apk_with_java(
+    opts: &SignOptions,
+    mut on_progress: impl FnMut(SigningProgressStep) -> std::result::Result<(), String>,
+    java: &Path,
+) -> Result<()> {
+    validate_signing_versions(&opts.signing_versions)?;
     on_progress(SigningProgressStep::Prepare).map_err(anyhow::Error::msg)?;
+
+    let final_output = opts
+        .output_path
+        .clone()
+        .unwrap_or_else(|| opts.apk_path.clone());
+    anyhow::ensure!(!final_output.as_os_str().is_empty(), "签名输出路径不能为空");
+    let output_parent = usable_parent(&final_output);
+    ensure_output_parent(&output_parent)?;
+    reject_output_symlink(&final_output)?;
+
     let source_report = crate::protection_report::report_path(&opts.apk_path);
     let mut protection_report = if source_report.exists() {
         let report = crate::protection_report::MethodReport::read(&source_report)?;
@@ -97,32 +119,29 @@ pub fn sign_apk_with_progress(
             .map_err(|err| Diagnostic::new(FailureCode::ToolNotFound).attach(err))?,
     };
 
-    let java = find_java().map_err(|err| Diagnostic::new(FailureCode::ToolNotFound).attach(err))?;
-
-    let ks_path_str = opts
-        .keystore_path
-        .to_str()
-        .context("keystore 路径包含非法字符")?;
-    let apksigner_str = apksigner
-        .to_str()
-        .context("apksigner 路径包含非法字符")?
-        .to_string();
-
-    let v = &opts.signing_versions;
-    let temp_dir = TempDir::new().context("创建签名临时目录失败")?;
     // 口令经文件传递：写在命令行上的口令对同机其他进程可见（ps、/proc/<pid>/cmdline）。
-    // 临时目录随进程退出清理，口令文件另收紧到 0600。
+    // 临时目录随本轮操作结束清理，口令文件另收紧到 0600。
+    let password_dir = TempDir::new().context("创建签名口令临时目录失败")?;
     let ks_pass_arg = format!(
         "file:{}",
-        write_password_file(temp_dir.path(), "ks.pass", &opts.keystore_password)?.display()
+        java_path(&write_password_file(
+            password_dir.path(),
+            "ks.pass",
+            &opts.keystore_password
+        )?)?
     );
     let key_pass_arg = format!(
         "file:{}",
-        write_password_file(temp_dir.path(), "key.pass", &opts.key_password)?.display()
+        java_path(&write_password_file(
+            password_dir.path(),
+            "key.pass",
+            &opts.key_password
+        )?)?
     );
-    let aligned_input = temp_dir.path().join("aligned.apk");
+
+    let aligned_input = password_dir.path().join("aligned.apk");
     on_progress(SigningProgressStep::Align).map_err(anyhow::Error::msg)?;
-    std::fs::copy(&opts.apk_path, &aligned_input)
+    fs::copy(&opts.apk_path, &aligned_input)
         .with_context(|| format!("复制待签名 APK 到临时目录失败: {}", opts.apk_path.display()))?;
     align_apk(&aligned_input)
         .context("内置 APK 对齐失败")
@@ -132,71 +151,41 @@ pub fn sign_apk_with_progress(
                 .attach(err)
         })?;
 
-    let final_output = opts
-        .output_path
-        .clone()
-        .unwrap_or_else(|| opts.apk_path.clone());
-    let staged_output = if protection_report.is_some() {
-        Some(
-            tempfile::Builder::new()
-                .prefix("shield-signed-")
-                .suffix(".apk")
-                .tempfile_in(
-                    final_output
-                        .parent()
-                        .filter(|p| !p.as_os_str().is_empty())
-                        .unwrap_or(Path::new(".")),
-                )?,
-        )
-    } else {
-        None
-    };
-    let sign_output = if let Some(staged) = staged_output.as_ref() {
-        staged.path().to_owned()
-    } else if final_output == opts.apk_path {
-        temp_dir.path().join("signed.apk")
-    } else {
-        final_output.clone()
-    };
+    // 暂存 APK 和 V4 附件由同一个任务目录持有；任何提前返回都会把两者一起清理。
+    let (staging_dir, staged_output, staged_idsig) = create_signing_stage(&output_parent)?;
+    let staged_path = staged_output.path().to_path_buf();
 
-    let aligned_input_str = aligned_input
-        .to_str()
-        .context("临时 APK 路径包含非法字符")?;
-    let sign_output_str = sign_output.to_str().context("签名输出路径包含非法字符")?;
-
-    let mut cmd_args = vec![
-        "-jar",
-        &apksigner_str,
-        "sign",
-        "--ks-type",
-        opts.keystore_type.as_str(),
-        "--ks",
-        ks_path_str,
-        "--ks-key-alias",
-        &opts.key_alias,
-        "--ks-pass",
-        &ks_pass_arg,
-        "--key-pass",
-        &key_pass_arg,
-        "--v1-signing-enabled",
-        bool_str(v.v1),
-        "--v2-signing-enabled",
-        bool_str(v.v2),
-        "--v3-signing-enabled",
-        bool_str(v.v3),
-        "--out",
-        sign_output_str,
+    let aligned_input_str = java_path(&aligned_input)?;
+    let staged_output_str = java_path(&staged_path)?;
+    let cmd_args: Vec<String> = vec![
+        "-jar".into(),
+        java_path(&apksigner)?,
+        "sign".into(),
+        "--ks-type".into(),
+        opts.keystore_type.as_str().into(),
+        "--ks".into(),
+        java_path(&opts.keystore_path)?,
+        "--ks-key-alias".into(),
+        opts.key_alias.clone(),
+        "--ks-pass".into(),
+        ks_pass_arg,
+        "--key-pass".into(),
+        key_pass_arg,
+        "--v1-signing-enabled".into(),
+        bool_str(opts.signing_versions.v1).into(),
+        "--v2-signing-enabled".into(),
+        bool_str(opts.signing_versions.v2).into(),
+        "--v3-signing-enabled".into(),
+        bool_str(opts.signing_versions.v3).into(),
+        "--v4-signing-enabled".into(),
+        bool_str(opts.signing_versions.v4).into(),
+        "--out".into(),
+        staged_output_str,
+        aligned_input_str,
     ];
 
-    if v.v4 {
-        cmd_args.push("--v4-signing-enabled");
-        cmd_args.push("true");
-    }
-
-    cmd_args.push(aligned_input_str);
-
     on_progress(SigningProgressStep::Sign).map_err(anyhow::Error::msg)?;
-    let output = no_window_command(&java)
+    let output = no_window_command(java)
         .args(&cmd_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -222,51 +211,283 @@ pub fn sign_apk_with_progress(
         )));
     }
 
-    if let (Some(report), Some(staged)) = (protection_report.as_mut(), staged_output) {
-        report.bind(&sign_output, false)?;
-        report.write(&crate::protection_report::report_path(&final_output))?;
-        let idsig = sign_output.with_extension("apk.idsig");
-        if idsig.exists() {
-            std::fs::rename(&idsig, final_output.with_extension("apk.idsig"))?;
-        }
-        staged.persist(&final_output).map_err(|e| e.error)?;
-        return Ok(());
-    }
-    if sign_output != final_output {
-        if final_output.exists() {
-            std::fs::remove_file(&final_output)
-                .with_context(|| format!("删除旧的签名输出失败: {}", final_output.display()))?;
-        }
-        std::fs::rename(&sign_output, &final_output).with_context(|| {
-            format!(
-                "写回最终签名 APK 失败: {} -> {}",
-                sign_output.display(),
-                final_output.display()
-            )
-        })?;
+    staged_output
+        .as_file()
+        .sync_all()
+        .context("同步暂存 APK 失败")?;
+    ensure_nonempty_file(&staged_path, "apksigner 未生成有效签名 APK")?;
+
+    if opts.signing_versions.v4 {
+        ensure_nonempty_file(&staged_idsig, "apksigner 未生成有效的 V4 签名附件")?;
+    } else if staged_idsig.exists() {
+        // 明确关闭 V4 时不能把签名器意外生成的附件带入最终产物。
+        fs::remove_file(&staged_idsig)
+            .with_context(|| format!("清理暂存 V4 附件失败: {}", staged_idsig.display()))?;
     }
 
-    let obsolete = crate::protection_report::report_path(&final_output);
-    if obsolete.exists() {
-        std::fs::remove_file(obsolete)?;
-    }
+    let staged_report = if let Some(report) = protection_report.as_mut() {
+        report.bind(&staged_path, false)?;
+        Some(write_staged_report(report, &output_parent)?)
+    } else {
+        None
+    };
+
+    on_progress(SigningProgressStep::Commit).map_err(anyhow::Error::msg)?;
+    let final_report = crate::protection_report::report_path(&final_output);
+    let final_idsig = idsig_path(&final_output);
+    let staged_idsig = opts.signing_versions.v4.then_some(staged_idsig);
+    commit_signed_outputs(
+        &output_parent,
+        staged_output,
+        staged_report,
+        staged_idsig.as_deref(),
+        &final_output,
+        &final_report,
+        &final_idsig,
+    )?;
+    drop(staging_dir);
 
     Ok(())
 }
 
-/// 把口令写入临时文件并收紧权限，供 apksigner 的 `file:` 参数使用。
-/// 文件内容不追加换行：apksigner 的 file 读取会自行去掉行尾。
-fn write_password_file(dir: &Path, name: &str, password: &str) -> Result<PathBuf> {
+/// 把口令写入临时文件并收紧权限，供 apksigner 的 `file:`、keytool/jarsigner 的 `:file`
+/// 参数使用。文件内容不追加换行；包含 CR/LF 的口令无法由单行文件无损表达，直接拒绝。
+pub fn write_password_file(dir: &Path, name: &str, password: &str) -> Result<PathBuf> {
+    anyhow::ensure!(
+        !password.contains('\n') && !password.contains('\r'),
+        "密码包含换行符，无法通过密码文件安全传递"
+    );
     let path = dir.join(name);
-    std::fs::write(&path, password.as_bytes())
+    fs::write(&path, password.as_bytes())
         .with_context(|| format!("写入口令文件失败: {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
             .with_context(|| format!("收紧口令文件权限失败: {}", path.display()))?;
     }
     Ok(path)
+}
+
+fn validate_signing_versions(versions: &SigningVersions) -> Result<()> {
+    anyhow::ensure!(
+        !versions.v4 || versions.v2 || versions.v3,
+        "V4 签名需要同时启用 V2 或 V3；请调整签名版本组合"
+    );
+    Ok(())
+}
+
+fn usable_parent(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."))
+        .to_path_buf()
+}
+
+fn ensure_output_parent(parent: &Path) -> Result<()> {
+    let metadata = fs::metadata(parent)
+        .with_context(|| format!("输出目录不存在或不可访问: {}", parent.display()))?;
+    anyhow::ensure!(
+        metadata.is_dir(),
+        "输出路径的父级不是目录: {}",
+        parent.display()
+    );
+    Ok(())
+}
+
+fn reject_output_symlink(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            anyhow::bail!(
+                "输出文件是符号链接，请选择实际输出文件而不是链接: {}",
+                path.display()
+            )
+        }
+        Ok(metadata) if metadata.is_dir() => {
+            anyhow::bail!("输出路径是目录，不能作为 APK 文件: {}", path.display())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn ensure_nonempty_file(path: &Path, message: &str) -> Result<()> {
+    let metadata = fs::metadata(path).with_context(|| format!("{message}: {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.is_file() && metadata.len() > 0,
+        "{message}: {}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn create_signing_stage(parent: &Path) -> Result<(TempDir, NamedTempFile, PathBuf)> {
+    let staging_dir = tempfile::Builder::new()
+        .prefix("shield-signed-")
+        .tempdir_in(parent)
+        .with_context(|| {
+            format!(
+                "创建签名暂存目录失败，请确认输出目录可写: {}",
+                parent.display()
+            )
+        })?;
+    let staged_apk = tempfile::Builder::new()
+        .prefix("signed-")
+        .suffix(".apk")
+        .tempfile_in(staging_dir.path())
+        .context("创建签名暂存 APK 失败")?;
+    let staged_idsig = idsig_path(staged_apk.path());
+    Ok((staging_dir, staged_apk, staged_idsig))
+}
+
+fn write_staged_report(
+    report: &crate::protection_report::MethodReport,
+    parent: &Path,
+) -> Result<NamedTempFile> {
+    let mut file = tempfile::Builder::new()
+        .prefix("shield-report-")
+        .suffix(".json")
+        .tempfile_in(parent)
+        .context("创建保护报告暂存文件失败")?;
+    serde_json::to_writer_pretty(&mut file, report).context("写入保护报告暂存文件失败")?;
+    file.as_file_mut()
+        .sync_all()
+        .context("同步保护报告暂存文件失败")?;
+    Ok(file)
+}
+
+fn java_path(path: &Path) -> Result<String> {
+    dunce::simplified(path)
+        .to_str()
+        .map(str::to_owned)
+        .with_context(|| format!("路径包含非法字符: {}", path.display()))
+}
+
+fn idsig_path(apk: &Path) -> PathBuf {
+    let mut value = apk.as_os_str().to_owned();
+    value.push(".idsig");
+    PathBuf::from(value)
+}
+
+struct AttachmentBackup {
+    path: PathBuf,
+    backup: PathBuf,
+    existed: bool,
+}
+
+fn backup_attachment(path: &Path, recovery: &Path, name: &str) -> Result<AttachmentBackup> {
+    let existed = path.exists();
+    let backup = recovery.join(name);
+    if existed {
+        fs::copy(path, &backup).with_context(|| format!("备份旧附件失败: {}", path.display()))?;
+    }
+    Ok(AttachmentBackup {
+        path: path.to_path_buf(),
+        backup,
+        existed,
+    })
+}
+
+fn restore_attachment(backup: &AttachmentBackup) -> Result<()> {
+    if backup.existed {
+        fs::copy(&backup.backup, &backup.path)
+            .with_context(|| format!("恢复旧附件失败: {}", backup.path.display()))?;
+    } else if backup.path.exists() {
+        fs::remove_file(&backup.path)
+            .with_context(|| format!("删除本次新建附件失败: {}", backup.path.display()))?;
+    }
+    Ok(())
+}
+
+fn restore_attachments(report: &AttachmentBackup, idsig: &AttachmentBackup) -> Result<()> {
+    restore_attachment(report)?;
+    restore_attachment(idsig)
+}
+
+fn recovery_failure(
+    recovery: TempDir,
+    primary: anyhow::Error,
+    restore: anyhow::Error,
+) -> anyhow::Error {
+    let path = recovery.keep();
+    anyhow::anyhow!(
+        "提交签名产物失败：{primary}；恢复旧附件也失败：{restore}。恢复副本保留在 {}",
+        path.display()
+    )
+}
+
+fn commit_signed_outputs(
+    parent: &Path,
+    staged_apk: NamedTempFile,
+    staged_report: Option<NamedTempFile>,
+    staged_idsig: Option<&Path>,
+    final_output: &Path,
+    final_report: &Path,
+    final_idsig: &Path,
+) -> Result<()> {
+    let recovery = tempfile::Builder::new()
+        .prefix("shield-recovery-")
+        .tempdir_in(parent)
+        .context("创建签名恢复目录失败")?;
+    let report_backup = backup_attachment(final_report, recovery.path(), "report.json")?;
+    let idsig_backup = backup_attachment(final_idsig, recovery.path(), "idsig")?;
+
+    if let Err(primary) = commit_attachments(staged_report, staged_idsig, final_report, final_idsig)
+    {
+        return match restore_attachments(&report_backup, &idsig_backup) {
+            Ok(()) => Err(anyhow::anyhow!(
+                "提交签名附件失败，旧附件尚未改变：{primary}"
+            )),
+            Err(restore) => Err(recovery_failure(recovery, primary, restore)),
+        };
+    }
+
+    match staged_apk.persist(final_output) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            let primary = anyhow::Error::from(error.error)
+                .context(format!("替换最终 APK 失败: {}", final_output.display()));
+            match restore_attachments(&report_backup, &idsig_backup) {
+                Ok(()) => Err(anyhow::anyhow!(
+                    "替换最终 APK 失败，旧 APK 保持不变，旧附件已恢复：{primary}"
+                )),
+                Err(restore) => Err(recovery_failure(recovery, primary, restore)),
+            }
+        }
+    }
+}
+
+fn commit_attachments(
+    staged_report: Option<NamedTempFile>,
+    staged_idsig: Option<&Path>,
+    final_report: &Path,
+    final_idsig: &Path,
+) -> Result<()> {
+    if let Some(staged_report) = staged_report {
+        if final_report.exists() {
+            fs::remove_file(final_report)
+                .with_context(|| format!("删除旧保护报告失败: {}", final_report.display()))?;
+        }
+        staged_report.persist(final_report).map_err(|error| {
+            anyhow::Error::from(error.error)
+                .context(format!("提交保护报告失败: {}", final_report.display()))
+        })?;
+    } else if final_report.exists() {
+        fs::remove_file(final_report)
+            .with_context(|| format!("删除旧保护报告失败: {}", final_report.display()))?;
+    }
+
+    if let Some(staged_idsig) = staged_idsig {
+        if final_idsig.exists() {
+            fs::remove_file(final_idsig)
+                .with_context(|| format!("删除旧 V4 附件失败: {}", final_idsig.display()))?;
+        }
+        fs::rename(staged_idsig, final_idsig)
+            .with_context(|| format!("提交 V4 附件失败: {}", final_idsig.display()))?;
+    } else if final_idsig.exists() {
+        fs::remove_file(final_idsig)
+            .with_context(|| format!("删除旧 V4 附件失败: {}", final_idsig.display()))?;
+    }
+    Ok(())
 }
 
 fn bool_str(b: bool) -> &'static str {
@@ -393,6 +614,154 @@ fn sanitize_tool_output(raw: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn write_test_apk(path: &Path) {
+        use std::io::Write;
+        let file = fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.start_file("classes.dex", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"dex").unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[cfg(unix)]
+    fn fake_java(dir: &Path, fail_after_write: bool) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(if fail_after_write {
+            "java-fail"
+        } else {
+            "java-success"
+        });
+        let tail = if fail_after_write {
+            "exit 2\n"
+        } else {
+            "exit 0\n"
+        };
+        let script = format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = \"-version\" ]; then\n\
+               echo 'openjdk version \"17.0.0\"' >&2\n\
+               exit 0\n\
+             fi\n\
+             out=\"\"\n\
+             input=\"\"\n\
+             prev=\"\"\n\
+             v4=0\n\
+             for arg in \"$@\"; do\n\
+               if [ \"$prev\" = \"--out\" ]; then out=\"$arg\"; fi\n\
+               if [ \"$prev\" = \"--v4-signing-enabled\" ] && [ \"$arg\" = \"true\" ]; then v4=1; fi\n\
+               input=\"$arg\"\n\
+               prev=\"$arg\"\n\
+             done\n\
+             cp \"$input\" \"$out\" || exit 3\n\
+             if [ \"$v4\" = \"1\" ]; then echo fake > \"$out.idsig\"; fi\n\
+             {tail}"
+        );
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    fn signing_options(root: &Path, output: PathBuf) -> SignOptions {
+        SignOptions {
+            apk_path: root.join("input.apk"),
+            output_path: Some(output),
+            keystore_path: root.join("fake.jks"),
+            key_alias: "test".into(),
+            keystore_password: "synthetic-pass".into(),
+            key_password: "synthetic-pass".into(),
+            apksigner_path: Some(root.join("apksigner.jar")),
+            keystore_type: KeystoreType::Jks,
+            signing_versions: SigningVersions {
+                v1: true,
+                v2: true,
+                v3: true,
+                v4: true,
+            },
+        }
+    }
+
+    #[cfg(unix)]
+    fn staging_entries(root: &Path) -> usize {
+        fs::read_dir(root)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("shield-signed-")
+            })
+            .count()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 提交前取消保留旧产物并清理暂存目录() {
+        let root = tempfile::tempdir().unwrap();
+        write_test_apk(&root.path().join("input.apk"));
+        fs::write(root.path().join("fake.jks"), b"fake").unwrap();
+        fs::write(root.path().join("apksigner.jar"), b"fake").unwrap();
+        let output = root.path().join("release.apk");
+        fs::write(&output, b"old-apk").unwrap();
+        fs::write(root.path().join("release.apk.idsig"), b"old-idsig").unwrap();
+        let java = fake_java(root.path(), false);
+
+        let result = sign_apk_with_java(
+            &signing_options(root.path(), output.clone()),
+            |step| {
+                if step == SigningProgressStep::Commit {
+                    Err("cancelled".into())
+                } else {
+                    Ok(())
+                }
+            },
+            &java,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(fs::read(&output).unwrap(), b"old-apk");
+        assert_eq!(
+            fs::read(root.path().join("release.apk.idsig")).unwrap(),
+            b"old-idsig"
+        );
+        assert_eq!(staging_entries(root.path()), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 签名器写出后失败不遗留暂存附件() {
+        let root = tempfile::tempdir().unwrap();
+        write_test_apk(&root.path().join("input.apk"));
+        fs::write(root.path().join("fake.jks"), b"fake").unwrap();
+        fs::write(root.path().join("apksigner.jar"), b"fake").unwrap();
+        let output = root.path().join("failed.apk");
+        fs::write(&output, b"old-apk").unwrap();
+        fs::write(root.path().join("failed.apk.idsig"), b"old-idsig").unwrap();
+        let java = fake_java(root.path(), true);
+
+        assert!(sign_apk_with_java(
+            &signing_options(root.path(), output.clone()),
+            |_| Ok(()),
+            &java,
+        )
+        .is_err());
+        assert_eq!(fs::read(&output).unwrap(), b"old-apk");
+        assert_eq!(
+            fs::read(root.path().join("failed.apk.idsig")).unwrap(),
+            b"old-idsig"
+        );
+        assert_eq!(staging_entries(root.path()), 0);
+    }
+
+    fn temp_file(dir: &Path, name: &str, content: &[u8]) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, content).unwrap();
+        path
+    }
+
     #[test]
     fn keystore_type_from_str_jks_is_default() {
         assert_eq!(KeystoreType::parse("JKS"), KeystoreType::Jks);
@@ -421,6 +790,159 @@ mod tests {
         assert!(v.v2);
         assert!(v.v3);
         assert!(!v.v4);
+    }
+
+    #[test]
+    fn v4_需要_v2_或_v3() {
+        let invalid = SigningVersions {
+            v1: true,
+            v2: false,
+            v3: false,
+            v4: true,
+        };
+        assert!(validate_signing_versions(&invalid).is_err());
+        let valid = SigningVersions {
+            v1: false,
+            v2: true,
+            v3: false,
+            v4: true,
+        };
+        assert!(validate_signing_versions(&valid).is_ok());
+    }
+
+    #[test]
+    fn idsig_路径保留原始文件名大小写和空格() {
+        assert_eq!(
+            idsig_path(Path::new("/tmp/My App.APK")),
+            PathBuf::from("/tmp/My App.APK.idsig")
+        );
+    }
+
+    #[test]
+    fn 口令文件收紧权限并拒绝换行() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_password_file(dir.path(), "test.pass", "  中文 pass  ").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), "  中文 pass  ".as_bytes());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        assert!(write_password_file(dir.path(), "bad.pass", "line1\nline2").is_err());
+        assert!(write_password_file(dir.path(), "bad.pass", "line1\rline2").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 签名暂存目录会同时清理_apk_和_idsig() {
+        let dir = tempfile::tempdir().unwrap();
+        let (staging, staged_apk, staged_idsig) = create_signing_stage(dir.path()).unwrap();
+        let apk_path = staged_apk.path().to_path_buf();
+        fs::write(&apk_path, b"staged-apk").unwrap();
+        fs::write(&staged_idsig, b"staged-idsig").unwrap();
+        drop(staging);
+        assert!(!apk_path.exists());
+        assert!(!staged_idsig.exists());
+        assert!(fs::read_dir(dir.path()).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn 输出文件是符号链接时拒绝签名() {
+        #[cfg(unix)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let target = temp_file(dir.path(), "target.apk", b"old");
+            let link = dir.path().join("link.apk");
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            assert!(reject_output_symlink(&link).is_err());
+            assert!(reject_output_symlink(&target).is_ok());
+        }
+    }
+
+    #[test]
+    fn 提交成功时同时替换_apk_报告和_v4_附件() {
+        let dir = tempfile::tempdir().unwrap();
+        let final_apk = temp_file(dir.path(), "app.APK", b"old-apk");
+        let final_report = temp_file(dir.path(), "app.APK.protection.json", b"old-report");
+        let final_idsig = temp_file(dir.path(), "app.APK.idsig", b"old-idsig");
+        let mut staged = NamedTempFile::new_in(dir.path()).unwrap();
+        std::io::Write::write_all(&mut staged, b"new-apk").unwrap();
+        let mut staged_report = NamedTempFile::new_in(dir.path()).unwrap();
+        std::io::Write::write_all(&mut staged_report, b"new-report").unwrap();
+        let staged_idsig = temp_file(dir.path(), "staged.idsig", b"new-idsig");
+
+        commit_signed_outputs(
+            dir.path(),
+            staged,
+            Some(staged_report),
+            Some(&staged_idsig),
+            &final_apk,
+            &final_report,
+            &final_idsig,
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(&final_apk).unwrap(), b"new-apk");
+        assert_eq!(fs::read(&final_report).unwrap(), b"new-report");
+        assert_eq!(fs::read(&final_idsig).unwrap(), b"new-idsig");
+    }
+
+    #[test]
+    fn v4_关闭时提交成功会删除旧附件() {
+        let dir = tempfile::tempdir().unwrap();
+        let final_apk = temp_file(dir.path(), "app.apk", b"old-apk");
+        let final_report = temp_file(dir.path(), "app.apk.protection.json", b"old-report");
+        let final_idsig = temp_file(dir.path(), "app.apk.idsig", b"old-idsig");
+        let mut staged = NamedTempFile::new_in(dir.path()).unwrap();
+        std::io::Write::write_all(&mut staged, b"new-apk").unwrap();
+
+        commit_signed_outputs(
+            dir.path(),
+            staged,
+            None,
+            None,
+            &final_apk,
+            &final_report,
+            &final_idsig,
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(&final_apk).unwrap(), b"new-apk");
+        assert!(!final_report.exists());
+        assert!(!final_idsig.exists());
+    }
+
+    #[test]
+    fn apk_替换失败时恢复旧报告和附件() {
+        let dir = tempfile::tempdir().unwrap();
+        let final_apk = dir.path().join("app.apk");
+        fs::create_dir(&final_apk).unwrap();
+        let final_report = temp_file(dir.path(), "app.apk.protection.json", b"old-report");
+        let final_idsig = temp_file(dir.path(), "app.apk.idsig", b"old-idsig");
+        let mut staged = NamedTempFile::new_in(dir.path()).unwrap();
+        std::io::Write::write_all(&mut staged, b"new-apk").unwrap();
+        let mut staged_report = NamedTempFile::new_in(dir.path()).unwrap();
+        std::io::Write::write_all(&mut staged_report, b"new-report").unwrap();
+        let staged_idsig = temp_file(dir.path(), "staged.idsig", b"new-idsig");
+
+        let error = commit_signed_outputs(
+            dir.path(),
+            staged,
+            Some(staged_report),
+            Some(&staged_idsig),
+            &final_apk,
+            &final_report,
+            &final_idsig,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("旧 APK 保持不变"));
+        assert_eq!(fs::read(&final_report).unwrap(), b"old-report");
+        assert_eq!(fs::read(&final_idsig).unwrap(), b"old-idsig");
+        assert!(final_apk.is_dir());
     }
 
     #[test]

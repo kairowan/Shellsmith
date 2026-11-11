@@ -4,6 +4,7 @@ use crate::project_inspect::IosTargetInspection;
 use crate::ShellsmithIosConfig;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -21,7 +22,12 @@ pub(crate) fn copy_project_tree(
         anyhow::bail!("工作副本目录必须不存在或为空：{}", destination.display());
     }
     fs::create_dir_all(destination)?;
-    copy_directory(source, destination, source, cancel)?;
+    let source_canonical = source.canonicalize()?;
+    let destination_canonical = destination.canonicalize()?;
+    if destination_canonical.starts_with(&source_canonical) {
+        anyhow::bail!("工作副本目录不能位于源码目录内：{}", destination.display());
+    }
+    copy_directory(source, destination, source, destination, cancel)?;
     Ok(destination.to_path_buf())
 }
 
@@ -32,6 +38,7 @@ pub(crate) fn integrate_runtime(
     config: &ShellsmithIosConfig,
     confidential_path: Option<&Path>,
 ) -> Result<()> {
+    ensure_within_root(working_root, working_project, "Xcode 工程")?;
     if source_contains(
         working_root,
         "extension SecurityThreatCenter: SecurityThreatHandler",
@@ -74,6 +81,7 @@ pub(crate) fn integrate_runtime(
     }
 
     let entrypoint = resolve_entrypoint(working_root, config)?;
+    ensure_within_root(working_root, &entrypoint, "iOS 启动入口")?;
     match entrypoint.extension().and_then(|value| value.to_str()) {
         Some("swift") => patch_swift_entrypoint(&entrypoint)?,
         Some("m") => {
@@ -87,6 +95,7 @@ pub(crate) fn integrate_runtime(
         ),
     }
     let pbxproj = find_pbxproj_for_target(working_root, working_project, target)?;
+    ensure_within_root(working_root, &pbxproj, "project.pbxproj")?;
     let project_directory = pbxproj
         .parent()
         .and_then(Path::parent)
@@ -100,6 +109,7 @@ fn copy_directory(
     source: &Path,
     destination: &Path,
     source_root: &Path,
+    destination_root: &Path,
     cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
     if cancel.load(Ordering::SeqCst) {
@@ -115,10 +125,21 @@ fn copy_directory(
         let destination_path = destination.join(&name);
         let metadata = fs::symlink_metadata(&source_path)?;
         if metadata.file_type().is_symlink() {
-            copy_symlink(&source_path, &destination_path, source_root)?;
+            copy_symlink(
+                &source_path,
+                &destination_path,
+                source_root,
+                destination_root,
+            )?;
         } else if metadata.is_dir() {
             fs::create_dir_all(&destination_path)?;
-            copy_directory(&source_path, &destination_path, source_root, cancel)?;
+            copy_directory(
+                &source_path,
+                &destination_path,
+                source_root,
+                destination_root,
+                cancel,
+            )?;
         } else if metadata.is_file() {
             fs::copy(&source_path, &destination_path).with_context(|| {
                 format!(
@@ -140,7 +161,12 @@ fn should_skip(name: &OsStr) -> bool {
     )
 }
 
-fn copy_symlink(source: &Path, destination: &Path, source_root: &Path) -> Result<()> {
+fn copy_symlink(
+    source: &Path,
+    destination: &Path,
+    source_root: &Path,
+    destination_root: &Path,
+) -> Result<()> {
     let link = fs::read_link(source)?;
     let resolved = if link.is_absolute() {
         link.clone()
@@ -154,10 +180,65 @@ fn copy_symlink(source: &Path, destination: &Path, source_root: &Path) -> Result
     if !canonical.starts_with(&root) {
         anyhow::bail!("工程包含指向源码目录外的符号链接：{}", source.display());
     }
+
+    // 绝对链接若原样复制，会继续指向原工程。将其重映射为副本内部的相对链接，
+    // 这样后续补丁只会修改工作副本，不会写回用户工程。
+    let copied_link = if link.is_absolute() {
+        let relative_to_root = canonical
+            .strip_prefix(&root)
+            .context("无法计算符号链接在源码根目录内的相对路径")?;
+        let copied_target = destination_root.canonicalize()?.join(relative_to_root);
+        let destination_parent = destination
+            .parent()
+            .unwrap_or(destination_root)
+            .canonicalize()?;
+        lexical_relative_path(&destination_parent, &copied_target)?
+    } else {
+        link
+    };
+
     #[cfg(unix)]
-    std::os::unix::fs::symlink(link, destination)?;
+    std::os::unix::fs::symlink(copied_link, destination)?;
     #[cfg(not(unix))]
     anyhow::bail!("当前系统不能复制 iOS 工程符号链接");
+    Ok(())
+}
+
+/// 计算两个绝对路径之间的相对路径。目标允许尚未复制完成，因此这里只做词法计算，
+/// 不对目标调用 canonicalize。
+fn lexical_relative_path(from: &Path, to: &Path) -> Result<PathBuf> {
+    let from_components = from.components().collect::<Vec<_>>();
+    let to_components = to.components().collect::<Vec<_>>();
+    let common = from_components
+        .iter()
+        .zip(&to_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut relative = PathBuf::new();
+    for component in &from_components[common..] {
+        if matches!(component, Component::Normal(_)) {
+            relative.push("..");
+        }
+    }
+    for component in &to_components[common..] {
+        relative.push(component.as_os_str());
+    }
+    if relative.as_os_str().is_empty() {
+        relative.push(".");
+    }
+    Ok(relative)
+}
+
+fn ensure_within_root(root: &Path, path: &Path, label: &str) -> Result<()> {
+    let root = root
+        .canonicalize()
+        .with_context(|| format!("无法解析{label}根目录: {}", root.display()))?;
+    let resolved = path
+        .canonicalize()
+        .with_context(|| format!("无法解析{label}: {}", path.display()))?;
+    if !resolved.starts_with(&root) {
+        anyhow::bail!("{label}位于工作副本之外: {}", path.display());
+    }
     Ok(())
 }
 
@@ -190,6 +271,7 @@ fn resolve_entrypoint(working_root: &Path, config: &ShellsmithIosConfig) -> Resu
         if !candidate.is_file() {
             anyhow::bail!("iOS 启动入口不存在：{}", candidate.display());
         }
+        ensure_within_root(working_root, &candidate, "iOS 启动入口")?;
         return Ok(candidate);
     }
     let mut files = Vec::new();
@@ -317,64 +399,114 @@ fn find_code_word(
 }
 
 fn collect_files(root: &Path, extension: &str, output: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(root)? {
+    let canonical_root = root.canonicalize()?;
+    let mut visited_dirs = HashSet::new();
+    let mut visited_files = HashSet::new();
+    collect_files_inner(
+        canonical_root.as_path(),
+        root,
+        extension,
+        output,
+        &mut visited_dirs,
+        &mut visited_files,
+    )
+}
+
+fn collect_files_inner(
+    root: &Path,
+    directory: &Path,
+    extension: &str,
+    output: &mut Vec<PathBuf>,
+    visited_dirs: &mut HashSet<PathBuf>,
+    visited_files: &mut HashSet<PathBuf>,
+) -> Result<()> {
+    for entry in fs::read_dir(directory)? {
         let entry = entry?;
         if should_skip(&entry.file_name()) || entry.file_name() == "Pods" {
             continue;
         }
         let path = entry.path();
-        if path.is_dir() {
-            collect_files(&path, extension, output)?;
-        } else if path.extension().and_then(|value| value.to_str()) == Some(extension) {
+        let canonical = path
+            .canonicalize()
+            .with_context(|| format!("解析工程路径或符号链接失败：{}", path.display()))?;
+        if !canonical.starts_with(root) {
+            anyhow::bail!("工程符号链接指向工作副本之外：{}", path.display());
+        }
+        if canonical.is_dir() {
+            if visited_dirs.insert(canonical) {
+                collect_files_inner(root, &path, extension, output, visited_dirs, visited_files)?;
+            }
+        } else if canonical.is_file()
+            && path.extension().and_then(|value| value.to_str()) == Some(extension)
+            && visited_files.insert(canonical)
+        {
             output.push(path);
         }
     }
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartCallState {
+    Absent,
+    Direct,
+    NestedOrConditional,
+}
+
 fn patch_swift_entrypoint(path: &Path) -> Result<()> {
     let mut content = fs::read_to_string(path)
         .with_context(|| format!("读取 Swift 启动入口失败：{}", path.display()))?;
-    if content.contains("ShellsmithProtection.start(") {
-        return Ok(());
-    }
     let main_index = find_swift_main(&content).context("启动入口缺少 @main")?;
-    let type_open = content[main_index..]
-        .find('{')
-        .map(|index| main_index + index)
+    let type_open = find_code_char(&content, main_index, content.len(), b'{')
         .context("无法识别 @main 类型主体")?;
     let type_close = matching_brace(&content, type_open).context("@main 类型大括号不完整")?;
     let call =
         "// Shellsmith 自动生成：应用启动时尽早启用保护。\n        ShellsmithProtection.start()\n";
-    let insertion = if code_contains_conformance(&content, main_index, type_open, "App") {
-        find_top_level_initializer(&content, type_open, type_close)
-            .map(|brace| (brace + 1, format!("\n        {call}")))
-            .unwrap_or_else(|| {
-                (
-                    type_open + 1,
-                    format!("\n    init() {{\n        {call}    }}\n"),
-                )
-            })
+
+    if code_contains_conformance(&content, main_index, type_open, "App") {
+        if let Some(init_open) = find_swiftui_noarg_initializer(&content, type_open, type_close)? {
+            let init_close =
+                matching_brace(&content, init_open).context("SwiftUI App 的 init 大括号不完整")?;
+            match start_call_state(&content, init_open + 1, init_close) {
+                StartCallState::Direct => {}
+                StartCallState::NestedOrConditional => anyhow::bail!(
+                    "SwiftUI App 的启动调用位于条件分支或嵌套作用域，无法确认每次启动都会执行；请手动调整"
+                ),
+                StartCallState::Absent => {
+                    content.insert_str(init_open + 1, &format!("\n        {call}"));
+                }
+            }
+        } else {
+            content.insert_str(
+                type_open + 1,
+                &format!("\n    init() {{\n        {call}    }}\n"),
+            );
+        }
     } else if code_contains_conformance(&content, main_index, type_close, "UIApplicationDelegate") {
-        content[main_index..type_close]
-            .find("didFinishLaunchingWithOptions")
-            .and_then(|relative| {
-                let signature = main_index + relative;
-                find_code_char(&content, signature, type_close, b'{')
-            })
-            .map(|brace| (brace + 1, format!("\n        {call}")))
-            .unwrap_or_else(|| {
-                (
-                    type_open + 1,
-                    format!(
-                        "\n    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {{\n        {call}        return true\n    }}\n"
-                    ),
-                )
-            })
+        if let Some(callback_open) = find_swift_launch_callback(&content, main_index, type_close)? {
+            let callback_close =
+                matching_brace(&content, callback_open).context("UIKit 启动回调大括号不完整")?;
+            match start_call_state(&content, callback_open + 1, callback_close) {
+                StartCallState::Direct => {}
+                StartCallState::NestedOrConditional => anyhow::bail!(
+                    "UIKit 启动回调中的保护调用位于条件分支或嵌套作用域，无法确认每次启动都会执行；请手动调整"
+                ),
+                StartCallState::Absent => {
+                    content.insert_str(callback_open + 1, &format!("\n        {call}"));
+                }
+            }
+        } else {
+            content.insert_str(
+                type_open + 1,
+                &format!(
+                    "\n    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {{\n        {call}        return true\n    }}\n"
+                ),
+            );
+        }
     } else {
         anyhow::bail!("无法识别 @main 是 SwiftUI App 还是 UIApplicationDelegate；请手动接入 ShellsmithProtection.start()")
-    };
-    content.insert_str(insertion.0, &insertion.1);
+    }
+
     if !content
         .lines()
         .any(|line| line.trim() == "import ShellsmithRuntime")
@@ -394,29 +526,261 @@ fn patch_swift_entrypoint(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn find_top_level_initializer(content: &str, open: usize, close: usize) -> Option<usize> {
+fn find_swift_launch_callback(content: &str, start: usize, end: usize) -> Result<Option<usize>> {
+    let mask = swift_code_mask(content);
+    let bytes = content.as_bytes();
+    let mut cursor = start;
+    let mut scanned = 0usize;
+    let mut conditional_depth = 0i32;
+    let mut candidates = Vec::new();
+    while let Some(callback) =
+        find_code_word(content, &mask, "didFinishLaunchingWithOptions", cursor, end)
+    {
+        advance_conditional_depth(
+            content,
+            &mask,
+            &mut scanned,
+            callback,
+            &mut conditional_depth,
+        );
+        cursor = callback + "didFinishLaunchingWithOptions".len();
+        let before = (0..callback)
+            .rev()
+            .find(|index| mask[*index] && matches!(bytes[*index], b';' | b'{' | b'}'))
+            .map_or(start, |index| index + 1);
+        let mut func_start = None;
+        let mut search = before;
+        while let Some(found) = find_code_word(content, &mask, "func", search, callback) {
+            func_start = Some(found);
+            search = found + "func".len();
+        }
+        let Some(func_start) = func_start else {
+            continue;
+        };
+        let signature = masked_code_text(content, &mask, func_start, callback);
+        let compact = signature.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !compact.contains("func application") || !compact.contains("UIApplication") {
+            continue;
+        }
+        if let Some(open) = find_code_char(content, callback, end, b'{') {
+            if matching_brace(content, open).is_some() {
+                candidates.push((open, conditional_depth > 0));
+            }
+        }
+    }
+
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [(open, false)] => Ok(Some(*open)),
+        _ => anyhow::bail!(
+            "UIKit 启动回调位于条件编译或存在多个候选，无法确认 Release 构建一定执行保护调用；请在配置中指定稳定的启动入口"
+        ),
+    }
+}
+
+fn advance_conditional_depth(
+    content: &str,
+    mask: &[bool],
+    from: &mut usize,
+    to: usize,
+    depth: &mut i32,
+) {
+    while *from < to {
+        *depth = (*depth + swift_conditional_delta(content, mask, *from)).max(0);
+        *from += 1;
+    }
+}
+
+/// 只把代码屏蔽后的有效 `#if` / `#endif` 计入条件层级。
+/// Swift 允许注释或 `{` 出现在同一行指令前，因此不能依赖原始行首空白。
+fn swift_conditional_delta(content: &str, mask: &[bool], index: usize) -> i32 {
+    if !mask[index] || content.as_bytes()[index] != b'#' {
+        return 0;
+    }
+    let rest = &content[index..];
+    if starts_swift_directive(rest, "#endif") {
+        -1
+    } else if starts_swift_directive(rest, "#if") {
+        1
+    } else {
+        0
+    }
+}
+
+fn starts_swift_directive(rest: &str, directive: &str) -> bool {
+    rest.starts_with(directive)
+        && rest
+            .as_bytes()
+            .get(directive.len())
+            .is_none_or(|byte| !is_identifier(*byte))
+}
+
+fn masked_code_text(content: &str, mask: &[bool], start: usize, end: usize) -> String {
+    let bytes = content.as_bytes();
+    let mut text = Vec::with_capacity(end.saturating_sub(start));
+    for index in start..end {
+        text.push(if mask[index] { bytes[index] } else { b' ' });
+    }
+    String::from_utf8_lossy(&text).into_owned()
+}
+
+fn start_call_state(content: &str, start: usize, end: usize) -> StartCallState {
+    let mask = swift_code_mask(content);
+    let bytes = content.as_bytes();
+    let needle = b"ShellsmithProtection.start(";
+    let mut depth = 0i32;
+    let mut conditional_depth = 0i32;
+    let mut nested = false;
+    let mut index = start;
+    while index < end {
+        if !mask[index] {
+            index += 1;
+            continue;
+        }
+        conditional_depth =
+            (conditional_depth + swift_conditional_delta(content, &mask, index)).max(0);
+        if bytes[index..end].starts_with(needle)
+            && mask[index..index + needle.len()].iter().all(|value| *value)
+        {
+            if depth == 0 && conditional_depth == 0 {
+                return StartCallState::Direct;
+            }
+            nested = true;
+        }
+        match bytes[index] {
+            b'{' => depth += 1,
+            b'}' => depth -= 1,
+            _ => {}
+        }
+        index += 1;
+    }
+    if nested {
+        StartCallState::NestedOrConditional
+    } else {
+        StartCallState::Absent
+    }
+}
+
+/// 只定位参与 SwiftUI 启动的无参 `init()`。参数化重载和其他自定义初始化方法不能
+/// 证明应用启动时执行过保护调用；存在多个或条件编译候选时拒绝猜测。
+fn find_swiftui_noarg_initializer(
+    content: &str,
+    open: usize,
+    close: usize,
+) -> Result<Option<usize>> {
     let bytes = content.as_bytes();
     let mask = swift_code_mask(content);
     let mut depth = 1usize;
+    let mut conditional_depth = 0i32;
+    let mut candidates = Vec::new();
+    let mut saw_init = false;
     let mut index = open + 1;
     while index < close {
         if !mask[index] {
             index += 1;
             continue;
         }
+        conditional_depth =
+            (conditional_depth + swift_conditional_delta(content, &mask, index)).max(0);
+
         match bytes[index] {
             b'{' => depth += 1,
             b'}' => depth = depth.saturating_sub(1),
-            b'i' if depth == 1 && content[index..close].starts_with("init") => {
-                let before_ok = index == 0 || !is_identifier(bytes[index - 1]);
-                let after = bytes.get(index + 4).copied();
-                if before_ok && matches!(after, Some(b'(' | b' ' | b'\t' | b'\n')) {
-                    if let Some(brace) = find_code_char(content, index, close, b'{') {
-                        return Some(brace);
-                    }
+            b'i' if depth == 1
+                && content[index..close].starts_with("init")
+                && (index == 0 || !is_identifier(bytes[index - 1]))
+                && bytes
+                    .get(index + 4)
+                    .is_none_or(|byte| !is_identifier(*byte)) =>
+            {
+                let previous = content[..index]
+                    .chars()
+                    .rev()
+                    .find(|value| !value.is_whitespace());
+                if previous == Some('.') {
+                    index += 4;
+                    continue;
                 }
+                saw_init = true;
+                let cursor = skip_swift_trivia(content, &mask, index + 4, close);
+                if cursor < close && matches!(bytes[cursor], b'?' | b'!') {
+                    index += 4;
+                    continue;
+                }
+                if cursor >= close || bytes[cursor] != b'(' {
+                    index += 4;
+                    continue;
+                }
+                let Some(close_paren) = matching_paren(content, &mask, cursor, close) else {
+                    index += 4;
+                    continue;
+                };
+                let has_parameters = content[cursor + 1..close_paren]
+                    .bytes()
+                    .enumerate()
+                    .any(|(offset, byte)| mask[cursor + 1 + offset] && !byte.is_ascii_whitespace());
+                if has_parameters {
+                    index = close_paren + 1;
+                    continue;
+                }
+                let body_open = skip_swift_trivia(content, &mask, close_paren + 1, close);
+                let Some(body_open) = find_code_char(content, body_open, close, b'{') else {
+                    index = close_paren + 1;
+                    continue;
+                };
+                if content[close_paren + 1..body_open]
+                    .bytes()
+                    .enumerate()
+                    .any(|(offset, byte)| mask[close_paren + 1 + offset] && byte == b';')
+                {
+                    index = close_paren + 1;
+                    continue;
+                }
+                let body_close = matching_brace(content, body_open)
+                    .context("SwiftUI App 的无参 init 大括号不完整")?;
+                candidates.push((body_open, conditional_depth > 0));
+                index = body_close + 1;
+                continue;
             }
             _ => {}
+        }
+        index += 1;
+    }
+
+    match candidates.as_slice() {
+        [] if saw_init => anyhow::bail!(
+            "@main 类型存在自定义 init，但没有可唯一确认的无参 init()；请手动接入 ShellsmithProtection.start()"
+        ),
+        [] => Ok(None),
+        [(body_open, false)] => Ok(Some(*body_open)),
+        _ => anyhow::bail!(
+            "@main 类型存在多个或条件编译的无参 init()，无法唯一确定启动路径；请手动接入 ShellsmithProtection.start()"
+        ),
+    }
+}
+
+fn skip_swift_trivia(content: &str, mask: &[bool], mut index: usize, end: usize) -> usize {
+    while index < end && (content.as_bytes()[index].is_ascii_whitespace() || !mask[index]) {
+        index += 1;
+    }
+    index
+}
+
+fn matching_paren(content: &str, mask: &[bool], open: usize, end: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut index = open;
+    while index < end {
+        if mask[index] {
+            match content.as_bytes()[index] {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(index);
+                    }
+                }
+                _ => {}
+            }
         }
         index += 1;
     }
@@ -496,8 +860,9 @@ fn swift_code_mask(content: &str) -> Vec<bool> {
     let mut mask = vec![true; bytes.len()];
     let mut index = 0usize;
     let mut line_comment = false;
-    let mut block_comment = false;
+    let mut block_comment_depth = 0usize;
     let mut string_delimiter = 0usize;
+    let mut raw_hashes = 0usize;
     let mut quote = b'"';
     let mut escaped = false;
     while index < bytes.len() {
@@ -509,11 +874,15 @@ fn swift_code_mask(content: &str) -> Vec<bool> {
             index += 1;
             continue;
         }
-        if block_comment {
+        if block_comment_depth > 0 {
             mask[index] = false;
-            if index + 1 < bytes.len() && bytes[index] == b'*' && bytes[index + 1] == b'/' {
+            if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'*' {
                 mask[index + 1] = false;
-                block_comment = false;
+                block_comment_depth += 1;
+                index += 2;
+            } else if index + 1 < bytes.len() && bytes[index] == b'*' && bytes[index + 1] == b'/' {
+                mask[index + 1] = false;
+                block_comment_depth -= 1;
                 index += 2;
             } else {
                 index += 1;
@@ -522,32 +891,58 @@ fn swift_code_mask(content: &str) -> Vec<bool> {
         }
         if string_delimiter != 0 {
             mask[index] = false;
-            if escaped {
+            if raw_hashes == 0 && escaped {
                 escaped = false;
                 index += 1;
                 continue;
             }
-            if bytes[index] == b'\\' && string_delimiter == 1 {
+            if raw_hashes == 0 && bytes[index] == b'\\' && string_delimiter == 1 {
                 escaped = true;
                 index += 1;
                 continue;
             }
-            if string_delimiter == 3
-                && index + 2 < bytes.len()
-                && &bytes[index..index + 3] == b"\"\"\""
-            {
-                mask[index + 1] = false;
-                mask[index + 2] = false;
-                string_delimiter = 0;
-                index += 3;
-            } else if string_delimiter == 1 && bytes[index] == quote {
-                string_delimiter = 0;
-                index += 1;
+            if string_delimiter == 3 {
+                if index + 2 < bytes.len() && &bytes[index..index + 3] == b"\"\"\"" {
+                    mask[index + 1] = false;
+                    mask[index + 2] = false;
+                    let mut end = index + 3;
+                    let mut hashes = 0;
+                    while end < bytes.len() && hashes < raw_hashes && bytes[end] == b'#' {
+                        mask[end] = false;
+                        hashes += 1;
+                        end += 1;
+                    }
+                    if hashes == raw_hashes {
+                        string_delimiter = 0;
+                        raw_hashes = 0;
+                        index = end;
+                    } else {
+                        index += 3;
+                    }
+                } else {
+                    index += 1;
+                }
+            } else if bytes[index] == quote {
+                let mut end = index + 1;
+                let mut hashes = 0;
+                while end < bytes.len() && hashes < raw_hashes && bytes[end] == b'#' {
+                    mask[end] = false;
+                    hashes += 1;
+                    end += 1;
+                }
+                if hashes == raw_hashes {
+                    string_delimiter = 0;
+                    raw_hashes = 0;
+                    index = end;
+                } else {
+                    index += 1;
+                }
             } else {
                 index += 1;
             }
             continue;
         }
+
         if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'/' {
             mask[index] = false;
             mask[index + 1] = false;
@@ -556,22 +951,46 @@ fn swift_code_mask(content: &str) -> Vec<bool> {
         } else if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'*' {
             mask[index] = false;
             mask[index + 1] = false;
-            block_comment = true;
+            block_comment_depth = 1;
             index += 2;
+        } else if bytes[index] == b'#' {
+            let mut hashes = 0usize;
+            let mut quote_at = index;
+            while quote_at < bytes.len() && bytes[quote_at] == b'#' {
+                hashes += 1;
+                quote_at += 1;
+            }
+            if quote_at < bytes.len() && bytes[quote_at] == b'"' {
+                let triple =
+                    quote_at + 2 < bytes.len() && &bytes[quote_at..quote_at + 3] == b"\"\"\"";
+                let end = quote_at + if triple { 3 } else { 1 };
+                for value in mask.iter_mut().take(end).skip(index) {
+                    *value = false;
+                }
+                string_delimiter = if triple { 3 } else { 1 };
+                raw_hashes = hashes;
+                quote = b'"';
+                index = end;
+            } else {
+                index += 1;
+            }
         } else if index + 2 < bytes.len() && &bytes[index..index + 3] == b"\"\"\"" {
             mask[index] = false;
             mask[index + 1] = false;
             mask[index + 2] = false;
             string_delimiter = 3;
+            raw_hashes = 0;
             index += 3;
         } else if bytes[index] == b'\"' {
             mask[index] = false;
             string_delimiter = 1;
+            raw_hashes = 0;
             quote = b'"';
             index += 1;
         } else if bytes[index] == b'\'' {
             mask[index] = false;
             string_delimiter = 1;
+            raw_hashes = 0;
             quote = b'\'';
             index += 1;
         } else {
@@ -603,18 +1022,13 @@ fn find_pbxproj_for_target(
 }
 
 fn collect_pbxproj(root: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(root)? {
-        let entry = entry?;
-        if should_skip(&entry.file_name()) || entry.file_name() == "Pods" {
-            continue;
-        }
-        let path = entry.path();
-        if path.file_name() == Some(OsStr::new("project.pbxproj")) {
-            output.push(path);
-        } else if path.is_dir() {
-            collect_pbxproj(&path, output)?;
-        }
-    }
+    let mut files = Vec::new();
+    collect_files(root, "pbxproj", &mut files)?;
+    output.extend(
+        files
+            .into_iter()
+            .filter(|path| path.file_name() == Some(OsStr::new("project.pbxproj"))),
+    );
     Ok(())
 }
 
@@ -901,6 +1315,168 @@ mod tests {
     }
 
     #[test]
+    fn 工作副本不能位于源码目录内() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("App.swift"), "let value = 1\n").unwrap();
+        let destination = source.join("output/project");
+        assert!(
+            copy_project_tree(&source, &destination, &Arc::new(AtomicBool::new(false))).is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 内部绝对符号链接复制后只指向工作副本() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("output/project");
+        fs::create_dir_all(source.join("Real")).unwrap();
+        fs::create_dir_all(source.join("Links")).unwrap();
+        let original = source.join("Real/Entry.swift");
+        fs::write(&original, "let value = 1\n").unwrap();
+        let link = source.join("Links/Entry.swift");
+        std::os::unix::fs::symlink(&original, &link).unwrap();
+
+        copy_project_tree(&source, &destination, &Arc::new(AtomicBool::new(false))).unwrap();
+
+        let copied_link = destination.join("Links/Entry.swift");
+        assert!(fs::symlink_metadata(&copied_link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!fs::read_link(&copied_link).unwrap().is_absolute());
+        let copied_target = copied_link.canonicalize().unwrap();
+        assert!(copied_target.starts_with(destination.canonicalize().unwrap()));
+
+        fs::write(&copied_link, "let value = 2\n").unwrap();
+        assert_eq!(fs::read_to_string(&original).unwrap(), "let value = 1\n");
+        assert_eq!(
+            fs::read_to_string(destination.join("Real/Entry.swift")).unwrap(),
+            "let value = 2\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 工程文件的绝对符号链接复制后不写回原工程() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("output/project");
+        fs::create_dir_all(source.join("Project")).unwrap();
+        fs::create_dir_all(source.join("Demo.xcodeproj")).unwrap();
+        let original = source.join("Project/project.pbxproj");
+        fs::write(&original, "// original\n").unwrap();
+        std::os::unix::fs::symlink(&original, source.join("Demo.xcodeproj/project.pbxproj"))
+            .unwrap();
+
+        copy_project_tree(&source, &destination, &Arc::new(AtomicBool::new(false))).unwrap();
+        fs::write(
+            destination.join("Demo.xcodeproj/project.pbxproj"),
+            "// patched copy\n",
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(&original).unwrap(), "// original\n");
+        assert_eq!(
+            fs::read_to_string(destination.join("Project/project.pbxproj")).unwrap(),
+            "// patched copy\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 指向源码外的绝对符号链接被拒绝() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("output/project");
+        fs::create_dir_all(&source).unwrap();
+        let outside = temp.path().join("outside.swift");
+        fs::write(&outside, "let outside = true\n").unwrap();
+        std::os::unix::fs::symlink(&outside, source.join("External.swift")).unwrap();
+
+        assert!(
+            copy_project_tree(&source, &destination, &Arc::new(AtomicBool::new(false))).is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(&outside).unwrap(),
+            "let outside = true\n"
+        );
+    }
+
+    #[test]
+    fn 注释和字符串里的启动文字仍插入真实调用() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import SwiftUI\n@main\nstruct DemoApp: App {\n    // ShellsmithProtection.start()\n    let text = \"ShellsmithProtection.start(\"\n    var body: some Scene { WindowGroup { Text(text) } }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        let mask = swift_code_mask(&content);
+        let needle = "ShellsmithProtection.start()";
+        let code_calls = content
+            .match_indices(needle)
+            .filter(|(index, _)| {
+                mask[*index..*index + needle.len()]
+                    .iter()
+                    .all(|value| *value)
+            })
+            .count();
+        assert_eq!(code_calls, 1);
+        assert!(content.contains("init() {"));
+    }
+
+    #[test]
+    fn 无关方法里的启动调用不能阻止真实入口注入() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import SwiftUI\n@main\nstruct DemoApp: App {\n    func helper() { ShellsmithProtection.start() }\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        assert_eq!(content.matches("ShellsmithProtection.start()").count(), 2);
+        assert!(content.contains("init() {"));
+    }
+
+    #[test]
+    fn 已有直接启动调用时保持幂等() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import SwiftUI\nimport ShellsmithRuntime\n@main\nstruct DemoApp: App {\n    init() {\n        ShellsmithProtection.start()\n    }\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        assert_eq!(content.matches("ShellsmithProtection.start()").count(), 1);
+        assert_eq!(content.matches("import ShellsmithRuntime").count(), 1);
+    }
+
+    #[test]
+    fn 条件分支里的启动调用被明确拒绝且不修改文件() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import SwiftUI\n@main\nstruct DemoApp: App {\n    init() {\n        if Bool.random() {\n            ShellsmithProtection.start()\n        }\n    }\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn 原始字符串和嵌套注释中的大括号不干扰定位() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import SwiftUI\n@main\nstruct DemoApp: App {\n    /* 外层 /* 内层 } */ 仍然是注释 */\n    let raw = #\"{ @main ShellsmithProtection.start(\"#\n    var body: some Scene { WindowGroup { Text(raw) } }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        assert_eq!(content.matches("ShellsmithProtection.start()").count(), 1);
+    }
+
+    #[test]
     fn patches_swiftui_entrypoint_once() {
         let temp = tempfile::NamedTempFile::new().unwrap();
         fs::write(
@@ -928,6 +1504,98 @@ mod tests {
         let start = content.find("ShellsmithProtection.start()").unwrap();
         let returns = content.find("return true").unwrap();
         assert!(start < returns);
+    }
+
+    #[test]
+    fn swiftui_选择无参_init_而不是带参重载() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import SwiftUI\n@main\nstruct DemoApp: App {\n    init(preview: Bool) { print(\"PREVIEW\") }\n    init() { print(\"REAL STARTUP\") }\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        let noarg = content.find("init() {").unwrap();
+        let call = content.find("ShellsmithProtection.start()").unwrap();
+        let startup = content.find("REAL STARTUP").unwrap();
+        assert!(noarg < call && call < startup);
+        assert_eq!(content.matches("ShellsmithProtection.start()").count(), 1);
+    }
+
+    #[test]
+    fn swiftui_只有带参_init_时明确拒绝() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import SwiftUI\n@main\nstruct DemoApp: App {\n    init(preview: Bool) { print(preview) }\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn swiftui_条件编译的无参_init_不被猜测() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import SwiftUI\n@main\nstruct DemoApp: App {\n#if DEBUG\n    init() { print(\"DEBUG\") }\n#endif\n    var body: some Scene { WindowGroup { Text(\"Hi\") } }\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_条件编译包裹启动回调时拒绝自动接入() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate {\n#if DEBUG\n    func application(_ application: UIApplication,\n                     didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n#endif\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_注释前缀的条件编译同样被拒绝() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate {\n/* 启动说明 */ #if DEBUG\n    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n#endif\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_行内条件编译同样被拒绝() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let source = "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate { #if DEBUG\n    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n#endif\n}\n";
+        fs::write(temp.path(), source).unwrap();
+        assert!(patch_swift_entrypoint(temp.path()).is_err());
+        assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+    }
+
+    #[test]
+    fn uikit_字符串里的伪条件指令不影响正常回调() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate {\n    let marker = \"#if DEBUG\"\n    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        assert_eq!(content.matches("func application(").count(), 1);
+        assert_eq!(content.matches("ShellsmithProtection.start()").count(), 1);
+    }
+
+    #[test]
+    fn uikit_回调前的注释不会导致重复方法() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            temp.path(),
+            "import UIKit\n@main\nclass AppDelegate: UIResponder, UIApplicationDelegate {\n    // 启动设置\n    func application(_ application: UIApplication,\n                     didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        return true\n    }\n}\n",
+        )
+        .unwrap();
+        patch_swift_entrypoint(temp.path()).unwrap();
+        let content = fs::read_to_string(temp.path()).unwrap();
+        assert_eq!(content.matches("func application(").count(), 1);
+        let call = content.find("ShellsmithProtection.start()").unwrap();
+        let returns = content.find("return true").unwrap();
+        assert!(call < returns);
     }
 
     #[test]

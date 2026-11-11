@@ -195,6 +195,9 @@ jobs:
           npm run typecheck
           npm run build
 
+      - name: 运行统计 Worker 测试
+        run: npm --prefix tools/stats-worker test
+
   dependency-audit:
     name: 依赖漏洞扫描
     needs: changes
@@ -206,11 +209,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: 检查 Rust 依赖公告
-        continue-on-error: true
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories
-          arguments: --all-features
 
   evidence-baseline:
     name: 证据基线
@@ -244,6 +245,7 @@ jobs:
       - fusion-contract
       - ios-core
       - full-quality
+      - dependency-audit
       - evidence-baseline
       - stub
       - linux-gui-bundle
@@ -264,6 +266,7 @@ jobs:
             "${{ needs.ios-core.result }}"
             "${{ needs.evidence-baseline.result }}"
             "${{ needs.full-quality.result }}"
+            "${{ needs.dependency-audit.result }}"
             "${{ needs.stub.result }}"
             "${{ needs.linux-gui-bundle.result }}"
             "${{ needs.windows-api19-resources.result }}"

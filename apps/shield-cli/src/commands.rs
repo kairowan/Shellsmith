@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use colored::Colorize;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -1337,6 +1337,14 @@ fn sign_aab_with_jarsigner(
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let pass_dir = shield_core::utils::create_temp_dir("jarsigner-pass-")?;
+    let store_pass_file =
+        shield_core::write_password_file(pass_dir.path(), "store.pass", store_pass)?;
+    let key_pass_file = shield_core::write_password_file(pass_dir.path(), "key.pass", key_pass)?;
+    let store_pass_file = store_pass_file
+        .to_str()
+        .context("密码文件路径包含非法字符")?;
+    let key_pass_file = key_pass_file.to_str().context("密码文件路径包含非法字符")?;
     let args = vec![
         "-keystore",
         keystore.to_str().unwrap(),
@@ -1345,16 +1353,16 @@ fn sign_aab_with_jarsigner(
             KeystoreTypeArg::Jks => "JKS",
             KeystoreTypeArg::Pkcs12 => "PKCS12",
         },
-        "-storepass",
-        store_pass,
-        "-keypass",
-        key_pass,
+        "-storepass:file",
+        store_pass_file,
+        "-keypass:file",
+        key_pass_file,
         "-signedjar",
         output.to_str().unwrap(),
         input.to_str().unwrap(),
         alias,
     ];
-    let result = shield_core::utils::no_window_command(&jarsigner)
+    let result = shield_core::keytool::java_tool_command(&jarsigner)
         .args(args)
         .output()?;
     if !result.status.success() {
@@ -1409,6 +1417,7 @@ fn signing_step_name(step: SigningProgressStep) -> &'static str {
         SigningProgressStep::Prepare => "prepare",
         SigningProgressStep::Align => "align",
         SigningProgressStep::Sign => "sign",
+        SigningProgressStep::Commit => "commit",
     }
 }
 
@@ -1417,6 +1426,7 @@ fn signing_step_message(step: SigningProgressStep) -> &'static str {
         SigningProgressStep::Prepare => "准备签名环境",
         SigningProgressStep::Align => "对齐 APK",
         SigningProgressStep::Sign => "写入 APK 签名",
+        SigningProgressStep::Commit => "提交签名产物",
     }
 }
 
@@ -1574,21 +1584,11 @@ fn run_bundletool_build_apks(
         std::fs::create_dir_all(parent)?;
     }
     let pass_dir = shield_core::utils::create_temp_dir("bundletool-pass-")?;
-    let pass_file = pass_dir.path().join("keystore.pass");
-    std::fs::write(&pass_file, keystore_password.as_bytes())?;
-    let key_pass_file = pass_dir.path().join("key.pass");
-    if let Some(key_password) = key_password {
-        std::fs::write(&key_pass_file, key_password.as_bytes())?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&pass_file, permissions.clone())?;
-        if key_password.is_some() {
-            std::fs::set_permissions(&key_pass_file, permissions)?;
-        }
-    }
+    let pass_file =
+        shield_core::write_password_file(pass_dir.path(), "keystore.pass", keystore_password)?;
+    let key_pass_file = key_password
+        .map(|password| shield_core::write_password_file(pass_dir.path(), "key.pass", password))
+        .transpose()?;
     let java = shield_core::utils::find_java()?;
     let mut args = vec![
         "-jar".to_string(),
@@ -1602,7 +1602,7 @@ fn run_bundletool_build_apks(
         format!("--ks-key-alias={key_alias}"),
         format!("--ks-pass=file:{}", pass_file.display()),
     ];
-    if key_password.is_some() {
+    if let Some(key_pass_file) = key_pass_file.as_ref() {
         args.push(format!("--key-pass=file:{}", key_pass_file.display()));
     }
     if let Some(spec) = device_spec {

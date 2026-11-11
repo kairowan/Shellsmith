@@ -44,8 +44,8 @@ pub use protect_api::{
 };
 pub use protection_policy::{AiResistance, CapabilityPlan, ProtectionPolicy, ProtectionProfile};
 pub use signing::{
-    check_apksigner, find_apksigner, sign_apk, sign_apk_with_progress, KeystoreType, SignOptions,
-    SigningProgressStep, SigningVersions,
+    check_apksigner, find_apksigner, sign_apk, sign_apk_with_progress, write_password_file,
+    KeystoreType, SignOptions, SigningProgressStep, SigningVersions,
 };
 pub use zipalign::{align_apk, verify_apk_alignment, AlignmentIssue};
 #[cfg(test)]

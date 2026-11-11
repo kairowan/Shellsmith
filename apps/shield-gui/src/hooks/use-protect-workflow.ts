@@ -316,14 +316,11 @@ export function useProtectWorkflow({
       taskLocked.current = true;
       taskId.current = crypto.randomUUID();
 
-      const intermediateOutput = joinPath(outputDirectory, protectedOutputFilename(input, false));
-      const unsignedOutput = autoSignReady && intermediateOutput === output
-        ? joinPath(outputDirectory, `${protectedOutputFilename(input, false).replace(/\.apk$/i, "")}_unsigned.apk`)
-        : autoSignReady ? intermediateOutput : output;
+      // 前端只确定最终输出；自动签名的中间 APK 由后端任务目录管理。
       await api.protectApk(
         taskId.current,
         input,
-        unsignedOutput,
+        output,
         runtimeMode,
         environmentPolicy,
         protectionProfile,
@@ -355,7 +352,7 @@ export function useProtectWorkflow({
         setState("idle");
       }
     }
-  }, [byosProfile, aiResistance, autoSignReady, buildInfo, certificate, environmentPolicy, fixedOutputDirectory, input, locale, output, outputDirectory, outputDirectoryMode, outputFilenameError, precheck, preflight, protectionProfile, protectRouteAssets, runtimeMode, runtimeUi, sharing, xopPvm2PackerPath, xopTrueVmpPrefixes, pvm2RequiredMethods, nativeVmpEvidence]);
+  }, [byosProfile, aiResistance, autoSignReady, buildInfo, certificate, environmentPolicy, fixedOutputDirectory, input, locale, output, outputDirectoryMode, outputFilenameError, precheck, preflight, protectionProfile, protectRouteAssets, runtimeMode, runtimeUi, sharing, xopPvm2PackerPath, xopTrueVmpPrefixes, pvm2RequiredMethods, nativeVmpEvidence]);
 
   const cancel = useCallback(async () => {
     await api.cancelProtect().catch(() => undefined);
@@ -363,7 +360,7 @@ export function useProtectWorkflow({
 
   const effectiveAutoSign = taskAutoSign ?? autoSignReady;
   const steps = effectiveAutoSign
-    ? ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk", "PrepareSign", "SignApk", "Cleanup"]
+    ? ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk", "PrepareSign", "SignApk", "CommitSign", "Cleanup"]
     : ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk"];
 
   return {

@@ -178,7 +178,7 @@ impl FailureContext {
             stage: match step {
                 "PrepareSign" => Stage::Prepare,
                 "AlignApk" => Stage::Align,
-                "SignApk" | "Cleanup" => Stage::Execute,
+                "SignApk" | "CommitSign" | "Cleanup" => Stage::Execute,
                 _ => Stage::Unknown,
             },
         }

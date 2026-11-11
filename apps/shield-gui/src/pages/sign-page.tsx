@@ -212,7 +212,7 @@ export function SignPage({
               locale={locale}
               state={state === "signing" ? "running" : state}
               currentStep={currentStep}
-              steps={["PrepareSign", "AlignApk", "SignApk"]}
+              steps={["PrepareSign", "AlignApk", "SignApk", "CommitSign"]}
               showProgress={state !== "idle" || Boolean(currentStep)}
               startedAt={startedAt}
               finishedAt={finishedAt}
