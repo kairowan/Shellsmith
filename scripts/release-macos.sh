@@ -126,22 +126,28 @@ build_cli() {
   cd "$ROOT"
 
   if [[ "$BUILD_UNIVERSAL" == "universal" ]]; then
-    cargo build --release -p shield-cli --target aarch64-apple-darwin
-    cargo build --release -p shield-cli --target x86_64-apple-darwin
+    cargo build --release -p shield-cli -p shellsmith-mcp --target aarch64-apple-darwin
+    cargo build --release -p shield-cli -p shellsmith-mcp --target x86_64-apple-darwin
 
     mkdir -p "$ROOT/target/universal/release"
     lipo -create \
       "$ROOT/target/aarch64-apple-darwin/release/shield" \
       "$ROOT/target/x86_64-apple-darwin/release/shield" \
       -output "$ROOT/target/universal/release/shield"
+    lipo -create \
+      "$ROOT/target/aarch64-apple-darwin/release/shellsmith-mcp" \
+      "$ROOT/target/x86_64-apple-darwin/release/shellsmith-mcp" \
+      -output "$ROOT/target/universal/release/shellsmith-mcp"
     CLI_BIN="$ROOT/target/universal/release/shield"
-    success "CLI universal binary 构建完成"
+    MCP_BIN="$ROOT/target/universal/release/shellsmith-mcp"
+    success "CLI + MCP universal binary 构建完成"
   else
-    cargo build --release -p shield-cli
+    cargo build --release -p shield-cli -p shellsmith-mcp
     CLI_BIN="$ROOT/target/release/shield"
-    success "CLI 构建完成（$(uname -m)）"
+    MCP_BIN="$ROOT/target/release/shellsmith-mcp"
+    success "CLI + MCP 构建完成（$(uname -m)）"
   fi
-  echo "  大小: $(du -h "$CLI_BIN" | cut -f1)"
+  echo "  大小: $(du -h "$CLI_BIN" | cut -f1) / $(du -h "$MCP_BIN" | cut -f1)"
 }
 
 prepare_aab_gui_tools() {
@@ -276,6 +282,8 @@ package_cli() {
 
   cp "$CLI_BIN" "$CLI_PKG_DIR/bin/shield"
   chmod +x "$CLI_PKG_DIR/bin/shield"
+  cp "$MCP_BIN" "$CLI_PKG_DIR/bin/shellsmith-mcp"
+  chmod +x "$CLI_PKG_DIR/bin/shellsmith-mcp"
 
   if [[ -f "$ROOT/tools/apktool_3.0.3.jar" ]]; then
     cp "$ROOT/tools/apktool_3.0.3.jar" "$CLI_PKG_DIR/lib/apktool.jar"
@@ -317,7 +325,10 @@ macOS 版本。
 
 \`\`\`bash
 ./bin/shield protect -i input.apk -o protected.apk
+./bin/shellsmith-mcp --allow-root "\$PWD"
 \`\`\`
+
+MCP 通过 stdio 暴露全部 CLI 能力；密码只从启动环境读取，不写入工具参数。
 
 ## 要求
 
@@ -329,6 +340,7 @@ macOS 版本。
 \`\`\`
 Shellsmith-cli-${VERSION}-macos-${ARCH_LABEL}/
 ├── bin/shield          # 可执行文件
+├── bin/shellsmith-mcp  # MCP stdio 服务
 ├── lib/
 │   ├── apktool.jar
 │   ├── apksigner.jar

@@ -113,8 +113,9 @@ pub(crate) enum Commands {
         ks: PathBuf,
         #[arg(long)]
         alias: String,
-        #[arg(long)]
-        ks_pass: String,
+        /// Keystore 密码；自动化环境优先使用 MOCIKA_SHIELD_KS_PASS。
+        #[arg(long, env = "MOCIKA_SHIELD_KS_PASS", hide_env_values = true)]
+        ks_pass: Option<String>,
     },
 }
 

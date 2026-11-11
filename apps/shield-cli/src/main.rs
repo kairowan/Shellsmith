@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 
 mod args;
@@ -67,6 +67,8 @@ fn execute(cli: Cli) -> Result<()> {
             println!("{result}");
         }
         Commands::CheckKeystore { ks, alias, ks_pass } => {
+            let ks_pass = ks_pass
+                .context("缺失 keystore 密码；请设置 MOCIKA_SHIELD_KS_PASS 或传入 --ks-pass")?;
             let result = run_check_keystore(ks, alias, ks_pass)?;
             println!("{result}");
         }

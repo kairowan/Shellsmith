@@ -1,0 +1,22 @@
+[package]
+name = "shellsmith-mcp"
+version = "1.10.1"
+edition = "2021"
+authors = ["MocikaDev"]
+license = "MIT OR Apache-2.0"
+description = "Shellsmith 的 Model Context Protocol 能力服务"
+repository = "https://github.com/kairowan/Shellsmith"
+
+[[bin]]
+name = "shellsmith-mcp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tempfile = "3.20"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

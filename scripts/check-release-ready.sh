@@ -72,6 +72,7 @@ info "检查版本号同步"
 version_files=(
   "crates/shield-core/Cargo.toml"
   "apps/shield-cli/Cargo.toml"
+  "apps/shellsmith-mcp/Cargo.toml"
   "shield-stub/src/main/rust/Cargo.toml"
   "shield-stub/compat/api19-rust/Cargo.toml"
   "apps/shield-gui/src-tauri/Cargo.toml"

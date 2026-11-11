@@ -2,6 +2,7 @@
 .NOTPARALLEL:
 VERSION    := $(shell grep '^version' apps/shield-cli/Cargo.toml | head -1 | sed 's/version = "\([^"]*\)"/\1/')
 CLI_BIN    := target/release/shield
+MCP_BIN    := target/release/shellsmith-mcp
 DIST_DIR   := dist
 PYTHON     ?= python3
 
@@ -15,7 +16,7 @@ else
   CLEAN_CMD      := rm -rf
 endif
 
-.PHONY: build-pvm2 test-pvm2 test-pvm2-runtime build-cli build-stub audit-stub-dex build-gui build-all \
+.PHONY: build-pvm2 test-pvm2 test-pvm2-runtime build-cli build-mcp build-stub audit-stub-dex build-gui build-all \
         release release-linux release-windows \
         release-macos release-macos-universal \
         bump-version test test-fusion test-native-vmp check-aab clean help
@@ -26,7 +27,8 @@ help:
 	@echo "  build-pvm2             从仓库 Java 源码重建 PVM2 打包器（JDK 17+）"
 	@echo "  test-pvm2              从源码构建并执行通用 DEX 方法验证"
 	@echo "  test-pvm2-runtime      检查 Native 明文生命周期、并发与 JNI 执行"
-	@echo "  build-cli              编译 shield-cli（当前平台 release）"
+	@echo "  build-cli              编译 shield-cli 与 shellsmith-mcp（当前平台 release）"
+	@echo "  build-mcp              仅编译 shellsmith-mcp"
 	@echo "  build-stub             构建 shield-stub（Android AAR + 资源包）"
 	@echo "  build-byos             构建设备授权 BYOS 资源（无 Google 依赖）"
 	@echo "  build-byos-play        构建 Google Play 授权专用资源"
@@ -46,9 +48,15 @@ help:
 	@echo "  clean                  清理所有构建产物"
 
 build-cli:
-	@echo "🦀 编译 shield-cli..."
-	cargo build --release -p shield-cli
+	@echo "🦀 编译 shield-cli 与 shellsmith-mcp..."
+	cargo build --release -p shield-cli -p shellsmith-mcp
 	@echo "✅ 产物: $(CLI_BIN)"
+	@echo "✅ 产物: $(MCP_BIN)"
+
+build-mcp:
+	@echo "🔌 编译 shellsmith-mcp..."
+	cargo build --release -p shellsmith-mcp
+	@echo "✅ 产物: $(MCP_BIN)"
 
 build-pvm2:
 	$(PYTHON) scripts/build_pvm2_packer.py
@@ -136,6 +144,7 @@ test:
 	cargo test -p shield-core
 	cargo test -p shield-ios
 	cargo test -p shield-cli
+	cargo test -p shellsmith-mcp
 
 test-fusion:
 	@echo "🧪 运行融合协议和兼容策略测试..."

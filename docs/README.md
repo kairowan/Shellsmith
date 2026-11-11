@@ -13,6 +13,7 @@ Shellsmith 是 Android 与 iOS 双平台应用加固工具。Android 流程加�
 | `crates/shield-core/` | Rust 共享核心库，承载 APK 加固、签名、ZIP 对齐、Java/工具探测等共用能力 |
 | `crates/shield-ios/` | iOS 工程检查、工作副本、Swift Package 接入、Xcode Archive/导出及签名验证 |
 | `apps/shield-cli/` | Rust CLI，负责参数解析、终端输出与 JSON 进度协议 |
+| `apps/shellsmith-mcp/` | MCP stdio 服务，把全部 CLI 能力暴露给其他 Agent，不包含模型或 UI |
 | `shield-stub/` | Android 壳模块，包含 Java 壳层和 Rust JNI native 库 |
 | `native-vmp/` | 源码/bitcode 阶段的选择性 LLVM Native VMP Pass、解释器和 CMake 接入 |
 | `apps/shield-gui/` | Tauri v2 + React 桌面 GUI，唯一正式 GUI，目标覆盖 Linux / macOS / Windows |
@@ -26,6 +27,7 @@ Shellsmith 是 Android 与 iOS 双平台应用加固工具。Android 流程加�
 | 第一次使用 | [../README.md](../README.md)、[usage.md](usage.md) |
 | 配置开发环境 | [ops/environment.md](ops/environment.md) |
 | 从源码构建 | [ops/build.md](ops/build.md) |
+| 接入 MCP / 其他 Agent | [mcp.md](mcp.md) |
 | 本地排障 | [ops/troubleshooting.md](ops/troubleshooting.md) |
 | 查看维护统计方案 | [ops/project-statistics.md](ops/project-statistics.md) |
 | 查看匿名使用统计方案 | [ops/telemetry.md](ops/telemetry.md) |

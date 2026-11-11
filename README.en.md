@@ -237,6 +237,7 @@ The iOS balanced and strict profiles integrate freeRASP directly into the target
 | Topic | Documentation |
 |---|---|
 | GUI, certificates, configuration locations, and CLI | [Usage guide](docs/usage.md) |
+| MCP server and agent integration | [MCP server](docs/mcp.md) (Chinese) |
 | Installation and runtime problems | [Troubleshooting](docs/ops/troubleshooting.md) |
 | Source builds | [Build guide](docs/ops/build.md), [environment requirements](docs/ops/environment.md) |
 | Architecture and internals | [Documentation index](docs/README.md) |
@@ -246,7 +247,7 @@ The iOS balanced and strict profiles integrate freeRASP directly into the target
 | BYOS local validation and real-device troubleshooting | [Local validation](docs/process/byos-local-validation.md) |
 | Future work | [Roadmap](docs/process/roadmap.md) |
 
-The CLI is source-built; Releases contain desktop GUI packages only. Build `make build-stub` first, then `make build-cli` or `make build-gui`. Refer to the build guide for dependencies and platform-specific steps.
+The CLI and MCP server are source-built; local `make release` / `scripts/release-cli.sh` CLI packages include both `shield` and `shellsmith-mcp`. Build `make build-stub` first, then `make build-cli` or `make build-gui`. Refer to the build guide for dependencies and platform-specific steps.
 
 <details>
 <summary>CI/CD and Cross-Platform Releases</summary>

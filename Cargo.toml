@@ -3,6 +3,7 @@ members = [
     "crates/shield-core",
     "crates/shield-ios",
     "apps/shield-cli",
+    "apps/shellsmith-mcp",
     "apps/shield-gui/src-tauri",
     "shield-stub/src/main/rust",
 ]

@@ -171,7 +171,7 @@ jobs:
           cache-dependency-path: apps/shield-gui/package-lock.json
 
       - name: 检查 Rust Clippy
-        run: cargo clippy -p shield-core -p shield-ios -p shield-cli --all-targets -- -D warnings
+        run: cargo clippy -p shield-core -p shield-ios -p shield-cli -p shellsmith-mcp --all-targets -- -D warnings
 
       - name: 验证 BYOS 真实 TLS 连接及证书拒绝
         run: cargo test -p shield-core connection_probe_real_tls -- --ignored
@@ -181,6 +181,7 @@ jobs:
           cargo test -p shield-core
           cargo test -p shield-ios
           cargo test -p shield-cli
+          cargo test -p shellsmith-mcp
           cargo test --manifest-path shield-stub/src/main/rust/Cargo.toml
 
       - name: 安装 GUI 前端依赖
