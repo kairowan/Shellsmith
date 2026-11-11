@@ -198,6 +198,9 @@ jobs:
       - name: 运行统计 Worker 测试
         run: npm --prefix tools/stats-worker test
 
+      - name: 检查内存采样脚本
+        run: bash tests/scripts/profile-memory-runtime-apk.sh --self-test
+
   dependency-audit:
     name: 依赖漏洞扫描
     needs: changes

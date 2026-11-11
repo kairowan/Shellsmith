@@ -176,6 +176,7 @@ measure_variant() {
     local launch total_time immediate_pss settled_pss
     launch="$("${ADB[@]}" shell am start -W -n "$LAUNCH_COMPONENT")"
     total_time="$(awk -F': ' '/^TotalTime:/{print $2}' <<<"$launch" | tr -d '\r')"
+    # 即时 PSS 为自然启动窗口；整理后 PSS 为 send-trim-memory 独立窗口。
     immediate_pss="$("${ADB[@]}" shell dumpsys meminfo "$PACKAGE" | \
       awk '/TOTAL PSS:/{print $3; exit} /^TOTAL[[:space:]]/{print $2; exit}' | tr -d '\r')"
     "${ADB[@]}" shell am send-trim-memory "$PACKAGE" RUNNING_LOW >/dev/null

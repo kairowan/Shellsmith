@@ -5,6 +5,7 @@ import com.android.tools.smali.dexlib2.Opcode;
 import com.android.tools.smali.dexlib2.Opcodes;
 import com.android.tools.smali.dexlib2.builder.MutableMethodImplementation;
 import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction10x;
+import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction11n;
 import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction11x;
 import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction21c;
 import com.android.tools.smali.dexlib2.builder.instruction.BuilderInstruction21s;
@@ -316,9 +317,9 @@ public final class TrueVmpTrampoline {
         return result.append(')').append(returnType).toString();
     }
 
-    private static MethodImplementation buildTrampoline(Method m, int dexIndex, int methodIdx,
-                                                         String bridgeDescriptor,
-                                                         String bridgeMethod) {
+    static MethodImplementation buildTrampoline(Method m, int dexIndex, int methodIdx,
+                                                String bridgeDescriptor,
+                                                String bridgeMethod) {
         List<? extends CharSequence> params = m.getParameterTypes();
         String ret = m.getReturnType();
         boolean isStatic = AccessFlags.STATIC.isSet(m.getAccessFlags());
@@ -336,15 +337,22 @@ public final class TrueVmpTrampoline {
             throw new IllegalArgumentException("dex/method index negative");
         }
 
+        boolean emptyStatic = isStatic && params.isEmpty();
         int boxedArgCount = params.size() + (isStatic ? 0 : 1);
 
         MutableMethodImplementation impl = new MutableMethodImplementation(regCount);
         // Use 32-bit const — large multidex apps often have method_id > 32767.
         impl.addInstruction(new BuilderInstruction31i(Opcode.CONST, 1, dexIndex));
         impl.addInstruction(new BuilderInstruction31i(Opcode.CONST, 2, methodIdx));
-        impl.addInstruction(new BuilderInstruction21s(Opcode.CONST_16, 4, (short) boxedArgCount));
-        impl.addInstruction(new BuilderInstruction22c(
-                Opcode.NEW_ARRAY, 0, 4, new ImmutableTypeReference("[Ljava/lang/Object;")));
+        if (emptyStatic) {
+            // 静态零参数方法直接传 null，避免每次调用分配 Object[0]。
+            // 解释器已把 null 当作零参数数组处理。
+            impl.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 0, 0));
+        } else {
+            impl.addInstruction(new BuilderInstruction21s(Opcode.CONST_16, 4, (short) boxedArgCount));
+            impl.addInstruction(new BuilderInstruction22c(
+                    Opcode.NEW_ARRAY, 0, 4, new ImmutableTypeReference("[Ljava/lang/Object;")));
+        }
 
         int reg = paramBase;
         int slot = 0;

@@ -831,6 +831,13 @@ static bool ensure_well_known_classes(JNIEnv* env) {
     return true;
 }
 
+static bool is_ascii_jni_string(const std::string& value) {
+    for (unsigned char byte : value) {
+        if (byte == 0 || byte > 0x7f) return false;
+    }
+    return true;
+}
+
 static jstring string_from_utf8(JNIEnv* env, const std::string& value) {
     // 镜像使用标准 UTF-8，NewStringUTF 接受的却是 JNI 修改版 UTF-8。
     // 复用 Java 解码器保留内嵌空字符和代理对；const-string 必须维持 ART 的驻留身份。
@@ -838,19 +845,28 @@ static jstring string_from_utf8(JNIEnv* env, const std::string& value) {
     if (!frame.active) return nullptr;
     jclass cls = cache_global_class(env, "java/lang/String");
     if (cls == nullptr) return nullptr;
-    jmethodID ctor = env->GetMethodID(cls, "<init>", "([BLjava/lang/String;)V");
-    if (ctor == nullptr) return nullptr;
     jmethodID intern = env->GetMethodID(cls, "intern", "()Ljava/lang/String;");
     if (intern == nullptr) return nullptr;
-    jbyteArray bytes = env->NewByteArray(static_cast<jsize>(value.size()));
-    if (bytes == nullptr) return nullptr;
-    env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(value.size()),
-                           reinterpret_cast<const jbyte*>(value.data()));
-    if (env->ExceptionCheck()) return nullptr;
-    jstring encoding = env->NewStringUTF("UTF-8");
-    if (encoding == nullptr) return nullptr;
-    jobject text = env->NewObject(cls, ctor, bytes, encoding);
-    if (env->ExceptionCheck() || text == nullptr) return nullptr;
+
+    jobject text = nullptr;
+    if (is_ascii_jni_string(value)) {
+        // 1..127 在标准 UTF-8 与 JNI Modified UTF-8 中编码一致；空串也可走此路径。
+        // 使用无符号字节判断，避免 char 符号扩展把高位字节误判为 ASCII。
+        text = env->NewStringUTF(value.c_str());
+        if (text == nullptr || env->ExceptionCheck()) return nullptr;
+    } else {
+        jmethodID ctor = env->GetMethodID(cls, "<init>", "([BLjava/lang/String;)V");
+        if (ctor == nullptr) return nullptr;
+        jbyteArray bytes = env->NewByteArray(static_cast<jsize>(value.size()));
+        if (bytes == nullptr) return nullptr;
+        env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(value.size()),
+                               reinterpret_cast<const jbyte*>(value.data()));
+        if (env->ExceptionCheck()) return nullptr;
+        jstring encoding = env->NewStringUTF("UTF-8");
+        if (encoding == nullptr) return nullptr;
+        text = env->NewObject(cls, ctor, bytes, encoding);
+        if (env->ExceptionCheck() || text == nullptr) return nullptr;
+    }
     jobject result = env->CallObjectMethod(text, intern);
     if (env->ExceptionCheck()) return nullptr;
     return reinterpret_cast<jstring>(frame.pop(result));

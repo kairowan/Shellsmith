@@ -42,6 +42,10 @@ public class CompatibilityActivity extends Activity {
         protected int protectedValue(int value) { return value + 3; }
         private int privateValue(int value) { return value ^ 0x5a; }
         public static int staticValue(int value) { return value - 11; }
+        public static void staticVoid() { }
+        public static Object staticObject() { return "static-object"; }
+        public static int staticInt() { return 41; }
+        public static Object staticThrows() { throw new IllegalStateException("static"); }
         public int divide(int value, int divisor) {
             try { return value / divisor; } catch (ArithmeticException error) { return -17; }
         }
@@ -210,6 +214,10 @@ public class CompatibilityActivity extends Activity {
             for (int value : ints) {
                 check(parent.compute(value) == value + 7 && parent.protectedValue(value) == value + 3, "整数与访问标志");
                 check((Integer)privateMethod.invoke(parent, value) == (value ^ 0x5a) && RulesView.staticValue(value) == value - 11, "反射私有和静态");
+                RulesView.staticVoid();
+                check(RulesView.staticInt() == 41 && RulesView.staticObject().equals("static-object"), "静态零参数返回值");
+                try { RulesView.staticThrows(); throw new AssertionError("静态异常丢失"); }
+                catch (IllegalStateException expected) { check(expected.getMessage().equals("static"), "静态零参数异常"); }
                 for (int divisor : ints) {
                     check(parent.divide(value, divisor) == (divisor == 0 ? -17 : value / divisor), "整数除法异常");
                     int caught = value == -1 ? 31 : value == 0 ? 43 : value == 1 ? 59 : 71;
@@ -422,8 +430,8 @@ for row in report['methods']:
     else:
         assert row['artifact_verified'], row
     counts['verified' if row['artifact_verified'] else row['reason']] += 1
-assert counts['verified'] == 46 and len(report['methods']) == (53 if args.min_api == 23 else 52), counts
-print('Java/D8 整包：46 个方法验证通过，初始化、桥接、同步声明和特殊对象契约保留。', flush=True)
+assert counts['verified'] == 50 and len(report['methods']) == (57 if args.min_api == 23 else 56), counts
+print('Java/D8 整包：50 个方法验证通过，初始化、桥接、同步声明和特殊对象契约保留。', flush=True)
 results = {'coverage': dict(counts), 'apk_sha256': report['output_sha256'],
            'resource_table': 'absent' if args.without_resource_table else 'empty', 'min_api': args.min_api,
            'source_sha256': hashlib.sha256(SOURCE.encode()).hexdigest(), 'devices': []}
@@ -453,7 +461,7 @@ for serial in args.serial:
         match = re.search(re.escape(marker) + r'(\d+) pages=(\d+)', logs)
         assert match and 'FATAL EXCEPTION' not in logs, str(path)
         checks = int(match.group(1))
-        assert checks == 525, checks
+        assert checks == 545, checks
         device['page_size'] = int(match.group(2))
         assert run(adb + ['shell', 'pidof', package]).strip(), str(path)
         device['scenarios'].append({'name': scenario, 'checks': checks})
