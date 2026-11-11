@@ -167,6 +167,14 @@ cargo test -p mocika-shield 中文证书真实 -- --ignored --nocapture
 - 每个应用进程必须拥有独立的回退记录和认证密钥；主、远程进程并发首次启动不得互相覆盖状态或触发错误回退
 - 包装密钥密文损坏或对应 Keystore 条目丢失时不得静默生成新密钥，必须在解密和业务类定义前失败关闭
 
+## PVM2 分配与采样回归
+
+- `PVM2_SANITIZER='' make test-pvm2-runtime` 通过：字符串 ASCII 快速路径、空串、控制字符、中文、内嵌 NUL、代理对和 intern 身份语义保持
+- `python3 tests/scripts/check-pvm2-packer.py` 通过：静态零参数跳板不生成 `NEW_ARRAY`，寄存器数和 `(II[Ljava/lang/Object;)` 调用参数正确；实例零参数方法仍保留接收者数组
+- `python3 tests/scripts/check-pvm2-art.py` 构建阶段通过：静态零参数 void、对象、基本类型返回和异常方法均完成转换
+- `bash tests/scripts/profile-memory-runtime-apk.sh --self-test` 通过：每个 PID 每个快照只执行一次 meminfo/smaps 采样，缺失字段标记为不可用
+- 真机分配收益仍需按同一 APK、资源、设备和场景做 A/B/C 对照；没有设备数据时不得把语义测试通过写成 GC 分配已下降
+
 ## APK 对齐与 Google Play 兼容
 
 - 加固输出 APK 已执行 ZIP 对齐

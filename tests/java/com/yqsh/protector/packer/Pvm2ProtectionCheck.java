@@ -2,6 +2,7 @@ package com.yqsh.protector.packer;
 
 import com.android.tools.smali.dexlib2.*;
 import com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile;
+import com.android.tools.smali.dexlib2.iface.instruction.*;
 import com.android.tools.smali.dexlib2.immutable.*;
 import com.android.tools.smali.dexlib2.immutable.instruction.*;
 import com.android.tools.smali.dexlib2.immutable.reference.*;
@@ -21,6 +22,7 @@ public final class Pvm2ProtectionCheck {
     public static void main(String[] args) throws Exception {
         Path root = Path.of(args[0]);
         checkInstructionBoundaries(root);
+        checkStaticZeroArgTrampoline();
         checkEmptyResourceTable(root);
         checkZeroMethodReports(root);
         checkMethodCompatibility(root);
@@ -279,6 +281,39 @@ public final class Pvm2ProtectionCheck {
         for (var cls : classes) pool.internClass(cls);
         FileDataStore store = new FileDataStore(path.toFile());
         try { pool.writeTo(store); } finally { store.close(); }
+    }
+
+    private static void checkStaticZeroArgTrampoline() {
+        var staticMethod = new ImmutableMethod("Lfixture/Static;", "run", List.of(), "V", 0x8,
+                Set.of(), Set.of(), null);
+        var staticImpl = TrueVmpTrampoline.buildTrampoline(staticMethod, 2, 3, BRIDGE, "interpret");
+        assert staticImpl.getRegisterCount() == 7;
+        boolean staticNewArray = false, staticNullArg = false, invokeSeen = false;
+        for (var instruction : staticImpl.getInstructions()) {
+            if (instruction.getOpcode() == Opcode.NEW_ARRAY) staticNewArray = true;
+            if (instruction.getOpcode() == Opcode.CONST_4
+                    && instruction instanceof OneRegisterInstruction one
+                    && instruction instanceof NarrowLiteralInstruction narrow
+                    && one.getRegisterA() == 0 && narrow.getNarrowLiteral() == 0) {
+                staticNullArg = true;
+            }
+            if (instruction.getOpcode() == Opcode.INVOKE_STATIC
+                    && instruction instanceof FiveRegisterInstruction five) {
+                assert five.getRegisterC() == 1 && five.getRegisterD() == 2
+                        && five.getRegisterE() == 0;
+                invokeSeen = true;
+            }
+        }
+        assert !staticNewArray && staticNullArg && invokeSeen;
+
+        var instanceMethod = new ImmutableMethod("Lfixture/Static;", "runInstance", List.of(), "V", 0,
+                Set.of(), Set.of(), null);
+        var instanceImpl = TrueVmpTrampoline.buildTrampoline(instanceMethod, 2, 4, BRIDGE, "interpret");
+        boolean instanceNewArray = false;
+        for (var instruction : instanceImpl.getInstructions()) {
+            if (instruction.getOpcode() == Opcode.NEW_ARRAY) instanceNewArray = true;
+        }
+        assert instanceNewArray;
     }
 
     private static void checkInstructionBoundaries(Path root) throws Exception {

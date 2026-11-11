@@ -103,6 +103,7 @@ measure_variant() {
         launch="$("${ADB[@]}" shell am start -W -n "$COMPONENT")"
         total_time="$(awk -F': ' '/^TotalTime:/{print $2}' <<< "$launch" | tr -d '\r ')"
         wait_for_processes
+        # 即时 PSS 属于自然启动窗口；整理后 PSS 属于独立的 send-trim-memory 窗口。
         immediate_pss="$(total_pss)"
         "${ADB[@]}" shell am send-trim-memory "$PACKAGE_NAME" RUNNING_LOW >/dev/null
         sleep 2

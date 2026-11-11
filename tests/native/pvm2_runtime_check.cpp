@@ -202,6 +202,37 @@ int main(int argc, char** argv) {
             {const_cast<char*>("-XX:-UseCompressedClassPointers"), nullptr}};
     JavaVMInitArgs args{}; args.version = JNI_VERSION_1_6; args.nOptions = 3; args.options = options;
     assert(JNI_CreateJavaVM(&jvm, reinterpret_cast<void**>(&env), &args) == JNI_OK);
+
+    // 字符串快速路径与标准 UTF-8 回退路径：空串、ASCII、控制字符、中文、NUL、代理对和 intern 身份。
+    jstring ascii = string_from_utf8(env, "pvm2-ascii");
+    jstring asciiAgain = string_from_utf8(env, "pvm2-ascii");
+    assert(ascii != nullptr && asciiAgain != nullptr && !env->ExceptionCheck());
+    assert(env->IsSameObject(ascii, asciiAgain));
+    assert(env->GetStringLength(ascii) == 10);
+    jstring empty = string_from_utf8(env, "");
+    assert(empty != nullptr && !env->ExceptionCheck() && env->GetStringLength(empty) == 0);
+    jstring controls = string_from_utf8(env, std::string("\x01\x7f", 2));
+    assert(controls != nullptr && !env->ExceptionCheck() && env->GetStringLength(controls) == 2);
+    jstring chinese = string_from_utf8(env, "\xE4\xB8\xAD\xE6\x96\x87");
+    assert(chinese != nullptr && !env->ExceptionCheck() && env->GetStringLength(chinese) == 2);
+    jchar chineseChars[2];
+    env->GetStringRegion(chinese, 0, 2, chineseChars);
+    assert(chineseChars[0] == 0x4e2d && chineseChars[1] == 0x6587);
+    jstring embeddedNul = string_from_utf8(env, std::string("a\0b", 3));
+    assert(embeddedNul != nullptr && !env->ExceptionCheck() && env->GetStringLength(embeddedNul) == 3);
+    jchar nulChars[3];
+    env->GetStringRegion(embeddedNul, 0, 3, nulChars);
+    assert(nulChars[0] == 'a' && nulChars[1] == 0 && nulChars[2] == 'b');
+    jstring emoji = string_from_utf8(env, "\xF0\x9F\x98\x80");
+    assert(emoji != nullptr && !env->ExceptionCheck() && env->GetStringLength(emoji) == 2);
+    jchar emojiChars[2];
+    env->GetStringRegion(emoji, 0, 2, emojiChars);
+    assert(emojiChars[0] == 0xd83d && emojiChars[1] == 0xde00);
+    for (jstring value : {ascii, asciiAgain, empty, controls, chinese, embeddedNul, emoji}) {
+        env->DeleteLocalRef(value);
+    }
+    puts("字符串转换：ASCII 快速路径、空串、控制字符、中文、NUL、代理对与 intern 身份通过");
+
     jobject result = interpret(env, 2, 0, nullptr);
     assert(result && !env->ExceptionCheck());
     jobject wideResult = interpret(env, 2, 188, nullptr);
