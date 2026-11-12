@@ -19,7 +19,23 @@ struct McpClient {
 
 impl McpClient {
     fn start(cli: &Path, allow_roots: &[&Path], envs: &[(&str, &str)]) -> Self {
+        Self::start_with_cwd(None, cli, allow_roots, envs)
+    }
+
+    fn start_in(cwd: &Path, cli: &Path, allow_roots: &[&Path], envs: &[(&str, &str)]) -> Self {
+        Self::start_with_cwd(Some(cwd), cli, allow_roots, envs)
+    }
+
+    fn start_with_cwd(
+        cwd: Option<&Path>,
+        cli: &Path,
+        allow_roots: &[&Path],
+        envs: &[(&str, &str)],
+    ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_shellsmith-mcp"));
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
         command.arg("--cli").arg(cli);
         for root in allow_roots {
             command.arg("--allow-root").arg(root);
@@ -221,6 +237,9 @@ case "$cmd" in
     printf '{"already_protected":false,"is_signed":true,"cert_fingerprint":"%s","error":null}\n' "$cert"
     ;;
   check-aab)
+    if [ -n "${FAKE_GRANDCHILD_MARKER:-}" ]; then
+      ( sleep 2; echo late > "$FAKE_GRANDCHILD_MARKER" ) &
+    fi
     sleep "${FAKE_CHECK_SLEEP:-0}"
     echo '{"has_base":true,"modules":[]}'
     ;;
@@ -442,6 +461,151 @@ fn enforces_allowed_roots() {
     );
     assert_eq!(result["isError"], true, "{result}");
     assert!(text(&result).contains("不在允许的目录内"));
+}
+
+#[test]
+fn rejects_ios_config_project_outside_allowed_root() {
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let project = outside.path().join("App.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// outside").unwrap();
+    let config = allowed.path().join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            project.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    let result = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": allowed.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(text(&result).contains("不在允许的目录内"), "{result}");
+}
+
+#[test]
+fn rejects_ios_config_auxiliary_paths_outside_allowed_root() {
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let project = allowed.path().join("App.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+    let outside_file = outside.path().join("outside.txt");
+    fs::write(&outside_file, b"outside").unwrap();
+
+    let base = format!(
+        "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n",
+        project.display()
+    );
+    let entrypoint_config = allowed.path().join("ios-entrypoint.toml");
+    fs::write(
+        &entrypoint_config,
+        format!("{base}entrypoint = \"{}\"\n", outside_file.display()),
+    )
+    .unwrap();
+    let confidential_config = allowed.path().join("ios-confidential.toml");
+    fs::write(
+        &confidential_config,
+        format!(
+            "{base}[confidential]\nenabled = true\nconfig = \"{}\"\n",
+            outside_file.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    for config in [entrypoint_config, confidential_config] {
+        let result = client.call(
+            "shellsmith_protect_ios",
+            json!({
+                "ios_config": config.display().to_string(),
+                "output": allowed.path().join("out").display().to_string(),
+                "dry_run": true
+            }),
+        );
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(text(&result).contains("不在允许的目录内"), "{result}");
+    }
+}
+
+#[test]
+fn allows_ios_config_project_inside_allowed_root() {
+    let allowed = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let project = allowed.path().join("App.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+    let config = allowed.path().join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            project.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    let result = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": allowed.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let job_id = result["structuredContent"]["job_id"].as_str().unwrap();
+    let job = client.wait_job(job_id);
+    assert_eq!(job["structuredContent"]["status"], "succeeded", "{job}");
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_ios_config_project_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let outside_project = outside.path().join("App.xcodeproj");
+    fs::create_dir_all(&outside_project).unwrap();
+    fs::write(outside_project.join("project.pbxproj"), b"// outside").unwrap();
+    let link = allowed.path().join("Linked.xcodeproj");
+    symlink(&outside_project, &link).unwrap();
+    let config = allowed.path().join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n",
+            link.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    let result = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": allowed.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(text(&result).contains("不在允许的目录内"), "{result}");
 }
 
 #[cfg(unix)]
@@ -776,6 +940,93 @@ fn sync_check_times_out_and_kills_cli() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn sync_timeout_kills_grandchildren() {
+    let temp = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(temp.path());
+    let aab = temp.path().join("app.aab");
+    let marker = temp.path().join("grandchild-wrote");
+    fs::write(&aab, b"aab").unwrap();
+
+    let mut client = McpClient::start(
+        &cli,
+        &[temp.path()],
+        &[
+            ("FAKE_CHECK_SLEEP", "5"),
+            ("FAKE_GRANDCHILD_MARKER", marker.to_str().unwrap()),
+            ("SHELLSMITH_MCP_SYNC_TIMEOUT_SECS", "1"),
+        ],
+    );
+    let result = client.call(
+        "shellsmith_check_aab",
+        json!({"path": aab.display().to_string()}),
+    );
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(text(&result).contains("超时"), "{result}");
+    thread::sleep(Duration::from_millis(2500));
+    assert!(
+        !marker.exists(),
+        "同步检查超时后孙进程仍继续运行: {}",
+        marker.display()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn closing_stdin_kills_sync_grandchildren() {
+    let temp = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(temp.path());
+    let aab = temp.path().join("app.aab");
+    let marker = temp.path().join("grandchild-wrote");
+    fs::write(&aab, b"aab").unwrap();
+
+    let mut client = McpClient::start(
+        &cli,
+        &[temp.path()],
+        &[
+            ("FAKE_CHECK_SLEEP", "5"),
+            ("FAKE_GRANDCHILD_MARKER", marker.to_str().unwrap()),
+        ],
+    );
+    client.send_request(
+        "tools/call",
+        json!({
+            "name": "shellsmith_check_aab",
+            "arguments": {"path": aab.display().to_string()}
+        }),
+    );
+    thread::sleep(Duration::from_millis(200));
+    client.close_stdin();
+    assert!(
+        client.wait_exit(Duration::from_secs(5)).is_some(),
+        "MCP 未在关闭 stdin 后退出"
+    );
+    thread::sleep(Duration::from_millis(2500));
+    assert!(
+        !marker.exists(),
+        "MCP 退出后同步检查孙进程仍继续运行: {}",
+        marker.display()
+    );
+}
+
+#[test]
+fn starts_relative_cli_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let bin = temp.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    write_fake_cli(&bin);
+    let mut client = McpClient::start_in(
+        temp.path(),
+        Path::new("./bin/fake-shield.sh"),
+        &[temp.path()],
+        &[],
+    );
+    let result = client.call("shellsmith_version", json!({}));
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["structuredContent"]["cli_version"], "shield 1.10.1");
+}
+
 #[test]
 fn offline_protect_does_not_inherit_byos_key() {
     let temp = tempfile::tempdir().unwrap();
@@ -913,7 +1164,7 @@ fn cancels_running_job_and_kills_cli_subprocess() {
 }
 
 #[test]
-fn certificate_precheck_uses_custom_apksigner() {
+fn top_level_apksigner_is_used_for_precheck_and_sign() {
     let temp = tempfile::tempdir().unwrap();
     let cli = write_fake_cli(temp.path());
     let log = temp.path().join("calls.log");
@@ -950,8 +1201,7 @@ fn certificate_precheck_uses_custom_apksigner() {
                 "keystore": keystore.display().to_string(),
                 "key_alias": "release",
                 "password_env": "TEST_KS_PASS",
-                "key_password_env": "TEST_KEY_PASS",
-                "apksigner": apksigner.display().to_string()
+                "key_password_env": "TEST_KEY_PASS"
             }
         }),
     );
@@ -965,6 +1215,11 @@ fn certificate_precheck_uses_custom_apksigner() {
         logs.lines()
             .any(|line| { line.starts_with("check-apk ") && line.contains("--apksigner") }),
         "证书预检没有使用自定义 apksigner: {logs}"
+    );
+    assert!(
+        logs.lines()
+            .any(|line| { line.starts_with("sign ") && line.contains("--apksigner") }),
+        "最终签名没有继承顶层 apksigner: {logs}"
     );
 }
 

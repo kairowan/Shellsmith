@@ -121,7 +121,7 @@ pub struct Server {
 impl Server {
     pub fn new(cli: PathBuf, allowed_roots: Vec<PathBuf>) -> Self {
         Self {
-            cli,
+            cli: resolve_cli_path(cli),
             allowed_roots,
             out: Arc::new(Mutex::new(BufWriter::new(std::io::stdout()))),
             jobs: Mutex::new(BTreeMap::new()),
@@ -297,6 +297,11 @@ impl Server {
         set_cli_working_dir(&mut process, &self.cli);
         apply_sanitized_env(&mut process, env);
         add_temp_env(&mut process, sync_temp.path());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            process.process_group(0);
+        }
         let mut child = process
             .spawn()
             .with_context(|| format!("启动 Shellsmith CLI 失败: {}", self.cli.display()))?;
@@ -756,6 +761,23 @@ fn set_cli_working_dir(process: &mut Command, cli: &Path) {
     if let Some(parent) = cli.parent().filter(|parent| !parent.as_os_str().is_empty()) {
         process.current_dir(parent);
     }
+}
+
+fn resolve_cli_path(cli: PathBuf) -> PathBuf {
+    if cli.is_absolute() {
+        return cli;
+    }
+    let has_parent = cli
+        .parent()
+        .is_some_and(|parent| !parent.as_os_str().is_empty());
+    if !has_parent {
+        return cli;
+    }
+    let Ok(cwd) = std::env::current_dir() else {
+        return cli;
+    };
+    let resolved = cwd.join(cli);
+    resolved.canonicalize().unwrap_or(resolved)
 }
 
 fn add_temp_env(process: &mut Command, root: &Path) {

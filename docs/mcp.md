@@ -44,7 +44,7 @@ cargo build --release -p shellsmith-mcp
 
 | 参数 | 环境变量 | 说明 |
 |---|---|---|
-| `--cli PATH` | `SHELLSMITH_MCP_CLI` | `shield` 可执行文件；默认先找同目录，再查 `PATH` |
+| `--cli PATH` | `SHELLSMITH_MCP_CLI` | `shield` 可执行文件；默认先找同目录，再查 `PATH`。相对路径按 MCP 启动目录解析 |
 | `--allow-root DIR` | `SHELLSMITH_MCP_ALLOWED_ROOTS` | 允许读写的目录，可重复；未配置时不限制路径。环境变量使用平台路径分隔符 |
 
 服务启动后从 stdin 读取 MCP 消息，向 stdout 写响应；诊断信息只写 stderr。
@@ -214,9 +214,9 @@ exec /opt/Shellsmith/bin/shellsmith-mcp --allow-root "$HOME/projects"
 ## 安全边界
 
 - **密码**：只从 MCP 进程环境读取；工具 schema 中没有 `password`、`ks_pass`、`key_password` 字段。错误信息不会回显密码。
-- **路径**：输入路径必须存在并会被规范化；输出父目录必须存在；配置 `--allow-root` 后，所有输入和输出都必须位于允许目录内。
+- **路径**：输入路径必须存在并会被规范化；输出父目录必须存在；配置 `--allow-root` 后，所有输入和输出都必须位于允许目录内。iOS 配置中的 `project.path`、`project.entrypoint` 和 `confidential.config` 也会单独校验，不因配置文件本身在允许目录内而放行外部工程。
 - **确认**：加固、签名、安装要求 `confirm: true`；原地覆盖还要求 `allow_in_place: true`。
-- **取消**：取消会终止 `shield` 子进程；已写出的临时文件由 CLI 自身清理。
+- **取消**：异步任务和同步检查都会终止整个 CLI 进程树；MCP 持有任务私有 `TMPDIR`/暂存根目录，取消或退出后会清理口令与 staging。回滚失败时 CLI 明确保留的恢复副本位于输出目录，不会被 MCP 删除。
 - **不上传**：MCP 不包含遥测、更新检查或远程托管逻辑。只有显式使用 BYOS 时才会访问你配置的 HTTPS 服务。
 - **报告**：`shellsmith_read_report` 只读本地 JSON，不执行报告中的任何内容。
 
