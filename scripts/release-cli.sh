@@ -33,14 +33,17 @@ echo "✓ shield-stub 构建完成"
 # 3. 编译 CLI
 echo "=> 编译 CLI..."
 cd "$PROJECT_ROOT"
-cargo build --release -p shield-cli
-echo "✓ CLI 编译完成"
+cargo build --release -p shield-cli -p shellsmith-mcp
+echo "✓ CLI 与 MCP 编译完成"
 
 # 4. 复制shield可执行文件
 echo "=> 复制可执行文件..."
 cp "$PROJECT_ROOT/target/release/shield" "$RELEASE_DIR/bin/"
 chmod +x "$RELEASE_DIR/bin/shield"
+cp "$PROJECT_ROOT/target/release/shellsmith-mcp" "$RELEASE_DIR/bin/"
+chmod +x "$RELEASE_DIR/bin/shellsmith-mcp"
 echo "✓ shield -> release/bin/shield"
+echo "✓ shellsmith-mcp -> release/bin/shellsmith-mcp"
 
 # 5. 复制工具JAR文件
 echo "=> 复制工具..."
@@ -117,7 +120,8 @@ cat > "$RELEASE_DIR/README.md" << 'EOF'
 ```
 Shellsmith-x.y.z/
 ├── bin/
-│   └── shield          # 可执行文件
+│   ├── shield          # 可执行文件
+│   └── shellsmith-mcp  # MCP stdio 服务
 ├── lib/
 │   ├── apktool.jar     # APK反编译工具
 │   ├── apksigner.jar   # APK签名工具
@@ -155,6 +159,18 @@ apksigner sign --ks keystore.jks protected.apk
 ./bin/shield --help
 ./bin/shield --version
 ```
+
+### MCP Server
+
+`bin/shellsmith-mcp` 通过 stdio 向其他 Agent 暴露全部 CLI 能力：
+
+```bash
+SHELLSMITH_MCP_CLI=./bin/shield ./bin/shellsmith-mcp --allow-root /path/to/projects
+```
+
+工具参数不接受明文密码；在启动 MCP 前导出 `MOCIKA_SHIELD_KS_PASS`、
+`MOCIKA_SHIELD_KEY_PASS`，并在工具里传对应的环境变量名。详见仓库
+`docs/mcp.md`。
 EOF
 echo "✓ README.md已生成"
 

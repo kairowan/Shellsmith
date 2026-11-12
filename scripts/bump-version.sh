@@ -9,6 +9,7 @@
 # 修改的文件（统一同步）:
 #   crates/shield-core/Cargo.toml
 #   apps/shield-cli/Cargo.toml
+#   apps/shellsmith-mcp/Cargo.toml
 #   apps/shield-gui/src-tauri/Cargo.toml
 #   shield-stub/src/main/rust/Cargo.toml
 #   shield-stub/compat/api19-rust/Cargo.toml
@@ -52,6 +53,9 @@ echo "  ✓ crates/shield-core/Cargo.toml"
 si "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$ROOT/apps/shield-cli/Cargo.toml"
 echo "  ✓ apps/shield-cli/Cargo.toml"
 
+si "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$ROOT/apps/shellsmith-mcp/Cargo.toml"
+echo "  ✓ apps/shellsmith-mcp/Cargo.toml"
+
 si "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$ROOT/apps/shield-gui/src-tauri/Cargo.toml"
 echo "  ✓ apps/shield-gui/src-tauri/Cargo.toml"
 
@@ -84,6 +88,7 @@ echo ""
 echo "验证结果："
 grep '^version'   "$ROOT/crates/shield-core/Cargo.toml"        | head -1 | sed 's/^/    crates\/shield-core\/Cargo.toml : /'
 grep '^version'   "$ROOT/apps/shield-cli/Cargo.toml"           | head -1 | sed 's/^/    apps\/shield-cli\/Cargo.toml     : /'
+grep '^version'   "$ROOT/apps/shellsmith-mcp/Cargo.toml"       | head -1 | sed 's/^/    apps\/shellsmith-mcp\/Cargo.toml : /'
 grep '^version'   "$ROOT/apps/shield-gui/src-tauri/Cargo.toml" | head -1 | sed 's/^/    apps\/shield-gui\/Cargo.toml     : /'
 grep '^version'   "$ROOT/shield-stub/src/main/rust/Cargo.toml" | head -1 | sed 's/^/    shield-stub\/Cargo.toml         : /'
 grep '^version'   "$ROOT/shield-stub/compat/api19-rust/Cargo.toml" | head -1 | sed 's/^/    API19兼容Cargo.toml           : /'

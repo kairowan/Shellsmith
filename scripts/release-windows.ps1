@@ -192,14 +192,17 @@ function Build-Cli {
     try {
         Run cargo @("build", "--release",
             "-p", "shield-cli",
+            "-p", "shellsmith-mcp",
             "--target", "x86_64-pc-windows-msvc")
     } finally {
         Pop-Location
     }
     $bin = Join-Path $Root "target\x86_64-pc-windows-msvc\release\shield.exe"
     if (-not (Test-Path $bin)) { Err "CLI 构建失败，产物不存在: $bin" }
-    Success "CLI 构建完成"
-    Get-Item $bin | Select-Object Name, Length
+    $mcp = Join-Path $Root "target\x86_64-pc-windows-msvc\release\shellsmith-mcp.exe"
+    if (-not (Test-Path $mcp)) { Err "MCP 构建失败，产物不存在: $mcp" }
+    Success "CLI 与 MCP 构建完成"
+    Get-Item $bin, $mcp | Select-Object Name, Length
 }
 
 # ========== 构建 GUI（Tauri NSIS bundle）==========
@@ -233,6 +236,7 @@ function Package-Cli {
     New-Item -ItemType Directory -Path "$pkgDir\bin","$pkgDir\lib","$pkgDir\resources","$pkgDir\licenses" | Out-Null
 
     Copy-Item (Join-Path $Root "target\x86_64-pc-windows-msvc\release\shield.exe") "$pkgDir\bin\shield.exe"
+    Copy-Item (Join-Path $Root "target\x86_64-pc-windows-msvc\release\shellsmith-mcp.exe") "$pkgDir\bin\shellsmith-mcp.exe"
 
     $apktool = Join-Path $Root "tools\apktool_3.0.3.jar"
     if (Test-Path $apktool) {
@@ -275,7 +279,10 @@ Windows x86_64 版本。
 
 ``````
 bin\shield.exe -i input.apk -o protected.apk
+bin\shellsmith-mcp.exe --allow-root "%CD%"
 ``````
+
+MCP 通过 stdio 暴露全部 CLI 能力；密码只从启动环境读取，不写入工具参数。
 
 ## 要求
 
@@ -287,6 +294,7 @@ bin\shield.exe -i input.apk -o protected.apk
 ``````
 Shellsmith-cli-$Version-windows-x86_64\
 ├── bin\shield.exe      # 可执行文件
+├── bin\shellsmith-mcp.exe # MCP stdio 服务
 ├── lib\
 │   ├── apktool.jar
 │   ├── apksigner.jar

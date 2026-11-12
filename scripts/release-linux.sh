@@ -96,11 +96,16 @@ build_cli() {
   cd "$ROOT"
   cargo build --release \
     -p shield-cli \
+    -p shellsmith-mcp \
     --target x86_64-unknown-linux-musl
 
   CLI_BIN="$ROOT/target/x86_64-unknown-linux-musl/release/shield"
+  MCP_BIN="$ROOT/target/x86_64-unknown-linux-musl/release/shellsmith-mcp"
   if [[ ! -f "$CLI_BIN" ]]; then
     error "CLI 构建失败，产物不存在"
+  fi
+  if [[ ! -f "$MCP_BIN" ]]; then
+    error "MCP 构建失败，产物不存在"
   fi
 
   local ldd_out
@@ -142,6 +147,8 @@ package_cli() {
   # 可执行文件
   cp "$ROOT/target/x86_64-unknown-linux-musl/release/shield" "$CLI_PKG_DIR/bin/shield"
   chmod +x "$CLI_PKG_DIR/bin/shield"
+  cp "$ROOT/target/x86_64-unknown-linux-musl/release/shellsmith-mcp" "$CLI_PKG_DIR/bin/shellsmith-mcp"
+  chmod +x "$CLI_PKG_DIR/bin/shellsmith-mcp"
 
   # 工具 JAR
   if [[ -f "$ROOT/tools/apktool_3.0.3.jar" ]]; then
@@ -188,7 +195,10 @@ Linux x86_64 静态链接版本，无需安装依赖。
 
 \`\`\`bash
 ./bin/shield protect -i input.apk -o protected.apk
+./bin/shellsmith-mcp --allow-root "\$PWD"
 \`\`\`
+
+MCP 通过 stdio 暴露全部 CLI 能力；密码只从启动环境读取，不写入工具参数。
 
 ## 要求
 
@@ -200,6 +210,7 @@ Linux x86_64 静态链接版本，无需安装依赖。
 \`\`\`
 Shellsmith-cli-${VERSION}-linux-x86_64/
 ├── bin/shield          # 可执行文件（静态链接）
+├── bin/shellsmith-mcp  # MCP stdio 服务（静态链接）
 ├── lib/
 │   ├── apktool.jar
 │   ├── apksigner.jar

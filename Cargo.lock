@@ -3648,6 +3648,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "shellsmith-mcp"
+version = "1.10.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "shield-cli"
 version = "1.10.1"
 dependencies = [

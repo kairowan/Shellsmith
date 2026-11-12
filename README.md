@@ -237,6 +237,7 @@ iOS balanced/strict 会让目标应用直接集成 freeRASP；其 `watcherMail`�
 | 需要了解 | 文档 |
 |---|---|
 | GUI 操作、签名证书、配置位置、CLI 用法 | [使用指南](docs/usage.md) |
+| MCP Server、Agent 集成与工具清单 | [MCP Server](docs/mcp.md) |
 | 安装与运行问题 | [本地排障](docs/ops/troubleshooting.md) |
 | 从源码编译 | [构建指南](docs/ops/build.md)、[环境要求](docs/ops/environment.md) |
 | 模块结构、原理与设计 | [文档导航](docs/README.md) |
@@ -246,7 +247,7 @@ iOS balanced/strict 会让目标应用直接集成 freeRASP；其 `watcherMail`�
 | BYOS 本地验证与真实设备排障 | [本地验证记录](docs/process/byos-local-validation.md) |
 | 后续规划 | [路线图](docs/process/roadmap.md) |
 
-CLI 仅供源码构建和自动化使用，Release 不单独提供 CLI 包。构建顺序为先 `make build-stub`，再 `make build-cli` 或 `make build-gui`；完整依赖与平台步骤以构建指南为准。
+CLI 与 MCP Server 可从源码构建；`make release` / `scripts/release-cli.sh` 生成的本地 CLI 包同时包含 `shield` 和 `shellsmith-mcp`。构建顺序为先 `make build-stub`，再 `make build-cli` 或 `make build-gui`；完整依赖与平台步骤以构建指南为准。
 
 <details>
 <summary>CI/CD 与跨平台发布</summary>

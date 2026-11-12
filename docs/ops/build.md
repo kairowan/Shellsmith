@@ -22,10 +22,11 @@
 
 ```bash
 make build-stub             # ① 从源码重建 Packer，再构建 Android 壳
-make build-cli              # ② 编译 shield 命令行工具
+make build-cli              # ② 编译 shield 与 shellsmith-mcp
+make build-mcp              # 仅编译 MCP Server
 make build-gui              # ③ 构建桌面 GUI Tauri 版（需先 build-stub）
 make build-all              # build-stub + build-cli + build-gui（Tauri）
-make test                   # 运行 Android 核心、iOS 核心、CLI 单元测试
+make test                   # 运行 Android 核心、iOS 核心、CLI 与 MCP 单元测试
 make test-pvm2              # 从源码重建并验证通用 DEX 方法保护
 make clean                  # 清理所有构建产物
 ```
@@ -82,15 +83,20 @@ rustup target add aarch64-linux-android armv7-linux-androideabi \
                   i686-linux-android x86_64-linux-android
 ```
 
-### 2. 编译 shield-cli
+### 2. 编译 shield-cli 与 MCP Server
 
 ```bash
 make build-cli
-# 等价于：cargo build --release -p shield-cli
+# 等价于：cargo build --release -p shield-cli -p shellsmith-mcp
+
+make build-mcp
+# 仅编译：cargo build --release -p shellsmith-mcp
 ```
 
-输出（Linux / macOS）：`target/release/shield`
-输出（Windows）：`target\release\shield.exe`
+输出（Linux / macOS）：`target/release/shield`、`target/release/shellsmith-mcp`
+输出（Windows）：`target\release\shield.exe`、`target\release\shellsmith-mcp.exe`
+
+MCP Server 的启动参数、客户端配置、工具清单和安全边界见 [MCP Server](../mcp.md)。
 
 ### 3. 构建 shield-gui（Tauri 桌面应用）
 
