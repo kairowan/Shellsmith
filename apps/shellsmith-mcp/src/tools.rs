@@ -608,6 +608,7 @@ fn dispatch(
         "shellsmith_check_ios" => {
             let input: CheckIosInput = parse(args)?;
             let project = server.resolve_input(&input.project, "Xcode 工程")?;
+            validate_ios_project(server, &project)?;
             let mut cli_args = vec!["check-ios".to_string(), project.display().to_string()];
             if let Some(scheme) = input.scheme {
                 cli_args.push("--scheme".into());
@@ -1266,7 +1267,7 @@ fn protect_ios(
         require_confirm(input.confirm)?;
     }
     let config = server.resolve_input(&input.ios_config, "iOS 配置")?;
-    validate_ios_config_paths(server, &config)?;
+    validate_ios_config_paths(server, &config, input.dry_run)?;
     let output = server.resolve_output(&input.output, "iOS 输出目录")?;
     let mut cli_args = vec![
         "protect-ios".to_string(),
@@ -1713,17 +1714,106 @@ fn resolve_config_path(base: &Path, value: &str) -> PathBuf {
     }
 }
 
-fn ensure_config_path_allowed(server: &Arc<Server>, path: &Path, label: &str) -> Result<()> {
-    if path.exists() {
-        server.resolve_input(&path.to_string_lossy(), label)?;
-    } else {
-        server.resolve_output(&path.to_string_lossy(), label)?;
+const MAX_IOS_BUNDLE_ENTRIES: usize = 50_000;
+const MAX_IOS_BUNDLE_DEPTH: usize = 32;
+
+/// 校验 iOS 工程 bundle 内实际会被读取的文件路径，重点拦截工程内部的文件级符号链接。
+fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
+    let mut pending = vec![(root.to_path_buf(), 0usize)];
+    let mut entries = 0usize;
+    while let Some((directory, depth)) = pending.pop() {
+        anyhow::ensure!(
+            depth <= MAX_IOS_BUNDLE_DEPTH,
+            "iOS 工程目录层级过深，无法完成路径校验: {}",
+            directory.display()
+        );
+        let children = fs::read_dir(&directory)
+            .with_context(|| format!("读取 iOS 工程目录失败: {}", directory.display()))?;
+        for child in children {
+            let child = child?;
+            entries += 1;
+            anyhow::ensure!(
+                entries <= MAX_IOS_BUNDLE_ENTRIES,
+                "iOS 工程目录条目过多，无法完成路径校验: {}",
+                root.display()
+            );
+            let path = child.path();
+            let metadata = fs::symlink_metadata(&path)
+                .with_context(|| format!("读取 iOS 工程路径失败: {}", path.display()))?;
+            if metadata.file_type().is_symlink() {
+                let target = path
+                    .canonicalize()
+                    .with_context(|| format!("iOS 工程内部符号链接无法解析: {}", path.display()))?;
+                server.ensure_allowed(&target, "iOS 工程内部路径")?;
+            } else if metadata.is_dir() {
+                pending.push((path, depth + 1));
+            }
+        }
     }
     Ok(())
 }
 
+/// workspace 检查会扫描同级的 .xcodeproj；保持与 CLI 相同的深度/跳过规则。
+fn collect_ios_projects(
+    server: &Arc<Server>,
+    root: &Path,
+    depth: usize,
+    output: &mut Vec<PathBuf>,
+) -> Result<()> {
+    if depth > 2 {
+        return Ok(());
+    }
+    let entries = fs::read_dir(root)
+        .with_context(|| format!("读取 iOS workspace 目录失败: {}", root.display()))?;
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .with_context(|| format!("读取 iOS workspace 路径失败: {}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            let target = path
+                .canonicalize()
+                .with_context(|| format!("iOS workspace 符号链接无法解析: {}", path.display()))?;
+            server.ensure_allowed(&target, "iOS 工程内部路径")?;
+            if target.extension().and_then(|value| value.to_str()) == Some("xcodeproj") {
+                output.push(target);
+            }
+            continue;
+        }
+        if path.extension().and_then(|value| value.to_str()) == Some("xcodeproj") {
+            output.push(path);
+        } else if metadata.is_dir()
+            && !matches!(
+                entry.file_name().to_str(),
+                Some(".git" | "Pods" | ".build" | "DerivedData")
+            )
+        {
+            collect_ios_projects(server, &path, depth + 1, output)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_ios_project(server: &Arc<Server>, project: &Path) -> Result<()> {
+    match project.extension().and_then(|value| value.to_str()) {
+        Some("xcodeproj") => validate_ios_bundle(server, project),
+        Some("xcworkspace") => {
+            validate_ios_bundle(server, project)?;
+            if let Some(root) = project.parent() {
+                let mut projects = Vec::new();
+                collect_ios_projects(server, root, 0, &mut projects)?;
+                for project in projects {
+                    validate_ios_bundle(server, &project)?;
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// iOS 配置中的工程、entrypoint 和 Swift Confidential 路径也必须受允许目录约束。
-fn validate_ios_config_paths(server: &Arc<Server>, config: &Path) -> Result<()> {
+fn validate_ios_config_paths(server: &Arc<Server>, config: &Path, dry_run: bool) -> Result<()> {
     let content = fs::read_to_string(config)
         .with_context(|| format!("读取 iOS 配置失败：{}", config.display()))?;
     let value: toml::Value = toml::from_str(&content).context("解析 iOS 配置失败")?;
@@ -1734,32 +1824,46 @@ fn validate_ios_config_paths(server: &Arc<Server>, config: &Path) -> Result<()> 
         .and_then(|project| project.get("path"))
         .and_then(toml::Value::as_str)
         .context("iOS 配置缺少 project.path")?;
-    let project_path = resolve_config_path(base, project);
-    server.resolve_input(&project_path.to_string_lossy(), "iOS 工程")?;
+    let project_path = server.resolve_input(
+        &resolve_config_path(base, project).to_string_lossy(),
+        "iOS 工程",
+    )?;
+    validate_ios_project(server, &project_path)?;
 
-    if let Some(entrypoint) = value
-        .get("project")
-        .and_then(|project| project.get("entrypoint"))
+    let profile = value
+        .get("protection")
+        .and_then(|protection| protection.get("profile"))
         .and_then(toml::Value::as_str)
-    {
-        let project_root = project_path.parent().unwrap_or(base);
-        ensure_config_path_allowed(
-            server,
-            &resolve_config_path(project_root, entrypoint),
-            "iOS entrypoint",
-        )?;
+        .unwrap_or("balanced");
+    let uses_protection = profile != "compat";
+
+    if uses_protection && !dry_run {
+        if let Some(entrypoint) = value
+            .get("project")
+            .and_then(|project| project.get("entrypoint"))
+            .and_then(toml::Value::as_str)
+        {
+            let project_root = project_path.parent().unwrap_or(base);
+            server.resolve_input(
+                &resolve_config_path(project_root, entrypoint).to_string_lossy(),
+                "iOS entrypoint",
+            )?;
+        }
     }
 
-    if let Some(confidential) = value.get("confidential") {
-        let enabled = confidential
-            .get("enabled")
-            .and_then(toml::Value::as_bool)
-            .unwrap_or(true);
-        if enabled {
-            if let Some(config_path) = confidential.get("config").and_then(toml::Value::as_str) {
-                ensure_config_path_allowed(
-                    server,
-                    &resolve_config_path(base, config_path),
+    if uses_protection {
+        if let Some(confidential) = value.get("confidential") {
+            let enabled = confidential
+                .get("enabled")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(true);
+            if enabled {
+                let config_path = confidential
+                    .get("config")
+                    .and_then(toml::Value::as_str)
+                    .context("Swift Confidential 已启用但缺少 config")?;
+                server.resolve_input(
+                    &resolve_config_path(base, config_path).to_string_lossy(),
                     "Swift Confidential 配置",
                 )?;
             }

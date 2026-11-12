@@ -243,6 +243,9 @@ case "$cmd" in
     sleep "${FAKE_CHECK_SLEEP:-0}"
     echo '{"has_base":true,"modules":[]}'
     ;;
+  check-ios)
+    printf '{\n  "project_path": "/tmp/App.xcodeproj",\n  "checks": [],\n  "schemes": [\n    "Audit"\n  ]\n}\n'
+    ;;
   check-keystore)
     if [ "$MOCIKA_SHIELD_KS_PASS" != "test-secret" ]; then
       echo '{"type":"error","message":"bad keystore password"}'
@@ -526,13 +529,18 @@ fn rejects_ios_config_auxiliary_paths_outside_allowed_root() {
     .unwrap();
 
     let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
-    for config in [entrypoint_config, confidential_config] {
+    let cases = [
+        (entrypoint_config, false, true),
+        (confidential_config, true, false),
+    ];
+    for (config, dry_run, confirm) in cases {
         let result = client.call(
             "shellsmith_protect_ios",
             json!({
                 "ios_config": config.display().to_string(),
                 "output": allowed.path().join("out").display().to_string(),
-                "dry_run": true
+                "dry_run": dry_run,
+                "confirm": confirm
             }),
         );
         assert_eq!(result["isError"], true, "{result}");
@@ -606,6 +614,102 @@ fn rejects_ios_config_project_symlink_escape() {
     );
     assert_eq!(result["isError"], true, "{result}");
     assert!(text(&result).contains("不在允许的目录内"), "{result}");
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_ios_project_internal_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let project = allowed.path().join("Nested.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    let private = outside.path().join("private.pbxproj");
+    fs::write(&private, b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.outside;").unwrap();
+    symlink(&private, project.join("project.pbxproj")).unwrap();
+    let config = allowed.path().join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            project.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    for (tool, arguments) in [
+        (
+            "shellsmith_protect_ios",
+            json!({
+                "ios_config": config.display().to_string(),
+                "output": allowed.path().join("out").display().to_string(),
+                "dry_run": true
+            }),
+        ),
+        (
+            "shellsmith_check_ios",
+            json!({"project": project.display().to_string()}),
+        ),
+    ] {
+        let result = client.call(tool, arguments);
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(text(&result).contains("不在允许的目录内"), "{result}");
+    }
+}
+
+#[test]
+fn compat_skips_unused_confidential_and_entrypoint_paths() {
+    let allowed = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let project = allowed.path().join("App.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+    let config = allowed.path().join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\nentrypoint = \"missing/App.swift\"\n[protection]\nprofile = \"compat\"\n[confidential]\nenabled = true\nconfig = \"missing/secrets.yml\"\n",
+            project.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    let result = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": allowed.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let job_id = result["structuredContent"]["job_id"].as_str().unwrap();
+    let job = client.wait_job(job_id);
+    assert_eq!(job["structuredContent"]["status"], "succeeded", "{job}");
+}
+
+#[test]
+fn check_ios_preserves_complete_pretty_json_report() {
+    let temp = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(temp.path());
+    let project = temp.path().join("App.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+
+    let mut client = McpClient::start(&cli, &[temp.path()], &[]);
+    let result = client.call(
+        "shellsmith_check_ios",
+        json!({"project": project.display().to_string()}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let structured = &result["structuredContent"];
+    assert_eq!(structured["project_path"], "/tmp/App.xcodeproj");
+    assert_eq!(structured["schemes"][0], "Audit");
+    assert!(structured["checks"].as_array().unwrap().is_empty());
 }
 
 #[cfg(unix)]

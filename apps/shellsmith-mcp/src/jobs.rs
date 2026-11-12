@@ -895,6 +895,10 @@ fn notify_progress(server: &Server, job: &Arc<Mutex<Job>>) {
 
 fn parse_json_output(bytes: &[u8]) -> Result<Value> {
     let text = String::from_utf8_lossy(bytes);
+    let trimmed = text.trim();
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+        return Ok(value);
+    }
     for line in text.lines().rev() {
         let line = line.trim();
         if line.is_empty() {
@@ -904,7 +908,7 @@ fn parse_json_output(bytes: &[u8]) -> Result<Value> {
             return Ok(value);
         }
     }
-    Ok(Value::String(text.trim().to_string()))
+    Ok(Value::String(trimmed.to_string()))
 }
 
 fn absolute_path(value: &str) -> Result<PathBuf> {
@@ -920,4 +924,36 @@ pub fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_json_output;
+    use serde_json::Value;
+
+    #[test]
+    fn parses_complete_pretty_json_before_line_fallback() {
+        let text = br#"{
+  "project_path": "/tmp/App.xcodeproj",
+  "schemes": ["Audit", "Other"],
+  "checks": []
+}"#;
+        let value = parse_json_output(text).unwrap();
+        assert_eq!(value["project_path"], "/tmp/App.xcodeproj");
+        assert_eq!(value["schemes"][0], "Audit");
+        assert!(value["checks"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn falls_back_to_last_json_event_line() {
+        let text = b"{\"type\":\"progress\",\"message\":\"working\"}\n{\"type\":\"done\"}\n";
+        let value = parse_json_output(text).unwrap();
+        assert_eq!(value["type"], "done");
+    }
+
+    #[test]
+    fn keeps_plain_text_when_no_json_is_present() {
+        let value = parse_json_output(b"shield 1.10.1\n").unwrap();
+        assert_eq!(value, Value::String("shield 1.10.1".to_string()));
+    }
 }
