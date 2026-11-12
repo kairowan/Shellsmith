@@ -208,7 +208,17 @@ case "$cmd" in
     echo "shield 1.10.1"
     ;;
   check-apk)
-    printf '{"already_protected":false,"is_signed":true,"cert_fingerprint":"%s","error":null}\n' "${FAKE_APK_CERT:-AA:BB:CC}"
+    cert="${FAKE_APK_CERT:-AA:BB:CC}"
+    has_apksigner=0
+    prev=""
+    for arg in "$@"; do
+      [ "$prev" = "--apksigner" ] && has_apksigner=1
+      prev="$arg"
+    done
+    if [ "${FAKE_CUSTOM_APKSIGNER:-0}" = "1" ] && [ "$has_apksigner" = "1" ]; then
+      cert="${FAKE_CUSTOM_APK_CERT:-CC:DD:EE}"
+    fi
+    printf '{"already_protected":false,"is_signed":true,"cert_fingerprint":"%s","error":null}\n' "$cert"
     ;;
   check-aab)
     sleep "${FAKE_CHECK_SLEEP:-0}"
@@ -903,6 +913,62 @@ fn cancels_running_job_and_kills_cli_subprocess() {
 }
 
 #[test]
+fn certificate_precheck_uses_custom_apksigner() {
+    let temp = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(temp.path());
+    let log = temp.path().join("calls.log");
+    let apk = temp.path().join("app.apk");
+    let output = temp.path().join("app-protected.apk");
+    let keystore = temp.path().join("release.jks");
+    let apksigner = temp.path().join("custom-apksigner.jar");
+    fs::write(&apk, b"apk").unwrap();
+    fs::write(&keystore, b"ks").unwrap();
+    fs::write(&apksigner, b"jar").unwrap();
+
+    let mut client = McpClient::start(
+        &cli,
+        &[temp.path()],
+        &[
+            ("TEST_KS_PASS", SECRET),
+            ("TEST_KEY_PASS", SECRET),
+            ("FAKE_SHIELD_LOG", log.to_str().unwrap()),
+            ("FAKE_APK_CERT", "AA:BB:CC"),
+            ("FAKE_KS_CERT", "CC:DD:EE"),
+            ("FAKE_CUSTOM_APKSIGNER", "1"),
+            ("FAKE_CUSTOM_APK_CERT", "CC:DD:EE"),
+        ],
+    );
+
+    let start = client.call(
+        "shellsmith_protect_apk",
+        json!({
+            "input": apk.display().to_string(),
+            "output": output.display().to_string(),
+            "apksigner": apksigner.display().to_string(),
+            "confirm": true,
+            "sign": {
+                "keystore": keystore.display().to_string(),
+                "key_alias": "release",
+                "password_env": "TEST_KS_PASS",
+                "key_password_env": "TEST_KEY_PASS",
+                "apksigner": apksigner.display().to_string()
+            }
+        }),
+    );
+    assert_eq!(start["isError"], false, "{start}");
+    let job_id = start["structuredContent"]["job_id"].as_str().unwrap();
+    let job = client.wait_job(job_id);
+    assert_eq!(job["structuredContent"]["status"], "succeeded", "{job}");
+
+    let logs = fs::read_to_string(&log).unwrap();
+    assert!(
+        logs.lines()
+            .any(|line| { line.starts_with("check-apk ") && line.contains("--apksigner") }),
+        "证书预检没有使用自定义 apksigner: {logs}"
+    );
+}
+
+#[test]
 fn signs_in_place_only_with_explicit_allow_in_place() {
     let temp = tempfile::tempdir().unwrap();
     let cli = write_fake_cli(temp.path());
@@ -960,11 +1026,59 @@ fn signs_in_place_only_with_explicit_allow_in_place() {
         job["structuredContent"]["result"]["output"],
         canonical_apk.display().to_string()
     );
+    assert!(
+        job["structuredContent"]["result"].get("report").is_none(),
+        "普通签名不应返回不存在的保护报告: {job}"
+    );
     let calls = fs::read_to_string(&log).unwrap();
     assert!(
         calls.contains(&format!("-o {}", canonical_apk.display())),
         "原地签名必须把输入路径同时作为输出传给 CLI: {calls}"
     );
+}
+
+#[test]
+fn sign_returns_report_only_when_the_file_exists() {
+    let temp = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(temp.path());
+    let apk = temp.path().join("app.apk");
+    let output = temp.path().join("signed.apk");
+    let keystore = temp.path().join("release.jks");
+    let report = PathBuf::from(format!("{}.protection.json", output.display()));
+    fs::write(&apk, b"apk").unwrap();
+    fs::write(&keystore, b"ks").unwrap();
+    fs::write(&report, b"{}").unwrap();
+
+    let mut client = McpClient::start(&cli, &[temp.path()], &[("TEST_KS_PASS", SECRET)]);
+    let start = client.call(
+        "shellsmith_sign_apk",
+        json!({
+            "input": apk.display().to_string(),
+            "output": output.display().to_string(),
+            "keystore": keystore.display().to_string(),
+            "key_alias": "release",
+            "password_env": "TEST_KS_PASS",
+            "confirm": true
+        }),
+    );
+    assert_eq!(start["isError"], false, "{start}");
+    let job_id = start["structuredContent"]["job_id"].as_str().unwrap();
+    let job = client.wait_job(job_id);
+    assert_eq!(job["structuredContent"]["status"], "succeeded", "{job}");
+    let canonical_report = output
+        .parent()
+        .unwrap()
+        .canonicalize()
+        .unwrap()
+        .join(format!(
+            "{}.protection.json",
+            output.file_name().unwrap().to_string_lossy()
+        ));
+    assert_eq!(
+        job["structuredContent"]["result"]["report"],
+        canonical_report.display().to_string()
+    );
+    assert!(canonical_report.is_file());
 }
 
 #[test]

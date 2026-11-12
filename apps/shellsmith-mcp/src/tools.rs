@@ -58,7 +58,13 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "shellsmith_check_apk",
             "Inspect an APK: protection marker, signature state, certificate fingerprint and native ABIs.",
-            object(json!({"path": string("APK path")}), &["path"]),
+            object(
+                json!({
+                    "path": string("APK path"),
+                    "apksigner": string("Optional apksigner JAR used to verify and read the certificate")
+                }),
+                &["path"],
+            ),
             read_only(),
         ),
         tool(
@@ -585,8 +591,17 @@ fn dispatch(
         "shellsmith_check_apk" => {
             let input: CheckPathInput = parse(args)?;
             let path = server.resolve_input(&input.path, "APK")?;
-            let value =
-                server.run_sync(&["check-apk".to_string(), path.display().to_string()], &[])?;
+            let mut cli_args = vec!["check-apk".to_string(), path.display().to_string()];
+            if let Some(apksigner) = input.apksigner.as_deref() {
+                cli_args.push("--apksigner".into());
+                cli_args.push(
+                    server
+                        .resolve_input(apksigner, "apksigner")?
+                        .display()
+                        .to_string(),
+                );
+            }
+            let value = server.run_sync(&cli_args, &[])?;
             Ok(ToolResult::ok(value))
         }
         "shellsmith_check_aab" => check_aab(server, args),
@@ -619,6 +634,7 @@ fn dispatch(
 #[derive(Debug, Deserialize)]
 struct CheckPathInput {
     path: String,
+    apksigner: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 struct CheckIosInput {
@@ -757,6 +773,7 @@ fn protect_apk(
             &source,
             sign,
             input.runtime_cert_sha256.as_deref(),
+            sign.apksigner.as_deref().or(input.apksigner.as_deref()),
         )?)
     } else {
         input.runtime_cert_sha256.clone()
@@ -901,15 +918,17 @@ fn protect_apk(
             label: "签名 APK".into(),
         });
     }
+    let expected_report = report_path(&final_output);
     let job_id = server.start_job(
         "shellsmith_protect_apk",
         JobPlan {
             commands,
             result: json!({
                 "output": final_output,
-                "report": report_path(&final_output),
+                "report": expected_report.clone(),
                 "signed": sign_output.is_some()
             }),
+            report: Some(expected_report.into()),
             keep,
         },
         progress_token,
@@ -1100,6 +1119,7 @@ fn protect_aab(
         input.key_password_env.as_deref(),
     )?;
     env.extend(stage_env);
+    let expected_report = report_path(&output);
     let job_id = server.start_job(
         "shellsmith_protect_aab",
         JobPlan {
@@ -1108,7 +1128,8 @@ fn protect_aab(
                 env,
                 label: "加固 AAB".into(),
             }],
-            result: json!({"output": output, "report": report_path(&output)}),
+            result: json!({"output": output, "report": expected_report.clone()}),
+            report: Some(expected_report.into()),
             keep,
         },
         progress_token,
@@ -1222,6 +1243,7 @@ fn protect_xop(
                 label: "XOP 单壳加固".into(),
             }],
             result: json!({"output": output}),
+            report: None,
             keep,
         },
         progress_token,
@@ -1289,6 +1311,7 @@ fn protect_ios(
                 label: "iOS 保护".into(),
             }],
             result: json!({"output": output}),
+            report: None,
             keep: Vec::new(),
         },
         progress_token,
@@ -1342,6 +1365,7 @@ fn sign_apk(
     )?;
     let mut env = sign_env(&input)?;
     env.extend(stage_env);
+    let expected_report = report_path(&final_output);
     let job_id = server.start_job(
         "shellsmith_sign_apk",
         JobPlan {
@@ -1350,7 +1374,8 @@ fn sign_apk(
                 env,
                 label: "签名 APK".into(),
             }],
-            result: json!({"output": final_output, "report": report_path(&final_output)}),
+            result: json!({"output": final_output, "report": expected_report.clone()}),
+            report: Some(expected_report.into()),
             keep,
         },
         progress_token,
@@ -1385,6 +1410,7 @@ fn install_apks(
                 label: "安装 APKS".into(),
             }],
             result: json!({"apks": apks}),
+            report: None,
             keep: Vec::new(),
         },
         progress_token,
@@ -1469,6 +1495,7 @@ fn ensure_sign_certificate_binding(
     input_apk: &Path,
     sign: &SignInput,
     requested: Option<&str>,
+    apksigner: Option<&str>,
 ) -> Result<String> {
     let keystore = resolve_sign_keystore(server, sign)?;
     let alias = sign.key_alias.as_deref().context("签名缺少 key_alias")?;
@@ -1485,10 +1512,17 @@ fn ensure_sign_certificate_binding(
     )?;
     let sign_cert = cert_fingerprint(&keystore_info).context("无法从 keystore 读取签名证书指纹")?;
 
-    let apk_info = server.run_sync(
-        &["check-apk".to_string(), input_apk.display().to_string()],
-        &[],
-    )?;
+    let mut apk_args = vec!["check-apk".to_string(), input_apk.display().to_string()];
+    if let Some(apksigner) = apksigner {
+        apk_args.push("--apksigner".into());
+        apk_args.push(
+            server
+                .resolve_input(apksigner, "apksigner")?
+                .display()
+                .to_string(),
+        );
+    }
+    let apk_info = server.run_sync(&apk_args, &[])?;
     let input_cert = cert_fingerprint(&apk_info);
 
     if let Some(requested) = requested {

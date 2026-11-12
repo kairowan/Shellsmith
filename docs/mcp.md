@@ -104,7 +104,7 @@ exec /opt/Shellsmith/bin/shellsmith-mcp --allow-root "$HOME/projects"
 | 工具 | 类型 | 说明 |
 |---|---|---|
 | `shellsmith_version` | 同步 | 返回 CLI 版本与 MCP 版本 |
-| `shellsmith_check_apk` | 同步 | 检查 APK 是否已加固、签名状态、证书指纹和 ABI |
+| `shellsmith_check_apk` | 同步 | 检查 APK 是否已加固、签名状态、证书指纹和 ABI；可传自定义 `apksigner` |
 | `shellsmith_check_aab` | 同步 | 检查 AAB 模块；可用 bundletool 校验并生成 APKS |
 | `shellsmith_check_ios` | 同步 | 检查 Xcode 工程、scheme 与签名配置，不修改工程 |
 | `shellsmith_check_keystore` | 同步 | 读取 keystore alias 的 SHA-256 证书指纹 |
@@ -183,7 +183,7 @@ exec /opt/Shellsmith/bin/shellsmith-mcp --allow-root "$HOME/projects"
 {"name": "shellsmith_job_status", "arguments": {"job_id": "job-1760000000000-1"}}
 ```
 
-任务结束后 `structuredContent.result` 包含输出路径和报告路径：
+任务结束后 `structuredContent.result` 包含输出路径，以及实际存在的报告路径：
 
 ```json
 {
@@ -192,6 +192,8 @@ exec /opt/Shellsmith/bin/shellsmith-mcp --allow-root "$HOME/projects"
   "signed": true
 }
 ```
+
+普通签名不会生成保护报告；如果产物旁没有 `*.protection.json`，结果会省略 `report` 字段，而不是返回不存在的路径。
 
 如果客户端在 `tools/call` 的 `_meta.progressToken` 中提供 token，服务会发送 `notifications/progress`。
 

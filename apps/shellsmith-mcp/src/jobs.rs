@@ -102,6 +102,8 @@ pub struct CommandPlan {
 pub struct JobPlan {
     pub commands: Vec<CommandPlan>,
     pub result: Value,
+    /// 期望生成的保护报告；任务成功时若文件不存在，从结果中省略。
+    pub report: Option<PathBuf>,
     /// 自动签名等流程的临时目录，必须活到任务结束。
     pub keep: Vec<TempDir>,
 }
@@ -664,9 +666,20 @@ fn run_job(server: Arc<Server>, job: Arc<Mutex<Job>>, plan: JobPlan, done: Arc<A
         &job,
         JobStatus::Succeeded,
         "任务完成".to_string(),
-        Some(plan.result),
+        Some(filter_job_result(plan.result, plan.report.as_deref())),
         None,
     );
+}
+
+fn filter_job_result(mut result: Value, report: Option<&Path>) -> Value {
+    if let Some(report) = report {
+        if !report.is_file() {
+            if let Some(object) = result.as_object_mut() {
+                object.remove("report");
+            }
+        }
+    }
+    result
 }
 
 struct DoneGuard(Arc<AtomicBool>);

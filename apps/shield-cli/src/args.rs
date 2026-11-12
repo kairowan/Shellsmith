@@ -67,6 +67,9 @@ pub(crate) enum Commands {
     Sign(SignArgs),
     CheckApk {
         path: PathBuf,
+        /// 可选 apksigner JAR；用于验证签名和读取证书。
+        #[arg(long, value_name = "JAR")]
+        apksigner: Option<PathBuf>,
     },
     CheckAab {
         path: PathBuf,

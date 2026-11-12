@@ -112,6 +112,17 @@ fn sign_apk_with_java(
         None
     };
 
+    let final_report = crate::protection_report::report_path(&final_output);
+    let final_idsig = idsig_path(&final_output);
+    // 在调用 apksigner 前创建恢复目录：即使输出目录随后被改为只读，
+    // 已创建的恢复目录仍可写入；它位于输出目录而不是 MCP 任务暂存根目录，
+    // 因此回滚失败时不会被父进程清理。
+    let recovery = if final_report.exists() || final_idsig.exists() {
+        Some(create_recovery_dir(&output_parent)?)
+    } else {
+        None
+    };
+
     let apksigner = match &opts.apksigner_path {
         Some(p) if p.exists() => p.clone(),
         Some(p) => anyhow::bail!("配置的 apksigner.jar 路径不存在: {}", p.display()),
@@ -233,8 +244,6 @@ fn sign_apk_with_java(
     };
 
     on_progress(SigningProgressStep::Commit).map_err(anyhow::Error::msg)?;
-    let final_report = crate::protection_report::report_path(&final_output);
-    let final_idsig = idsig_path(&final_output);
     let staged_idsig = opts.signing_versions.v4.then_some(staged_idsig);
     commit_signed_outputs(
         &output_parent,
@@ -244,6 +253,7 @@ fn sign_apk_with_java(
         &final_output,
         &final_report,
         &final_idsig,
+        recovery,
     )?;
     drop(staging_dir);
 
@@ -417,6 +427,14 @@ fn recovery_failure(
     )
 }
 
+fn create_recovery_dir(parent: &Path) -> Result<TempDir> {
+    tempfile::Builder::new()
+        .prefix("shield-recovery-")
+        .tempdir_in(parent)
+        .context("创建签名恢复目录失败")
+}
+
+#[allow(clippy::too_many_arguments)]
 fn commit_signed_outputs(
     parent: &Path,
     staged_apk: NamedTempFile,
@@ -425,12 +443,14 @@ fn commit_signed_outputs(
     final_output: &Path,
     final_report: &Path,
     final_idsig: &Path,
+    recovery: Option<TempDir>,
 ) -> Result<()> {
-    let parent = staging_parent(parent);
-    let recovery = tempfile::Builder::new()
-        .prefix("shield-recovery-")
-        .tempdir_in(&parent)
-        .context("创建签名恢复目录失败")?;
+    // 恢复副本必须位于输出目录，而不是 MCP 可回收的任务暂存根目录；
+    // 否则回滚失败时 CLI 虽然 keep 了副本，父进程清理后仍会把它删掉。
+    let recovery = match recovery {
+        Some(recovery) => recovery,
+        None => create_recovery_dir(parent)?,
+    };
     let report_backup = backup_attachment(final_report, recovery.path(), "report.json")?;
     let idsig_backup = backup_attachment(final_idsig, recovery.path(), "idsig")?;
 
@@ -866,6 +886,19 @@ mod tests {
     }
 
     #[test]
+    fn 恢复目录固定在输出目录() {
+        let dir = tempfile::tempdir().unwrap();
+        let recovery = create_recovery_dir(dir.path()).unwrap();
+        assert!(recovery.path().starts_with(dir.path()));
+        assert!(recovery
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("shield-recovery-"));
+    }
+
+    #[test]
     fn 提交成功时同时替换_apk_报告和_v4_附件() {
         let dir = tempfile::tempdir().unwrap();
         let final_apk = temp_file(dir.path(), "app.APK", b"old-apk");
@@ -885,6 +918,7 @@ mod tests {
             &final_apk,
             &final_report,
             &final_idsig,
+            None,
         )
         .unwrap();
 
@@ -910,6 +944,7 @@ mod tests {
             &final_apk,
             &final_report,
             &final_idsig,
+            None,
         )
         .unwrap();
 
@@ -939,6 +974,7 @@ mod tests {
             &final_apk,
             &final_report,
             &final_idsig,
+            None,
         )
         .unwrap_err();
 
