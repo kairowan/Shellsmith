@@ -287,7 +287,7 @@ MCP 通过 stdio 暴露全部 CLI 能力；密码只从启动环境读取，不�
 ## 要求
 
 - Windows 10/11 (64-bit)
-- Java 8+（需完整 JDK，`java` / `keytool` 须在 PATH 中）
+- Java 8+（需完整 JDK，``java`` / ``keytool`` 须在 PATH 中）
 
 ## 目录结构
 

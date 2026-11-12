@@ -186,17 +186,17 @@ RUNEOF
   chmod +x "$CLI_PKG_DIR/shield.sh"
 
   # README
-  cat > "$CLI_PKG_DIR/README.md" << READMEEOF
-# Shellsmith CLI v${VERSION}
+  cat > "$CLI_PKG_DIR/README.md" << 'READMEEOF'
+# Shellsmith CLI v@VERSION@
 
 Linux x86_64 静态链接版本，无需安装依赖。
 
 ## 使用方法
 
-\`\`\`bash
+```bash
 ./bin/shield protect -i input.apk -o protected.apk
-./bin/shellsmith-mcp --allow-root "\$PWD"
-\`\`\`
+./bin/shellsmith-mcp --allow-root "$PWD"
+```
 
 MCP 通过 stdio 暴露全部 CLI 能力；密码只从启动环境读取，不写入工具参数。
 
@@ -207,8 +207,8 @@ MCP 通过 stdio 暴露全部 CLI 能力；密码只从启动环境读取，不�
 
 ## 目录结构
 
-\`\`\`
-Shellsmith-cli-${VERSION}-linux-x86_64/
+```
+Shellsmith-cli-@VERSION@-linux-x86_64/
 ├── bin/shield          # 可执行文件（静态链接）
 ├── bin/shellsmith-mcp  # MCP stdio 服务（静态链接）
 ├── lib/
@@ -220,8 +220,10 @@ Shellsmith-cli-${VERSION}-linux-x86_64/
 │   └── resources-api19.zip   # Android 4.4 ARMv7 兼容运行时
 ├── licenses/                 # XopProtector 许可证与声明
 └── README.md
-\`\`\`
+```
 READMEEOF
+  sed "s/@VERSION@/${VERSION}/g" "$CLI_PKG_DIR/README.md" > "$CLI_PKG_DIR/README.md.tmp"
+  mv "$CLI_PKG_DIR/README.md.tmp" "$CLI_PKG_DIR/README.md"
 
   # 打包
   cd "$DIST_DIR/cli"

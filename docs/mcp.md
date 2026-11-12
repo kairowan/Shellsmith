@@ -95,6 +95,7 @@ exec /opt/Shellsmith/bin/shellsmith-mcp --allow-root "$HOME/projects"
 | `SHELLSMITH_BYOS_API_KEY` | BYOS 构建端 API key |
 | `SHELLSMITH_MCP_CLI` | 默认 `shield` 路径 |
 | `SHELLSMITH_MCP_ALLOWED_ROOTS` | 默认允许目录列表 |
+| `SHELLSMITH_MCP_SYNC_TIMEOUT_SECS` | 同步检查超时秒数，默认 600；超时会终止 CLI |
 
 ## 工具清单
 
@@ -161,6 +162,11 @@ exec /opt/Shellsmith/bin/shellsmith-mcp --allow-root "$HOME/projects"
   }
 }
 ```
+
+自动签名开始前会读取输入 APK 与 keystore 的证书指纹：
+
+- 未设置 `runtime_cert_sha256` 时，两者必须一致，否则直接拒绝；
+- 如确实要把运行时绑定到新证书，设置 `runtime_cert_sha256` 为最终签名证书指纹显式授权；它与 keystore 证书不一致时仍会拒绝。
 
 返回：
 

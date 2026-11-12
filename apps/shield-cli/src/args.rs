@@ -140,7 +140,7 @@ impl Commands {
 pub(crate) struct ProtectIosArgs {
     /// Shellsmith iOS TOML 配置。
     #[arg(long = "ios-config", value_name = "TOML")]
-    pub config: PathBuf,
+    pub ios_config: PathBuf,
     /// 独立输出目录；必须不存在或为空，不能位于源码目录内。
     #[arg(short, long, value_name = "DIR")]
     pub output: PathBuf,
@@ -512,6 +512,54 @@ impl RuntimeUiArgs {
             obfuscate_resource_names: Some(v.obfuscate_resource_names),
             resource_name_keep: Some(v.resource_name_keep),
             ui_packer,
+        }
+    }
+}
+
+#[cfg(test)]
+mod ios_config_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn ios_config_does_not_collide_with_global_config() {
+        let parsed = Cli::try_parse_from([
+            "shield",
+            "protect-ios",
+            "--ios-config",
+            "ios.toml",
+            "--output",
+            "out",
+        ])
+        .expect("合法的 iOS 参数应能解析");
+        assert!(parsed.config.is_none());
+        match parsed.command {
+            Commands::ProtectIos(args) => {
+                assert_eq!(args.ios_config, PathBuf::from("ios.toml"));
+            }
+            _ => panic!("错误命令"),
+        }
+    }
+
+    #[test]
+    fn global_and_ios_config_are_independent() {
+        let parsed = Cli::try_parse_from([
+            "shield",
+            "--config",
+            "cli.toml",
+            "protect-ios",
+            "--ios-config",
+            "ios.toml",
+            "--output",
+            "out",
+        ])
+        .expect("全局配置与 iOS 配置应能同时解析");
+        assert_eq!(parsed.config.as_deref(), Some(Path::new("cli.toml")));
+        match parsed.command {
+            Commands::ProtectIos(args) => {
+                assert_eq!(args.ios_config, PathBuf::from("ios.toml"));
+            }
+            _ => panic!("错误命令"),
         }
     }
 }
