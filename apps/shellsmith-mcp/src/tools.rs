@@ -393,7 +393,7 @@ struct RuntimeUiInput {
     ui_packer: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default)]
 struct SignInput {
     input: Option<String>,
     output: Option<String>,
@@ -899,7 +899,10 @@ fn protect_apk(
         env: env.clone(),
         label: "加固 APK".into(),
     }];
-    if let Some(sign) = input.sign {
+    if let Some(mut sign) = input.sign {
+        if sign.apksigner.is_none() {
+            sign.apksigner = input.apksigner.clone();
+        }
         let sign_args = sign_command_args(
             server,
             &sign,
@@ -1263,6 +1266,7 @@ fn protect_ios(
         require_confirm(input.confirm)?;
     }
     let config = server.resolve_input(&input.ios_config, "iOS 配置")?;
+    validate_ios_config_paths(server, &config)?;
     let output = server.resolve_output(&input.output, "iOS 输出目录")?;
     let mut cli_args = vec![
         "protect-ios".to_string(),
@@ -1697,6 +1701,71 @@ fn push_path_opt(
     let path = server.resolve_input(value, label)?;
     args.push(flag.to_string());
     args.push(path.display().to_string());
+    Ok(())
+}
+
+fn resolve_config_path(base: &Path, value: &str) -> PathBuf {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        base.join(path)
+    }
+}
+
+fn ensure_config_path_allowed(server: &Arc<Server>, path: &Path, label: &str) -> Result<()> {
+    if path.exists() {
+        server.resolve_input(&path.to_string_lossy(), label)?;
+    } else {
+        server.resolve_output(&path.to_string_lossy(), label)?;
+    }
+    Ok(())
+}
+
+/// iOS 配置中的工程、entrypoint 和 Swift Confidential 路径也必须受允许目录约束。
+fn validate_ios_config_paths(server: &Arc<Server>, config: &Path) -> Result<()> {
+    let content = fs::read_to_string(config)
+        .with_context(|| format!("读取 iOS 配置失败：{}", config.display()))?;
+    let value: toml::Value = toml::from_str(&content).context("解析 iOS 配置失败")?;
+    let base = config.parent().unwrap_or(Path::new("."));
+
+    let project = value
+        .get("project")
+        .and_then(|project| project.get("path"))
+        .and_then(toml::Value::as_str)
+        .context("iOS 配置缺少 project.path")?;
+    let project_path = resolve_config_path(base, project);
+    server.resolve_input(&project_path.to_string_lossy(), "iOS 工程")?;
+
+    if let Some(entrypoint) = value
+        .get("project")
+        .and_then(|project| project.get("entrypoint"))
+        .and_then(toml::Value::as_str)
+    {
+        let project_root = project_path.parent().unwrap_or(base);
+        ensure_config_path_allowed(
+            server,
+            &resolve_config_path(project_root, entrypoint),
+            "iOS entrypoint",
+        )?;
+    }
+
+    if let Some(confidential) = value.get("confidential") {
+        let enabled = confidential
+            .get("enabled")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(true);
+        if enabled {
+            if let Some(config_path) = confidential.get("config").and_then(toml::Value::as_str) {
+                ensure_config_path_allowed(
+                    server,
+                    &resolve_config_path(base, config_path),
+                    "Swift Confidential 配置",
+                )?;
+            }
+        }
+    }
+
     Ok(())
 }
 
