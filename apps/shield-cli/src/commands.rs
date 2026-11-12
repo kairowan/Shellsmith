@@ -131,7 +131,7 @@ pub(crate) fn run_check_ios(project: PathBuf, scheme: Option<&str>) -> Result<St
 }
 
 pub(crate) fn run_protect_ios(args: ProtectIosArgs) -> Result<()> {
-    let config = shield_ios::ShellsmithIosConfig::load(&args.config)?;
+    let config = shield_ios::ShellsmithIosConfig::load(&args.ios_config)?;
     let cancel = Arc::new(AtomicBool::new(false));
     let json = args.json;
     let report = shield_ios::protect_ios_project(
@@ -546,12 +546,12 @@ pub fn run_protect_aab_with_control(
     let staged_aab = tempfile::Builder::new()
         .prefix("shield-aab-")
         .suffix(".aab")
-        .tempfile_in(
+        .tempfile_in(shield_core::utils::staging_parent(
             args.output
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
                 .unwrap_or(std::path::Path::new(".")),
-        )?;
+        ))?;
     sign_aab_with_jarsigner(
         &unsigned_aab,
         staged_aab.path(),

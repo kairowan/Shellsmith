@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -751,16 +751,30 @@ fn protect_apk(
             anyhow::bail!("原地加固必须同时提供 sign 配置：先加固到临时文件，再签名覆盖原文件");
         }
     }
+    let runtime_cert_sha256 = if let Some(sign) = input.sign.as_ref() {
+        Some(ensure_sign_certificate_binding(
+            server,
+            &source,
+            sign,
+            input.runtime_cert_sha256.as_deref(),
+        )?)
+    } else {
+        input.runtime_cert_sha256.clone()
+    };
     let parent = final_output.parent().unwrap_or(Path::new("."));
     let mut keep = Vec::new();
+    let stage = tempfile::Builder::new()
+        .prefix("shellsmith-mcp-stage-")
+        .tempdir_in(parent)
+        .context("创建 MCP 任务暂存目录失败")?;
+    let stage_root = stage.path().to_path_buf();
+    keep.push(stage);
+    let stage_env = vec![(
+        "SHELLSMITH_STAGE_ROOT".to_string(),
+        stage_root.display().to_string(),
+    )];
     let (protect_output, sign_output) = if input.sign.is_some() {
-        let temp = tempfile::Builder::new()
-            .prefix("shellsmith-mcp-")
-            .tempdir_in(parent)
-            .context("创建 MCP 自动签名临时目录失败")?;
-        let unsigned = temp.path().join("unsigned.apk");
-        keep.push(temp);
-        (unsigned, Some(final_output.clone()))
+        (stage_root.join("unsigned.apk"), Some(final_output.clone()))
     } else {
         (final_output.clone(), None)
     };
@@ -787,7 +801,7 @@ fn protect_apk(
     push_opt(
         &mut protect_args,
         "--runtime-cert-sha256",
-        input.runtime_cert_sha256.as_deref(),
+        runtime_cert_sha256.as_deref(),
     );
     push_path_opt(
         server,
@@ -844,7 +858,7 @@ fn protect_apk(
         protect_args.push(input.exclude_abis.join(","));
     }
     push_runtime_ui(server, &mut protect_args, input.runtime_ui.as_ref())?;
-    let mut env = Vec::new();
+    let mut env = stage_env.clone();
     if let Some(endpoint) = input.byos_endpoint.as_deref() {
         protect_args.push("--byos-endpoint".into());
         protect_args.push(endpoint.to_string());
@@ -879,7 +893,8 @@ fn protect_apk(
                 .as_deref(),
             input.allow_in_place,
         )?;
-        let sign_env = sign_env(&sign)?;
+        let mut sign_env = sign_env(&sign)?;
+        sign_env.extend(stage_env);
         commands.push(CommandPlan {
             args: sign_args,
             env: sign_env,
@@ -898,7 +913,7 @@ fn protect_apk(
             keep,
         },
         progress_token,
-    );
+    )?;
     Ok(ToolResult::ok(
         json!({"job_id": job_id, "status": "running"}),
     ))
@@ -919,6 +934,16 @@ fn protect_aab(
     if source == output {
         anyhow::bail!("AAB 输出不能等于输入");
     }
+    let mut keep = Vec::new();
+    let stage = tempfile::Builder::new()
+        .prefix("shellsmith-mcp-stage-")
+        .tempdir_in(output.parent().unwrap_or(Path::new(".")))
+        .context("创建 MCP 任务暂存目录失败")?;
+    let stage_env = vec![(
+        "SHELLSMITH_STAGE_ROOT".to_string(),
+        stage.path().display().to_string(),
+    )];
+    keep.push(stage);
     let mut cli_args = vec![
         "protect-aab".to_string(),
         "-i".into(),
@@ -1070,10 +1095,11 @@ fn protect_aab(
         input.smoke_package.as_deref(),
     );
     push_runtime_ui(server, &mut cli_args, input.runtime_ui.as_ref())?;
-    let env = password_envs(
+    let mut env = password_envs(
         input.password_env.as_deref(),
         input.key_password_env.as_deref(),
     )?;
+    env.extend(stage_env);
     let job_id = server.start_job(
         "shellsmith_protect_aab",
         JobPlan {
@@ -1083,10 +1109,10 @@ fn protect_aab(
                 label: "加固 AAB".into(),
             }],
             result: json!({"output": output, "report": report_path(&output)}),
-            keep: Vec::new(),
+            keep,
         },
         progress_token,
-    );
+    )?;
     Ok(ToolResult::ok(
         json!({"job_id": job_id, "status": "running"}),
     ))
@@ -1106,6 +1132,16 @@ fn protect_xop(
     if source == output {
         anyhow::bail!("输出不能等于输入；XOP 加固不支持原地覆盖");
     }
+    let mut keep = Vec::new();
+    let stage = tempfile::Builder::new()
+        .prefix("shellsmith-mcp-stage-")
+        .tempdir_in(output.parent().unwrap_or(Path::new(".")))
+        .context("创建 MCP 任务暂存目录失败")?;
+    let stage_env = vec![(
+        "SHELLSMITH_STAGE_ROOT".to_string(),
+        stage.path().display().to_string(),
+    )];
+    keep.push(stage);
     let mut cli_args = vec![
         "protect-xop".to_string(),
         "-i".into(),
@@ -1162,7 +1198,7 @@ fn protect_xop(
         cli_args.push("--rasp-action".into());
         cli_args.push(action.to_string());
     }
-    let env = if input.keystore.is_some() {
+    let mut env = if input.keystore.is_some() {
         if input.key_alias.as_deref().unwrap_or_default().is_empty() {
             anyhow::bail!("提供 keystore 时必须提供 key_alias");
         }
@@ -1176,6 +1212,7 @@ fn protect_xop(
         }
         Vec::new()
     };
+    env.extend(stage_env);
     let job_id = server.start_job(
         "shellsmith_protect_xop",
         JobPlan {
@@ -1185,10 +1222,10 @@ fn protect_xop(
                 label: "XOP 单壳加固".into(),
             }],
             result: json!({"output": output}),
-            keep: Vec::new(),
+            keep,
         },
         progress_token,
-    );
+    )?;
     Ok(ToolResult::ok(
         json!({"job_id": job_id, "status": "running"}),
     ))
@@ -1255,7 +1292,7 @@ fn protect_ios(
             keep: Vec::new(),
         },
         progress_token,
-    );
+    )?;
     Ok(ToolResult::ok(
         json!({"job_id": job_id, "status": "running"}),
     ))
@@ -1286,6 +1323,16 @@ fn sign_apk(
     }
     let final_output = output.clone().unwrap_or_else(|| source.clone());
     let final_output_string = final_output.display().to_string();
+    let mut keep = Vec::new();
+    let stage = tempfile::Builder::new()
+        .prefix("shellsmith-mcp-stage-")
+        .tempdir_in(final_output.parent().unwrap_or(Path::new(".")))
+        .context("创建 MCP 任务暂存目录失败")?;
+    let stage_env = vec![(
+        "SHELLSMITH_STAGE_ROOT".to_string(),
+        stage.path().display().to_string(),
+    )];
+    keep.push(stage);
     let cli_args = sign_command_args(
         server,
         &input,
@@ -1293,7 +1340,8 @@ fn sign_apk(
         Some(&final_output_string),
         input.allow_in_place.unwrap_or(false),
     )?;
-    let env = sign_env(&input)?;
+    let mut env = sign_env(&input)?;
+    env.extend(stage_env);
     let job_id = server.start_job(
         "shellsmith_sign_apk",
         JobPlan {
@@ -1303,10 +1351,10 @@ fn sign_apk(
                 label: "签名 APK".into(),
             }],
             result: json!({"output": final_output, "report": report_path(&final_output)}),
-            keep: Vec::new(),
+            keep,
         },
         progress_token,
-    );
+    )?;
     Ok(ToolResult::ok(
         json!({"job_id": job_id, "status": "running"}),
     ))
@@ -1340,7 +1388,7 @@ fn install_apks(
             keep: Vec::new(),
         },
         progress_token,
-    );
+    )?;
     Ok(ToolResult::ok(
         json!({"job_id": job_id, "status": "running"}),
     ))
@@ -1395,6 +1443,74 @@ fn job_cancel(server: &Arc<Server>, args: Value) -> Result<ToolResult> {
     Ok(ToolResult::ok(serde_json::to_value(job)?))
 }
 
+fn normalize_fingerprint(value: &str) -> String {
+    value.trim().to_uppercase().replace([':', ' ', '-'], "")
+}
+
+fn cert_fingerprint(value: &Value) -> Option<String> {
+    value
+        .get("cert_fingerprint")
+        .and_then(Value::as_str)
+        .map(normalize_fingerprint)
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_sign_keystore(server: &Arc<Server>, input: &SignInput) -> Result<PathBuf> {
+    let keystore = input.keystore.as_deref().context("签名缺少 keystore")?;
+    server.resolve_input(keystore, "keystore")
+}
+
+/// 校验运行时绑定证书与最终签名证书一致。
+///
+/// - 未显式提供 `runtime_cert_sha256` 时，CLI 会默认绑定输入 APK 证书；因此输入证书必须等于最终签名证书。
+/// - 显式提供时，绑定证书必须等于最终签名证书；这允许用户有意把运行时绑定到新证书。
+fn ensure_sign_certificate_binding(
+    server: &Arc<Server>,
+    input_apk: &Path,
+    sign: &SignInput,
+    requested: Option<&str>,
+) -> Result<String> {
+    let keystore = resolve_sign_keystore(server, sign)?;
+    let alias = sign.key_alias.as_deref().context("签名缺少 key_alias")?;
+    let env = sign_env(sign)?;
+    let keystore_info = server.run_sync(
+        &[
+            "check-keystore".to_string(),
+            "--ks".into(),
+            keystore.display().to_string(),
+            "--alias".into(),
+            alias.to_string(),
+        ],
+        &env,
+    )?;
+    let sign_cert = cert_fingerprint(&keystore_info).context("无法从 keystore 读取签名证书指纹")?;
+
+    let apk_info = server.run_sync(
+        &["check-apk".to_string(), input_apk.display().to_string()],
+        &[],
+    )?;
+    let input_cert = cert_fingerprint(&apk_info);
+
+    if let Some(requested) = requested {
+        let requested = normalize_fingerprint(requested);
+        if requested != sign_cert {
+            anyhow::bail!(
+                "runtime_cert_sha256 与最终签名证书不一致：绑定 {requested}，最终签名 {sign_cert}"
+            );
+        }
+    } else if input_cert.as_deref() != Some(sign_cert.as_str()) {
+        if input_cert.is_none() {
+            anyhow::bail!(
+                "输入 APK 未签名或无法读取证书；请显式设置 runtime_cert_sha256={sign_cert} 以绑定最终签名证书"
+            );
+        }
+        anyhow::bail!(
+            "输入 APK 证书与最终签名证书不一致；请使用同一证书，或显式设置 runtime_cert_sha256={sign_cert} 确认重绑定"
+        );
+    }
+    Ok(sign_cert)
+}
+
 fn sign_command_args(
     server: &Arc<Server>,
     input: &SignInput,
@@ -1402,8 +1518,7 @@ fn sign_command_args(
     output_path: Option<&str>,
     allow_in_place: bool,
 ) -> Result<Vec<String>> {
-    let keystore = input.keystore.as_deref().context("签名缺少 keystore")?;
-    let keystore = server.resolve_input(keystore, "keystore")?;
+    let keystore = resolve_sign_keystore(server, input)?;
     if output_path.is_none() && !allow_in_place {
         anyhow::bail!("签名需要 output");
     }

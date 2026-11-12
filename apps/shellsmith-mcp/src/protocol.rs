@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::sync::Arc;
+use std::thread;
 
 const LATEST_PROTOCOL_VERSION: &str = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
@@ -24,7 +25,13 @@ pub fn serve(server: Arc<Server>) -> Result<()> {
     let mut line = String::new();
     loop {
         line.clear();
-        let read = reader.read_line(&mut line)?;
+        let read = match reader.read_line(&mut line) {
+            Ok(read) => read,
+            Err(error) => {
+                server.shutdown();
+                return Err(error.into());
+            }
+        };
         if read == 0 {
             break;
         }
@@ -51,6 +58,7 @@ pub fn serve(server: Arc<Server>) -> Result<()> {
             handle_message(&server, &message);
         }
     }
+    server.shutdown();
     Ok(())
 }
 
@@ -114,10 +122,25 @@ fn handle_message(server: &Arc<Server>, message: &Value) {
                 .get("_meta")
                 .and_then(|meta| meta.get("progressToken"))
                 .cloned();
-            let result = tools::call(server, name, arguments, progress_token);
-            serde_json::to_value(result).map_err(|error| anyhow::anyhow!(error.to_string()))
+            let server = Arc::clone(server);
+            let name = name.to_string();
+            thread::spawn(move || {
+                let result = tools::call(&server, &name, arguments, progress_token);
+                match serde_json::to_value(result) {
+                    Ok(value) => server.write_json(&success_response(id, value)),
+                    Err(error) => server.write_json(&error_response(
+                        id,
+                        -32603,
+                        format!("序列化工具结果失败: {error}"),
+                    )),
+                }
+            });
+            return;
         }
-        "shutdown" => Ok(Value::Null),
+        "shutdown" => {
+            server.shutdown();
+            Ok(Value::Null)
+        }
         _ => Err(anyhow::anyhow!("未支持的方法: {method}")),
     };
 
@@ -140,6 +163,7 @@ fn handle_notification(server: &Arc<Server>, method: &str, _params: Value) {
         | "notifications/cancelled"
         | "notifications/roots/list_changed" => {}
         "exit" => {
+            server.shutdown();
             let _ = std::io::stdout().flush();
             std::process::exit(0);
         }

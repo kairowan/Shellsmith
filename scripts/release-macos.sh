@@ -323,10 +323,10 @@ macOS 版本。
 
 ## 使用方法
 
-\`\`\`bash
+```bash
 ./bin/shield protect -i input.apk -o protected.apk
-./bin/shellsmith-mcp --allow-root "\$PWD"
-\`\`\`
+./bin/shellsmith-mcp --allow-root "$PWD"
+```
 
 MCP 通过 stdio 暴露全部 CLI 能力；密码只从启动环境读取，不写入工具参数。
 
@@ -337,8 +337,8 @@ MCP 通过 stdio 暴露全部 CLI 能力；密码只从启动环境读取，不�
 
 ## 目录结构
 
-\`\`\`
-Shellsmith-cli-${VERSION}-macos-${ARCH_LABEL}/
+```
+Shellsmith-cli-@VERSION@-macos-@ARCH_LABEL@/
 ├── bin/shield          # 可执行文件
 ├── bin/shellsmith-mcp  # MCP stdio 服务
 ├── lib/
@@ -351,8 +351,11 @@ Shellsmith-cli-${VERSION}-macos-${ARCH_LABEL}/
 ├── licenses/                 # XopProtector 许可证与声明
 ├── shield.sh           # 快捷启动脚本
 └── README.md
-\`\`\`
+```
 READMEEOF
+  sed -e "s/@VERSION@/${VERSION}/g" -e "s/@ARCH_LABEL@/${ARCH_LABEL}/g" \
+    "$CLI_PKG_DIR/README.md" > "$CLI_PKG_DIR/README.md.tmp"
+  mv "$CLI_PKG_DIR/README.md.tmp" "$CLI_PKG_DIR/README.md"
 
   cd "$DIST_DIR/cli"
   tar -czf "Shellsmith-cli-${VERSION}-macos-${ARCH_LABEL}.tar.gz" \

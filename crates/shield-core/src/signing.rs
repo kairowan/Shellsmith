@@ -5,7 +5,7 @@ use std::process::Stdio;
 use tempfile::{NamedTempFile, TempDir};
 
 use crate::diagnostic::{Diagnostic, FailureCode, ToolName};
-use crate::utils::{find_java, no_window_command};
+use crate::utils::{find_java, no_window_command, staging_parent};
 use crate::zipalign::align_apk;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -321,9 +321,10 @@ fn ensure_nonempty_file(path: &Path, message: &str) -> Result<()> {
 }
 
 fn create_signing_stage(parent: &Path) -> Result<(TempDir, NamedTempFile, PathBuf)> {
+    let parent = staging_parent(parent);
     let staging_dir = tempfile::Builder::new()
         .prefix("shield-signed-")
-        .tempdir_in(parent)
+        .tempdir_in(&parent)
         .with_context(|| {
             format!(
                 "创建签名暂存目录失败，请确认输出目录可写: {}",
@@ -343,10 +344,11 @@ fn write_staged_report(
     report: &crate::protection_report::MethodReport,
     parent: &Path,
 ) -> Result<NamedTempFile> {
+    let parent = staging_parent(parent);
     let mut file = tempfile::Builder::new()
         .prefix("shield-report-")
         .suffix(".json")
-        .tempfile_in(parent)
+        .tempfile_in(&parent)
         .context("创建保护报告暂存文件失败")?;
     serde_json::to_writer_pretty(&mut file, report).context("写入保护报告暂存文件失败")?;
     file.as_file_mut()
@@ -424,9 +426,10 @@ fn commit_signed_outputs(
     final_report: &Path,
     final_idsig: &Path,
 ) -> Result<()> {
+    let parent = staging_parent(parent);
     let recovery = tempfile::Builder::new()
         .prefix("shield-recovery-")
-        .tempdir_in(parent)
+        .tempdir_in(&parent)
         .context("创建签名恢复目录失败")?;
     let report_backup = backup_attachment(final_report, recovery.path(), "report.json")?;
     let idsig_backup = backup_attachment(final_idsig, recovery.path(), "idsig")?;

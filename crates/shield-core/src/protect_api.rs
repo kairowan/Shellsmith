@@ -161,15 +161,16 @@ pub fn protect_apk(
         opts.byos_auth,
     )
     .map_err(ShieldError::from)?;
-    let parent = opts
-        .output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
+    let parent = crate::utils::staging_parent(
+        opts.output
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new(".")),
+    );
     let staged = tempfile::Builder::new()
         .prefix("shield-output-")
         .suffix(".apk")
-        .tempfile_in(parent)
+        .tempfile_in(&parent)
         .map_err(anyhow::Error::from)
         .map_err(ShieldError::from)?;
     let mut working = opts.clone();

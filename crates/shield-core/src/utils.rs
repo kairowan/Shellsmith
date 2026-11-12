@@ -130,6 +130,16 @@ pub fn create_temp_dir(prefix: &str) -> Result<tempfile::TempDir> {
         .context("创建临时目录失败")
 }
 
+/// 任务私有暂存根目录；父进程可通过 `SHELLSMITH_STAGE_ROOT` 指定。
+///
+/// 默认仍使用产物所在目录，保证同级暂存文件可以原子重命名到最终路径。
+pub fn staging_parent(default_parent: &Path) -> PathBuf {
+    std::env::var_os("SHELLSMITH_STAGE_ROOT")
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| default_parent.to_path_buf())
+}
+
 pub fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
