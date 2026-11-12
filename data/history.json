@@ -125974,7 +125974,4040 @@
           "其他": 912
         }
       }
+    },
+    {
+      "date": "2026-11-12",
+      "collected_at": "2026-11-12T07:49:43.881291Z",
+      "repository": {
+        "stars": 178,
+        "forks": 41,
+        "open_issues": 11
+      },
+      "traffic": {
+        "window_days": 14,
+        "available": false,
+        "views": null,
+        "unique_visitors": null,
+        "clones": null,
+        "unique_cloners": null
+      },
+      "usage": {
+        "available": true,
+        "active_devices": 11,
+        "latest_complete_date": "2026-11-11",
+        "app_starts": 1482,
+        "protect_successes": 152,
+        "protect_failures": 20,
+        "trend": [
+          {
+            "usage_date": "2026-10-29",
+            "active_devices": 23,
+            "app_starts": 32,
+            "protect_successes": 18,
+            "protect_failures": 2,
+            "sign_successes": 17,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "active_devices": 11,
+            "app_starts": 25,
+            "protect_successes": 15,
+            "protect_failures": 0,
+            "sign_successes": 9,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-10-31",
+            "active_devices": 6,
+            "app_starts": 8,
+            "protect_successes": 5,
+            "protect_failures": 0,
+            "sign_successes": 4,
+            "date": "2026-10-31"
+          },
+          {
+            "usage_date": "2026-11-01",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "date": "2026-11-01"
+          },
+          {
+            "usage_date": "2026-11-02",
+            "active_devices": 6,
+            "app_starts": 12,
+            "protect_successes": 4,
+            "protect_failures": 4,
+            "sign_successes": 3,
+            "date": "2026-11-02"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "active_devices": 17,
+            "app_starts": 684,
+            "protect_successes": 9,
+            "protect_failures": 1,
+            "sign_successes": 6,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "active_devices": 28,
+            "app_starts": 193,
+            "protect_successes": 21,
+            "protect_failures": 5,
+            "sign_successes": 20,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "active_devices": 23,
+            "app_starts": 456,
+            "protect_successes": 15,
+            "protect_failures": 5,
+            "sign_successes": 10,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-06",
+            "active_devices": 13,
+            "app_starts": 18,
+            "protect_successes": 15,
+            "protect_failures": 1,
+            "sign_successes": 15,
+            "date": "2026-11-06"
+          },
+          {
+            "usage_date": "2026-11-07",
+            "active_devices": 3,
+            "app_starts": 4,
+            "protect_successes": 3,
+            "protect_failures": 0,
+            "sign_successes": 3,
+            "date": "2026-11-07"
+          },
+          {
+            "usage_date": "2026-11-08",
+            "active_devices": 4,
+            "app_starts": 4,
+            "protect_successes": 6,
+            "protect_failures": 0,
+            "sign_successes": 5,
+            "date": "2026-11-08"
+          },
+          {
+            "usage_date": "2026-11-09",
+            "active_devices": 12,
+            "app_starts": 18,
+            "protect_successes": 9,
+            "protect_failures": 2,
+            "sign_successes": 9,
+            "date": "2026-11-09"
+          },
+          {
+            "usage_date": "2026-11-10",
+            "active_devices": 7,
+            "app_starts": 9,
+            "protect_successes": 6,
+            "protect_failures": 0,
+            "sign_successes": 5,
+            "date": "2026-11-10"
+          },
+          {
+            "usage_date": "2026-11-11",
+            "active_devices": 11,
+            "app_starts": 17,
+            "protect_successes": 26,
+            "protect_failures": 0,
+            "sign_successes": 22,
+            "date": "2026-11-11"
+          }
+        ],
+        "version_breakdown_available": true,
+        "version_trend": [
+          {
+            "usage_date": "2026-10-29",
+            "app_version": "1.3.0",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-29",
+            "app_version": "1.4.0",
+            "active_devices": 4,
+            "app_starts": 5,
+            "protect_starts": 3,
+            "protect_successes": 3,
+            "protect_failures": 0,
+            "sign_successes": 3,
+            "sign_failures": 0,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-29",
+            "app_version": "1.4.0-alpha.1",
+            "active_devices": 1,
+            "app_starts": 2,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-29",
+            "app_version": "1.4.2",
+            "active_devices": 4,
+            "app_starts": 6,
+            "protect_starts": 5,
+            "protect_successes": 5,
+            "protect_failures": 0,
+            "sign_successes": 5,
+            "sign_failures": 0,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-29",
+            "app_version": "1.4.3",
+            "active_devices": 3,
+            "app_starts": 3,
+            "protect_starts": 5,
+            "protect_successes": 5,
+            "protect_failures": 0,
+            "sign_successes": 5,
+            "sign_failures": 0,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-29",
+            "app_version": "1.7.0",
+            "active_devices": 4,
+            "app_starts": 4,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-29",
+            "app_version": "1.9.0",
+            "active_devices": 5,
+            "app_starts": 10,
+            "protect_starts": 4,
+            "protect_successes": 2,
+            "protect_failures": 2,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "app_version": "1.3.0",
+            "active_devices": 1,
+            "app_starts": 2,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "app_version": "1.4.0",
+            "active_devices": 1,
+            "app_starts": 2,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "app_version": "1.4.0-alpha.1",
+            "active_devices": 1,
+            "app_starts": 2,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "app_version": "1.4.1",
+            "active_devices": 1,
+            "app_starts": 2,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "app_version": "1.4.2",
+            "active_devices": 3,
+            "app_starts": 7,
+            "protect_starts": 5,
+            "protect_successes": 5,
+            "protect_failures": 0,
+            "sign_successes": 3,
+            "sign_failures": 0,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "app_version": "1.4.3",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "app_version": "1.9.0",
+            "active_devices": 4,
+            "app_starts": 8,
+            "protect_starts": 5,
+            "protect_successes": 4,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-10-31",
+            "app_version": "1.3.0",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-10-31"
+          },
+          {
+            "usage_date": "2026-10-31",
+            "app_version": "1.4.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-10-31"
+          },
+          {
+            "usage_date": "2026-10-31",
+            "app_version": "1.4.2-rc.2",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-10-31"
+          },
+          {
+            "usage_date": "2026-10-31",
+            "app_version": "1.4.3",
+            "active_devices": 2,
+            "app_starts": 3,
+            "protect_starts": 3,
+            "protect_successes": 3,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-10-31"
+          },
+          {
+            "usage_date": "2026-10-31",
+            "app_version": "1.9.0",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-10-31"
+          },
+          {
+            "usage_date": "2026-11-01",
+            "app_version": "1.4.0",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-01"
+          },
+          {
+            "usage_date": "2026-11-01",
+            "app_version": "1.8.6",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-01"
+          },
+          {
+            "usage_date": "2026-11-02",
+            "app_version": "1.4.0-alpha.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-02"
+          },
+          {
+            "usage_date": "2026-11-02",
+            "app_version": "1.4.3",
+            "active_devices": 2,
+            "app_starts": 3,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-02"
+          },
+          {
+            "usage_date": "2026-11-02",
+            "app_version": "1.9.0",
+            "active_devices": 3,
+            "app_starts": 8,
+            "protect_starts": 7,
+            "protect_successes": 3,
+            "protect_failures": 4,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-02"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "app_version": "1.10.0-rc.1",
+            "active_devices": 1,
+            "app_starts": 2,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "app_version": "1.3.0",
+            "active_devices": 3,
+            "app_starts": 3,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "app_version": "1.4.0",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "app_version": "1.4.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "app_version": "1.4.3",
+            "active_devices": 1,
+            "app_starts": 0,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "app_version": "1.7.0",
+            "active_devices": 7,
+            "app_starts": 636,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "app_version": "1.9.0",
+            "active_devices": 5,
+            "app_starts": 41,
+            "protect_starts": 4,
+            "protect_successes": 3,
+            "protect_failures": 1,
+            "sign_successes": 3,
+            "sign_failures": 0,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.10.0",
+            "active_devices": 2,
+            "app_starts": 3,
+            "protect_starts": 4,
+            "protect_successes": 4,
+            "protect_failures": 0,
+            "sign_successes": 4,
+            "sign_failures": 0,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.10.0-rc.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.10.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.3.0",
+            "active_devices": 3,
+            "app_starts": 5,
+            "protect_starts": 4,
+            "protect_successes": 3,
+            "protect_failures": 1,
+            "sign_successes": 3,
+            "sign_failures": 0,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.4.0",
+            "active_devices": 16,
+            "app_starts": 171,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.4.3",
+            "active_devices": 4,
+            "app_starts": 6,
+            "protect_starts": 4,
+            "protect_successes": 1,
+            "protect_failures": 3,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.9.0",
+            "active_devices": 5,
+            "app_starts": 6,
+            "protect_starts": 14,
+            "protect_successes": 13,
+            "protect_failures": 1,
+            "sign_successes": 12,
+            "sign_failures": 0,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.10.0",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.10.1",
+            "active_devices": 4,
+            "app_starts": 7,
+            "protect_starts": 9,
+            "protect_successes": 4,
+            "protect_failures": 5,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.3.0",
+            "active_devices": 3,
+            "app_starts": 4,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.4.0",
+            "active_devices": 7,
+            "app_starts": 419,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.4.1",
+            "active_devices": 3,
+            "app_starts": 5,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.4.3",
+            "active_devices": 6,
+            "app_starts": 18,
+            "protect_starts": 5,
+            "protect_successes": 5,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 3,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.9.0",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-06",
+            "app_version": "1.10.1",
+            "active_devices": 5,
+            "app_starts": 5,
+            "protect_starts": 5,
+            "protect_successes": 4,
+            "protect_failures": 1,
+            "sign_successes": 4,
+            "sign_failures": 0,
+            "date": "2026-11-06"
+          },
+          {
+            "usage_date": "2026-11-06",
+            "app_version": "1.3.0",
+            "active_devices": 1,
+            "app_starts": 0,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 4,
+            "sign_failures": 0,
+            "date": "2026-11-06"
+          },
+          {
+            "usage_date": "2026-11-06",
+            "app_version": "1.4.1",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-06"
+          },
+          {
+            "usage_date": "2026-11-06",
+            "app_version": "1.4.2",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-06"
+          },
+          {
+            "usage_date": "2026-11-06",
+            "app_version": "1.4.3",
+            "active_devices": 3,
+            "app_starts": 5,
+            "protect_starts": 5,
+            "protect_successes": 5,
+            "protect_failures": 0,
+            "sign_successes": 4,
+            "sign_failures": 0,
+            "date": "2026-11-06"
+          },
+          {
+            "usage_date": "2026-11-06",
+            "app_version": "1.9.0",
+            "active_devices": 2,
+            "app_starts": 4,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-06"
+          },
+          {
+            "usage_date": "2026-11-07",
+            "app_version": "1.10.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-07"
+          },
+          {
+            "usage_date": "2026-11-07",
+            "app_version": "1.4.0",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-07"
+          },
+          {
+            "usage_date": "2026-11-07",
+            "app_version": "1.4.2-rc.2",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-07"
+          },
+          {
+            "usage_date": "2026-11-07",
+            "app_version": "1.4.3",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-07"
+          },
+          {
+            "usage_date": "2026-11-08",
+            "app_version": "1.3.0",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-08"
+          },
+          {
+            "usage_date": "2026-11-08",
+            "app_version": "1.4.0-alpha.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-08"
+          },
+          {
+            "usage_date": "2026-11-08",
+            "app_version": "1.4.3",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_starts": 5,
+            "protect_successes": 5,
+            "protect_failures": 0,
+            "sign_successes": 4,
+            "sign_failures": 0,
+            "date": "2026-11-08"
+          },
+          {
+            "usage_date": "2026-11-09",
+            "app_version": "1.10.1",
+            "active_devices": 6,
+            "app_starts": 7,
+            "protect_starts": 12,
+            "protect_successes": 9,
+            "protect_failures": 2,
+            "sign_successes": 8,
+            "sign_failures": 0,
+            "date": "2026-11-09"
+          },
+          {
+            "usage_date": "2026-11-09",
+            "app_version": "1.4.3",
+            "active_devices": 5,
+            "app_starts": 8,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-09"
+          },
+          {
+            "usage_date": "2026-11-09",
+            "app_version": "1.9.0",
+            "active_devices": 3,
+            "app_starts": 3,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-09"
+          },
+          {
+            "usage_date": "2026-11-10",
+            "app_version": "1.10.1",
+            "active_devices": 2,
+            "app_starts": 2,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-10"
+          },
+          {
+            "usage_date": "2026-11-10",
+            "app_version": "1.4.0-alpha.1",
+            "active_devices": 2,
+            "app_starts": 5,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-10"
+          },
+          {
+            "usage_date": "2026-11-10",
+            "app_version": "1.4.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-10"
+          },
+          {
+            "usage_date": "2026-11-10",
+            "app_version": "1.4.3",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-10"
+          },
+          {
+            "usage_date": "2026-11-10",
+            "app_version": "1.9.0",
+            "active_devices": 1,
+            "app_starts": 0,
+            "protect_starts": 2,
+            "protect_successes": 2,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-10"
+          },
+          {
+            "usage_date": "2026-11-11",
+            "app_version": "1.10.1",
+            "active_devices": 4,
+            "app_starts": 5,
+            "protect_starts": 5,
+            "protect_successes": 5,
+            "protect_failures": 0,
+            "sign_successes": 2,
+            "sign_failures": 0,
+            "date": "2026-11-11"
+          },
+          {
+            "usage_date": "2026-11-11",
+            "app_version": "1.4.0",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 1,
+            "protect_successes": 1,
+            "protect_failures": 0,
+            "sign_successes": 1,
+            "sign_failures": 0,
+            "date": "2026-11-11"
+          },
+          {
+            "usage_date": "2026-11-11",
+            "app_version": "1.4.0-alpha.1",
+            "active_devices": 2,
+            "app_starts": 6,
+            "protect_starts": 4,
+            "protect_successes": 4,
+            "protect_failures": 0,
+            "sign_successes": 4,
+            "sign_failures": 0,
+            "date": "2026-11-11"
+          },
+          {
+            "usage_date": "2026-11-11",
+            "app_version": "1.4.1",
+            "active_devices": 1,
+            "app_starts": 1,
+            "protect_starts": 0,
+            "protect_successes": 0,
+            "protect_failures": 0,
+            "sign_successes": 0,
+            "sign_failures": 0,
+            "date": "2026-11-11"
+          },
+          {
+            "usage_date": "2026-11-11",
+            "app_version": "1.4.3",
+            "active_devices": 2,
+            "app_starts": 3,
+            "protect_starts": 10,
+            "protect_successes": 10,
+            "protect_failures": 0,
+            "sign_successes": 9,
+            "sign_failures": 0,
+            "date": "2026-11-11"
+          },
+          {
+            "usage_date": "2026-11-11",
+            "app_version": "1.9.0",
+            "active_devices": 2,
+            "app_starts": 1,
+            "protect_starts": 6,
+            "protect_successes": 6,
+            "protect_failures": 0,
+            "sign_successes": 6,
+            "sign_failures": 0,
+            "date": "2026-11-11"
+          }
+        ],
+        "failure_breakdown_available": true,
+        "failure_breakdown": [
+          {
+            "usage_date": "2026-10-29",
+            "app_version": "1.9.0",
+            "operation": "protect",
+            "stage": "manifest",
+            "count": 2,
+            "date": "2026-10-29"
+          },
+          {
+            "usage_date": "2026-10-30",
+            "app_version": "1.9.0",
+            "operation": "task",
+            "stage": "unknown",
+            "count": 1,
+            "date": "2026-10-30"
+          },
+          {
+            "usage_date": "2026-11-02",
+            "app_version": "1.9.0",
+            "operation": "protect",
+            "stage": "manifest",
+            "count": 4,
+            "date": "2026-11-02"
+          },
+          {
+            "usage_date": "2026-11-03",
+            "app_version": "1.9.0",
+            "operation": "protect",
+            "stage": "manifest",
+            "count": 1,
+            "date": "2026-11-03"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.4.3",
+            "operation": "protect",
+            "stage": "manifest",
+            "count": 3,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-04",
+            "app_version": "1.9.0",
+            "operation": "protect",
+            "stage": "prepare",
+            "count": 1,
+            "date": "2026-11-04"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.10.1",
+            "operation": "protect",
+            "stage": "unpack",
+            "count": 5,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-05",
+            "app_version": "1.4.3",
+            "operation": "sign",
+            "stage": "execute",
+            "count": 3,
+            "date": "2026-11-05"
+          },
+          {
+            "usage_date": "2026-11-06",
+            "app_version": "1.10.1",
+            "operation": "protect",
+            "stage": "manifest",
+            "count": 1,
+            "date": "2026-11-06"
+          },
+          {
+            "usage_date": "2026-11-09",
+            "app_version": "1.10.1",
+            "operation": "protect",
+            "stage": "manifest",
+            "count": 2,
+            "date": "2026-11-09"
+          }
+        ],
+        "failure_reason_breakdown_available": true,
+        "failure_reason_breakdown": [
+          {
+            "operation": "certificate",
+            "code": "TOOL_NOT_FOUND",
+            "date": "2026-10-29",
+            "flow": "certificate",
+            "app_version": "1.9.0",
+            "usage_date": "2026-10-29",
+            "count": 8,
+            "stage": "execute",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "date": "2026-10-29",
+            "flow": "protect",
+            "app_version": "1.9.0",
+            "usage_date": "2026-10-29",
+            "count": 2,
+            "stage": "manifest",
+            "classifier_version": 1
+          },
+          {
+            "operation": "certificate",
+            "code": "KEYSTORE_PASSWORD_INVALID",
+            "date": "2026-10-30",
+            "flow": "certificate",
+            "app_version": "1.9.0",
+            "usage_date": "2026-10-30",
+            "count": 3,
+            "stage": "execute",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "UNKNOWN",
+            "date": "2026-10-30",
+            "flow": "protect_with_sign",
+            "app_version": "1.9.0",
+            "usage_date": "2026-10-30",
+            "count": 1,
+            "stage": "unknown",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "date": "2026-11-02",
+            "flow": "protect",
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-02",
+            "count": 1,
+            "stage": "manifest",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "UNKNOWN",
+            "date": "2026-11-02",
+            "flow": "protect_with_sign",
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-02",
+            "count": 3,
+            "stage": "manifest",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "date": "2026-11-03",
+            "flow": "protect",
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-03",
+            "count": 1,
+            "stage": "manifest",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "date": "2026-11-04",
+            "flow": "protect",
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-04",
+            "count": 3,
+            "stage": "manifest",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "UNKNOWN",
+            "date": "2026-11-04",
+            "flow": "protect_with_sign",
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-04",
+            "count": 1,
+            "stage": "prepare",
+            "classifier_version": 1
+          },
+          {
+            "operation": "certificate",
+            "code": "TOOL_NOT_FOUND",
+            "date": "2026-11-05",
+            "flow": "certificate",
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-05",
+            "count": 1,
+            "stage": "execute",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "TOOL_PROCESS_FAILED",
+            "date": "2026-11-05",
+            "flow": "protect",
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-05",
+            "count": 5,
+            "stage": "unpack",
+            "classifier_version": 1
+          },
+          {
+            "operation": "sign",
+            "code": "TOOL_PROCESS_FAILED",
+            "date": "2026-11-05",
+            "flow": "sign",
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-05",
+            "count": 3,
+            "stage": "execute",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "date": "2026-11-06",
+            "flow": "protect",
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-06",
+            "count": 1,
+            "stage": "manifest",
+            "classifier_version": 1
+          },
+          {
+            "operation": "protect",
+            "code": "APK_REPACK_FAILED",
+            "date": "2026-11-09",
+            "flow": "protect",
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-09",
+            "count": 2,
+            "stage": "manifest",
+            "classifier_version": 1
+          }
+        ],
+        "failure_classifier_coverage": [
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-10-29",
+            "reporting_devices": 2,
+            "app_version": "1.3.0",
+            "usage_date": "2026-10-29"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-29",
+            "reporting_devices": 4,
+            "app_version": "1.4.0",
+            "usage_date": "2026-10-29"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-10-29",
+            "reporting_devices": 1,
+            "app_version": "1.4.0-alpha.1",
+            "usage_date": "2026-10-29"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-29",
+            "reporting_devices": 4,
+            "app_version": "1.4.2",
+            "usage_date": "2026-10-29"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-29",
+            "reporting_devices": 3,
+            "app_version": "1.4.3",
+            "usage_date": "2026-10-29"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-29",
+            "reporting_devices": 4,
+            "app_version": "1.7.0",
+            "usage_date": "2026-10-29"
+          },
+          {
+            "failure_count": 2,
+            "failure_classifier_version": 1,
+            "date": "2026-10-29",
+            "reporting_devices": 5,
+            "app_version": "1.9.0",
+            "usage_date": "2026-10-29"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-10-30",
+            "reporting_devices": 1,
+            "app_version": "1.3.0",
+            "usage_date": "2026-10-30"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-30",
+            "reporting_devices": 1,
+            "app_version": "1.4.0",
+            "usage_date": "2026-10-30"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-10-30",
+            "reporting_devices": 1,
+            "app_version": "1.4.0-alpha.1",
+            "usage_date": "2026-10-30"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-30",
+            "reporting_devices": 1,
+            "app_version": "1.4.1",
+            "usage_date": "2026-10-30"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-30",
+            "reporting_devices": 3,
+            "app_version": "1.4.2",
+            "usage_date": "2026-10-30"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-30",
+            "reporting_devices": 2,
+            "app_version": "1.4.3",
+            "usage_date": "2026-10-30"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-30",
+            "reporting_devices": 4,
+            "app_version": "1.9.0",
+            "usage_date": "2026-10-30"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-10-31",
+            "reporting_devices": 2,
+            "app_version": "1.3.0",
+            "usage_date": "2026-10-31"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-31",
+            "reporting_devices": 1,
+            "app_version": "1.4.1",
+            "usage_date": "2026-10-31"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-31",
+            "reporting_devices": 1,
+            "app_version": "1.4.2-rc.2",
+            "usage_date": "2026-10-31"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-31",
+            "reporting_devices": 2,
+            "app_version": "1.4.3",
+            "usage_date": "2026-10-31"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-10-31",
+            "reporting_devices": 1,
+            "app_version": "1.9.0",
+            "usage_date": "2026-10-31"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-01",
+            "reporting_devices": 1,
+            "app_version": "1.4.0",
+            "usage_date": "2026-11-01"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-01",
+            "reporting_devices": 1,
+            "app_version": "1.8.6",
+            "usage_date": "2026-11-01"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-11-02",
+            "reporting_devices": 1,
+            "app_version": "1.4.0-alpha.1",
+            "usage_date": "2026-11-02"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-02",
+            "reporting_devices": 2,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-02"
+          },
+          {
+            "failure_count": 4,
+            "failure_classifier_version": 1,
+            "date": "2026-11-02",
+            "reporting_devices": 3,
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-02"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-03",
+            "reporting_devices": 1,
+            "app_version": "1.10.0-rc.1",
+            "usage_date": "2026-11-03"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-11-03",
+            "reporting_devices": 3,
+            "app_version": "1.3.0",
+            "usage_date": "2026-11-03"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-03",
+            "reporting_devices": 1,
+            "app_version": "1.4.0",
+            "usage_date": "2026-11-03"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-03",
+            "reporting_devices": 1,
+            "app_version": "1.4.1",
+            "usage_date": "2026-11-03"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-03",
+            "reporting_devices": 1,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-03"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-03",
+            "reporting_devices": 7,
+            "app_version": "1.7.0",
+            "usage_date": "2026-11-03"
+          },
+          {
+            "failure_count": 1,
+            "failure_classifier_version": 1,
+            "date": "2026-11-03",
+            "reporting_devices": 5,
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-03"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-04",
+            "reporting_devices": 2,
+            "app_version": "1.10.0",
+            "usage_date": "2026-11-04"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-04",
+            "reporting_devices": 1,
+            "app_version": "1.10.0-rc.1",
+            "usage_date": "2026-11-04"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-04",
+            "reporting_devices": 1,
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-04"
+          },
+          {
+            "failure_count": 1,
+            "failure_classifier_version": null,
+            "date": "2026-11-04",
+            "reporting_devices": 3,
+            "app_version": "1.3.0",
+            "usage_date": "2026-11-04"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-04",
+            "reporting_devices": 16,
+            "app_version": "1.4.0",
+            "usage_date": "2026-11-04"
+          },
+          {
+            "failure_count": 3,
+            "failure_classifier_version": 1,
+            "date": "2026-11-04",
+            "reporting_devices": 4,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-04"
+          },
+          {
+            "failure_count": 1,
+            "failure_classifier_version": 1,
+            "date": "2026-11-04",
+            "reporting_devices": 5,
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-04"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-05",
+            "reporting_devices": 1,
+            "app_version": "1.10.0",
+            "usage_date": "2026-11-05"
+          },
+          {
+            "failure_count": 5,
+            "failure_classifier_version": 1,
+            "date": "2026-11-05",
+            "reporting_devices": 4,
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-05"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-11-05",
+            "reporting_devices": 3,
+            "app_version": "1.3.0",
+            "usage_date": "2026-11-05"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-05",
+            "reporting_devices": 7,
+            "app_version": "1.4.0",
+            "usage_date": "2026-11-05"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-05",
+            "reporting_devices": 3,
+            "app_version": "1.4.1",
+            "usage_date": "2026-11-05"
+          },
+          {
+            "failure_count": 3,
+            "failure_classifier_version": 1,
+            "date": "2026-11-05",
+            "reporting_devices": 6,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-05"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-05",
+            "reporting_devices": 2,
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-05"
+          },
+          {
+            "failure_count": 1,
+            "failure_classifier_version": 1,
+            "date": "2026-11-06",
+            "reporting_devices": 5,
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-06"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-11-06",
+            "reporting_devices": 1,
+            "app_version": "1.3.0",
+            "usage_date": "2026-11-06"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-06",
+            "reporting_devices": 2,
+            "app_version": "1.4.1",
+            "usage_date": "2026-11-06"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-06",
+            "reporting_devices": 2,
+            "app_version": "1.4.2",
+            "usage_date": "2026-11-06"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-06",
+            "reporting_devices": 3,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-06"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-06",
+            "reporting_devices": 2,
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-06"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-07",
+            "reporting_devices": 1,
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-07"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-07",
+            "reporting_devices": 1,
+            "app_version": "1.4.0",
+            "usage_date": "2026-11-07"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-07",
+            "reporting_devices": 1,
+            "app_version": "1.4.2-rc.2",
+            "usage_date": "2026-11-07"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-07",
+            "reporting_devices": 1,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-07"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-11-08",
+            "reporting_devices": 1,
+            "app_version": "1.3.0",
+            "usage_date": "2026-11-08"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-11-08",
+            "reporting_devices": 1,
+            "app_version": "1.4.0-alpha.1",
+            "usage_date": "2026-11-08"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-08",
+            "reporting_devices": 2,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-08"
+          },
+          {
+            "failure_count": 2,
+            "failure_classifier_version": 1,
+            "date": "2026-11-09",
+            "reporting_devices": 6,
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-09"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-09",
+            "reporting_devices": 5,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-09"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-09",
+            "reporting_devices": 3,
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-09"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-10",
+            "reporting_devices": 2,
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-10"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-11-10",
+            "reporting_devices": 2,
+            "app_version": "1.4.0-alpha.1",
+            "usage_date": "2026-11-10"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-10",
+            "reporting_devices": 1,
+            "app_version": "1.4.1",
+            "usage_date": "2026-11-10"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-10",
+            "reporting_devices": 1,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-10"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-10",
+            "reporting_devices": 1,
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-10"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-11",
+            "reporting_devices": 4,
+            "app_version": "1.10.1",
+            "usage_date": "2026-11-11"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-11",
+            "reporting_devices": 1,
+            "app_version": "1.4.0",
+            "usage_date": "2026-11-11"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": null,
+            "date": "2026-11-11",
+            "reporting_devices": 2,
+            "app_version": "1.4.0-alpha.1",
+            "usage_date": "2026-11-11"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-11",
+            "reporting_devices": 1,
+            "app_version": "1.4.1",
+            "usage_date": "2026-11-11"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-11",
+            "reporting_devices": 2,
+            "app_version": "1.4.3",
+            "usage_date": "2026-11-11"
+          },
+          {
+            "failure_count": 0,
+            "failure_classifier_version": 1,
+            "date": "2026-11-11",
+            "reporting_devices": 2,
+            "app_version": "1.9.0",
+            "usage_date": "2026-11-11"
+          }
+        ]
+      },
+      "release_assets": [
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_android-runtime.zip",
+          "download_count": 2,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_linux_amd64.AppImage.sig",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_macos_universal.app.tar.gz",
+          "download_count": 4,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_macos_universal.app.tar.gz.sig",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_windows_x64_setup.exe",
+          "download_count": 7,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "Shellsmith_1.10.0_windows_x64_setup.exe.sig",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.10.0",
+          "published_at": "2026-11-04T07:00:29Z",
+          "name": "latest.json",
+          "download_count": 15,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_android-runtime.zip",
+          "download_count": 2,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_linux_amd64.deb",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_macos_universal.app.tar.gz",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_macos_universal.dmg",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_windows_x64_setup.exe",
+          "download_count": 5,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "Shellsmith_1.10.0-rc.1_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.10.0-rc.1",
+          "published_at": "2026-10-28T03:51:18Z",
+          "name": "latest.json",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_android-runtime.zip",
+          "download_count": 12,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_linux_amd64.AppImage",
+          "download_count": 8,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_linux_amd64.AppImage.sig",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_linux_amd64.deb",
+          "download_count": 7,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_macos_universal.app.tar.gz",
+          "download_count": 13,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_macos_universal.app.tar.gz.sig",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_macos_universal.dmg",
+          "download_count": 6,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_windows_x64_setup.exe",
+          "download_count": 36,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "Shellsmith_1.10.1_windows_x64_setup.exe.sig",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.10.1",
+          "published_at": "2026-11-04T13:07:53Z",
+          "name": "latest.json",
+          "download_count": 94,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.0-build.6",
+          "published_at": "2026-09-25T07:34:42Z",
+          "name": "Shellsmith_1.4.0-build.6_android-runtime.zip",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.0-build.6",
+          "published_at": "2026-09-25T07:34:42Z",
+          "name": "Shellsmith_1.4.0-build.6_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.0-build.6",
+          "published_at": "2026-09-25T07:34:42Z",
+          "name": "Shellsmith_1.4.0-build.6_linux_amd64.deb",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.0-build.6",
+          "published_at": "2026-09-25T07:34:42Z",
+          "name": "Shellsmith_1.4.0-build.6_macos_universal.dmg",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.0-build.6",
+          "published_at": "2026-09-25T07:34:42Z",
+          "name": "Shellsmith_1.4.0-build.6_windows_x64_setup.exe",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.1",
+          "published_at": "2026-09-27T08:31:52Z",
+          "name": "Shellsmith_1.4.1_android-runtime.zip",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.1",
+          "published_at": "2026-09-27T08:31:52Z",
+          "name": "Shellsmith_1.4.1_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.1",
+          "published_at": "2026-09-27T08:31:52Z",
+          "name": "Shellsmith_1.4.1_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.1",
+          "published_at": "2026-09-27T08:31:52Z",
+          "name": "Shellsmith_1.4.1_macos_universal.dmg",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.1",
+          "published_at": "2026-09-27T08:31:52Z",
+          "name": "Shellsmith_1.4.1_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.1-build.7",
+          "published_at": "2026-09-27T08:39:03Z",
+          "name": "Shellsmith_1.4.1-build.7_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.1-build.7",
+          "published_at": "2026-09-27T08:39:03Z",
+          "name": "Shellsmith_1.4.1-build.7_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.1-build.7",
+          "published_at": "2026-09-27T08:39:03Z",
+          "name": "Shellsmith_1.4.1-build.7_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.1-build.7",
+          "published_at": "2026-09-27T08:39:03Z",
+          "name": "Shellsmith_1.4.1-build.7_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.1-build.7",
+          "published_at": "2026-09-27T08:39:03Z",
+          "name": "Shellsmith_1.4.1-build.7_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.1-build.8",
+          "published_at": "2026-09-27T09:52:56Z",
+          "name": "Shellsmith_1.4.1-build.8_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.1-build.8",
+          "published_at": "2026-09-27T09:52:56Z",
+          "name": "Shellsmith_1.4.1-build.8_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.1-build.8",
+          "published_at": "2026-09-27T09:52:56Z",
+          "name": "Shellsmith_1.4.1-build.8_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.1-build.8",
+          "published_at": "2026-09-27T09:52:56Z",
+          "name": "Shellsmith_1.4.1-build.8_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.1-build.8",
+          "published_at": "2026-09-27T09:52:56Z",
+          "name": "Shellsmith_1.4.1-build.8_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.2",
+          "published_at": "2026-09-27T10:00:57Z",
+          "name": "Shellsmith_1.4.2_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.2",
+          "published_at": "2026-09-27T10:00:57Z",
+          "name": "Shellsmith_1.4.2_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.2",
+          "published_at": "2026-09-27T10:00:57Z",
+          "name": "Shellsmith_1.4.2_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.2",
+          "published_at": "2026-09-27T10:00:57Z",
+          "name": "Shellsmith_1.4.2_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.2",
+          "published_at": "2026-09-27T10:00:57Z",
+          "name": "Shellsmith_1.4.2_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.2-build.9",
+          "published_at": "2026-09-27T10:06:22Z",
+          "name": "Shellsmith_1.4.2-build.9_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.2-build.9",
+          "published_at": "2026-09-27T10:06:22Z",
+          "name": "Shellsmith_1.4.2-build.9_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.2-build.9",
+          "published_at": "2026-09-27T10:06:22Z",
+          "name": "Shellsmith_1.4.2-build.9_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.2-build.9",
+          "published_at": "2026-09-27T10:06:22Z",
+          "name": "Shellsmith_1.4.2-build.9_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.2-build.9",
+          "published_at": "2026-09-27T10:06:22Z",
+          "name": "Shellsmith_1.4.2-build.9_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.3",
+          "published_at": "2026-10-08T03:06:47Z",
+          "name": "Shellsmith_1.4.3_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.3",
+          "published_at": "2026-10-08T03:06:47Z",
+          "name": "Shellsmith_1.4.3_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.3",
+          "published_at": "2026-10-08T03:06:47Z",
+          "name": "Shellsmith_1.4.3_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.3",
+          "published_at": "2026-10-08T03:06:47Z",
+          "name": "Shellsmith_1.4.3_macos_universal.dmg",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.3",
+          "published_at": "2026-10-08T03:06:47Z",
+          "name": "Shellsmith_1.4.3_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.3-build.11",
+          "published_at": "2026-10-08T02:46:59Z",
+          "name": "Shellsmith_1.4.3-build.11_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.3-build.11",
+          "published_at": "2026-10-08T02:46:59Z",
+          "name": "Shellsmith_1.4.3-build.11_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.3-build.11",
+          "published_at": "2026-10-08T02:46:59Z",
+          "name": "Shellsmith_1.4.3-build.11_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.3-build.11",
+          "published_at": "2026-10-08T02:46:59Z",
+          "name": "Shellsmith_1.4.3-build.11_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.3-build.11",
+          "published_at": "2026-10-08T02:46:59Z",
+          "name": "Shellsmith_1.4.3-build.11_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.4",
+          "published_at": "2026-10-08T06:29:14Z",
+          "name": "Shellsmith_1.4.4_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.4",
+          "published_at": "2026-10-08T06:29:14Z",
+          "name": "Shellsmith_1.4.4_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.4",
+          "published_at": "2026-10-08T06:29:14Z",
+          "name": "Shellsmith_1.4.4_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.4",
+          "published_at": "2026-10-08T06:29:14Z",
+          "name": "Shellsmith_1.4.4_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.4",
+          "published_at": "2026-10-08T06:29:14Z",
+          "name": "Shellsmith_1.4.4_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_macos_universal.app.tar.gz",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_macos_universal.dmg",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "Shellsmith_1.4.5_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.4.5",
+          "published_at": "2026-10-08T09:02:24Z",
+          "name": "latest.json",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_android-runtime.zip",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_linux_amd64.deb",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_macos_universal.app.tar.gz",
+          "download_count": 6,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_macos_universal.dmg",
+          "download_count": 5,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_windows_x64_setup.exe",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "Shellsmith_1.5.0_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.5.0",
+          "published_at": "2026-10-08T10:36:50Z",
+          "name": "latest.json",
+          "download_count": 10,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_android-runtime.zip",
+          "download_count": 2,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_linux_amd64.AppImage",
+          "download_count": 4,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_linux_amd64.deb",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_macos_universal.app.tar.gz",
+          "download_count": 7,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_macos_universal.dmg",
+          "download_count": 5,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_windows_x64_setup.exe",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "Shellsmith_1.5.1_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.5.1",
+          "published_at": "2026-10-09T02:31:23Z",
+          "name": "latest.json",
+          "download_count": 15,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_android-runtime.zip",
+          "download_count": 2,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_linux_amd64.deb",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_macos_universal.app.tar.gz",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_macos_universal.dmg",
+          "download_count": 4,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_windows_x64_setup.exe",
+          "download_count": 9,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "Shellsmith_1.5.2_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.5.2",
+          "published_at": "2026-10-09T09:20:31Z",
+          "name": "latest.json",
+          "download_count": 9,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_android-runtime.zip",
+          "download_count": 2,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_macos_universal.app.tar.gz",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_macos_universal.dmg",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "Shellsmith_1.6.0_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.0",
+          "published_at": "2026-10-10T03:25:42Z",
+          "name": "latest.json",
+          "download_count": 6,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_android-runtime.zip",
+          "download_count": 4,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_linux_amd64.deb",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_macos_universal.app.tar.gz",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_macos_universal.dmg",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_windows_x64_setup.exe",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "Shellsmith_1.6.1_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.1",
+          "published_at": "2026-10-10T04:44:54Z",
+          "name": "latest.json",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_android-runtime.zip",
+          "download_count": 2,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_macos_universal.app.tar.gz",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_macos_universal.dmg",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "Shellsmith_1.6.2_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.2",
+          "published_at": "2026-10-10T05:40:26Z",
+          "name": "latest.json",
+          "download_count": 4,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_macos_universal.app.tar.gz",
+          "download_count": 6,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_macos_universal.dmg",
+          "download_count": 4,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_windows_x64_setup.exe",
+          "download_count": 15,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "Shellsmith_1.6.3_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.3",
+          "published_at": "2026-10-10T07:50:09Z",
+          "name": "latest.json",
+          "download_count": 33,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_macos_universal.app.tar.gz",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "Shellsmith_1.6.3-build.55_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.3-build.55",
+          "published_at": "2026-10-10T09:48:02Z",
+          "name": "latest.json",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_linux_amd64.AppImage",
+          "download_count": 4,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_macos_universal.app.tar.gz",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "Shellsmith_1.6.3-build.58_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.3-build.58",
+          "published_at": "2026-10-12T08:33:35Z",
+          "name": "latest.json",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_macos_universal.app.tar.gz",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_macos_universal.dmg",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_windows_x64_setup.exe",
+          "download_count": 8,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "Shellsmith_1.6.4_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.6.4",
+          "published_at": "2026-10-12T08:31:59Z",
+          "name": "latest.json",
+          "download_count": 7,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_android-runtime.zip",
+          "download_count": 4,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_macos_universal.app.tar.gz",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_macos_universal.dmg",
+          "download_count": 5,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_windows_x64_setup.exe",
+          "download_count": 5,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "Shellsmith_1.7.0_windows_x64_setup.exe.sig",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.7.0",
+          "published_at": "2026-10-13T06:33:45Z",
+          "name": "latest.json",
+          "download_count": 14,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_macos_universal.app.tar.gz",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "Shellsmith_1.7.0-build.63_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.7.0-build.63",
+          "published_at": "2026-10-13T06:37:17Z",
+          "name": "latest.json",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_android-runtime.zip",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_macos_universal.app.tar.gz",
+          "download_count": 6,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_macos_universal.dmg",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_windows_x64_setup.exe",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "Shellsmith_1.8.0_windows_x64_setup.exe.sig",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.0",
+          "published_at": "2026-10-15T08:28:17Z",
+          "name": "latest.json",
+          "download_count": 14,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_android-runtime.zip",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_macos_universal.app.tar.gz",
+          "download_count": 4,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_macos_universal.dmg",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_windows_x64_setup.exe",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "Shellsmith_1.8.1_windows_x64_setup.exe.sig",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.1",
+          "published_at": "2026-10-16T04:04:39Z",
+          "name": "latest.json",
+          "download_count": 5,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_android-runtime.zip",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_macos_universal.app.tar.gz",
+          "download_count": 4,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_windows_x64_setup.exe",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "Shellsmith_1.8.2_windows_x64_setup.exe.sig",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.2",
+          "published_at": "2026-10-16T06:29:08Z",
+          "name": "latest.json",
+          "download_count": 9,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_android-runtime.zip",
+          "download_count": 3,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_linux_amd64.AppImage",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_macos_universal.app.tar.gz",
+          "download_count": 5,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_windows_x64_setup.exe",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "Shellsmith_1.8.3_windows_x64_setup.exe.sig",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.3",
+          "published_at": "2026-10-16T07:49:49Z",
+          "name": "latest.json",
+          "download_count": 9,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_android-runtime.zip",
+          "download_count": 6,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_linux_amd64.AppImage",
+          "download_count": 4,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_macos_universal.app.tar.gz",
+          "download_count": 6,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_macos_universal.dmg",
+          "download_count": 6,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_windows_x64_setup.exe",
+          "download_count": 35,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "Shellsmith_1.8.4_windows_x64_setup.exe.sig",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.4",
+          "published_at": "2026-10-16T10:02:37Z",
+          "name": "latest.json",
+          "download_count": 51,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_android-runtime.zip",
+          "download_count": 6,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_linux_amd64.AppImage",
+          "download_count": 4,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_linux_amd64.deb",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_macos_universal.app.tar.gz",
+          "download_count": 7,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_macos_universal.app.tar.gz.sig",
+          "download_count": 3,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_macos_universal.dmg",
+          "download_count": 8,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_windows_x64_setup.exe",
+          "download_count": 21,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "Shellsmith_1.8.5_windows_x64_setup.exe.sig",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.5",
+          "published_at": "2026-10-19T03:06:13Z",
+          "name": "latest.json",
+          "download_count": 25,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_macos_universal.app.tar.gz",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_macos_universal.dmg",
+          "download_count": 1,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "Shellsmith_1.8.5-build.79_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.5-build.79",
+          "published_at": "2026-10-19T05:52:11Z",
+          "name": "latest.json",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_android-runtime.zip",
+          "download_count": 10,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_linux_amd64.AppImage",
+          "download_count": 4,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_linux_amd64.deb",
+          "download_count": 7,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_macos_universal.app.tar.gz",
+          "download_count": 13,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_macos_universal.app.tar.gz.sig",
+          "download_count": 4,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_macos_universal.dmg",
+          "download_count": 21,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_windows_x64_setup.exe",
+          "download_count": 43,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "Shellsmith_1.8.6_windows_x64_setup.exe.sig",
+          "download_count": 3,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.8.6",
+          "published_at": "2026-10-19T08:46:01Z",
+          "name": "latest.json",
+          "download_count": 87,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.6-build.81",
+          "published_at": null,
+          "name": "Shellsmith_1.8.6-build.81_android-runtime.zip",
+          "download_count": 0,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.8.6-build.81",
+          "published_at": null,
+          "name": "Shellsmith_1.8.6-build.81_linux_amd64.AppImage",
+          "download_count": 0,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.6-build.81",
+          "published_at": null,
+          "name": "Shellsmith_1.8.6-build.81_linux_amd64.AppImage.sig",
+          "download_count": 0,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.6-build.81",
+          "published_at": null,
+          "name": "Shellsmith_1.8.6-build.81_linux_amd64.deb",
+          "download_count": 0,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.8.6-build.81",
+          "published_at": null,
+          "name": "Shellsmith_1.8.6-build.81_macos_universal.app.tar.gz",
+          "download_count": 0,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.6-build.81",
+          "published_at": null,
+          "name": "Shellsmith_1.8.6-build.81_macos_universal.app.tar.gz.sig",
+          "download_count": 0,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.8.6-build.81",
+          "published_at": null,
+          "name": "Shellsmith_1.8.6-build.81_macos_universal.dmg",
+          "download_count": 0,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_android-runtime.zip",
+          "download_count": 19,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_linux_amd64.AppImage",
+          "download_count": 5,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_linux_amd64.AppImage.sig",
+          "download_count": 3,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_linux_amd64.deb",
+          "download_count": 4,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_macos_universal.app.tar.gz",
+          "download_count": 16,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_macos_universal.dmg",
+          "download_count": 13,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_windows_x64_setup.exe",
+          "download_count": 57,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "Shellsmith_1.9.0_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.9.0",
+          "published_at": "2026-10-21T07:20:21Z",
+          "name": "latest.json",
+          "download_count": 401,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_android-runtime.zip",
+          "download_count": 1,
+          "platform": "其他"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_linux_amd64.AppImage",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_linux_amd64.AppImage.sig",
+          "download_count": 2,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_linux_amd64.deb",
+          "download_count": 1,
+          "platform": "Linux"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_macos_universal.app.tar.gz",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_macos_universal.app.tar.gz.sig",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_macos_universal.dmg",
+          "download_count": 2,
+          "platform": "macOS"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_windows_x64_setup.exe",
+          "download_count": 1,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "Shellsmith_1.9.0-build.82_windows_x64_setup.exe.sig",
+          "download_count": 2,
+          "platform": "Windows"
+        },
+        {
+          "tag": "v1.9.0-build.82",
+          "published_at": "2026-10-21T07:13:32Z",
+          "name": "latest.json",
+          "download_count": 1,
+          "platform": "其他"
+        }
+      ],
+      "totals": {
+        "downloads": 1784,
+        "platform_downloads": {
+          "Windows": 337,
+          "macOS": 300,
+          "Linux": 218,
+          "其他": 929
+        }
+      }
     }
   ],
-  "updated_at": "2026-11-11T07:18:22.553287Z"
+  "updated_at": "2026-11-12T07:49:43.881291Z"
 }
