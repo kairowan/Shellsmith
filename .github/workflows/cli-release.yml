@@ -1,0 +1,252 @@
+name: CLI and MCP Release Bundles
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v1.10.2"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cli-release-${{ github.event.workflow_run.head_sha || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: CLI + MCP ${{ matrix.platform }}
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+          - platform: macos-universal
+            os: macos-15
+            target: universal
+          - platform: windows-x86_64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.tag }}
+          fetch-depth: 0
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHON=python3
+          command -v python3 >/dev/null 2>&1 || PYTHON=python
+          version="$("$PYTHON" -c 'import json; print(json.load(open("apps/shield-gui/package.json", encoding="utf-8"))["version"])')"
+          tag="v${version}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            test "${{ inputs.tag }}" = "$tag"
+          fi
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' > draft.txt; then
+            echo "release $tag not found" >&2
+            exit 1
+          fi
+          test "$(cat draft.txt)" = "false"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "PLATFORM=${{ matrix.platform }}" >> "$GITHUB_ENV"
+
+      - name: Install Rust targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ matrix.platform }}" in
+            linux-x86_64)
+              rustup target add x86_64-unknown-linux-musl
+              ;;
+            macos-universal)
+              rustup target add aarch64-apple-darwin x86_64-apple-darwin
+              ;;
+          esac
+
+      - name: Install musl tools
+        if: matrix.platform == 'linux-x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build shield and shellsmith-mcp
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/bin
+          case "${{ matrix.platform }}" in
+            linux-x86_64)
+              cargo build --release -p shield-cli -p shellsmith-mcp \
+                --target x86_64-unknown-linux-musl
+              cp target/x86_64-unknown-linux-musl/release/shield bundle/bin/shield
+              cp target/x86_64-unknown-linux-musl/release/shellsmith-mcp bundle/bin/shellsmith-mcp
+              ;;
+            macos-universal)
+              cargo build --release -p shield-cli -p shellsmith-mcp --target aarch64-apple-darwin
+              cargo build --release -p shield-cli -p shellsmith-mcp --target x86_64-apple-darwin
+              for binary in shield shellsmith-mcp; do
+                lipo -create \
+                  "target/aarch64-apple-darwin/release/$binary" \
+                  "target/x86_64-apple-darwin/release/$binary" \
+                  -output "bundle/bin/$binary"
+              done
+              ;;
+            windows-x86_64)
+              cargo build --release -p shield-cli -p shellsmith-mcp \
+                --target x86_64-pc-windows-msvc
+              cp target/x86_64-pc-windows-msvc/release/shield.exe bundle/bin/shield.exe
+              cp target/x86_64-pc-windows-msvc/release/shellsmith-mcp.exe bundle/bin/shellsmith-mcp.exe
+              ;;
+            *)
+              echo "unknown platform: ${{ matrix.platform }}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Download Android runtime asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "*android-runtime.zip" \
+            --dir runtime
+          archive="$(find runtime -maxdepth 1 -type f -name '*android-runtime.zip' -print -quit)"
+          test -n "$archive"
+          echo "RUNTIME_ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - name: Extract Android runtime asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHON=python3
+          command -v python3 >/dev/null 2>&1 || PYTHON=python
+          "$PYTHON" - "$RUNTIME_ARCHIVE" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              archive.extractall("runtime/extracted")
+          PY
+
+      - name: Assemble CLI + MCP bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bundle/lib bundle/resources bundle/licenses
+          runtime_root="$(dirname "$(find runtime/extracted -type f -name resources.zip -print -quit)")"
+          test -n "$runtime_root"
+          cp "$runtime_root"/resources*.zip bundle/resources/
+          cp "$runtime_root"/mocika-play-delivery-api.jar bundle/resources/
+          cp "$runtime_root"/xop-pvm2-packer.jar bundle/lib/
+          cp "$runtime_root"/licenses/* bundle/licenses/ 2>/dev/null || true
+          cp tools/apktool_3.0.3.jar bundle/lib/apktool.jar
+          cp tools/apksigner.jar bundle/lib/apksigner.jar
+          cp tools/licenses/XopProtector-LICENSE.txt bundle/licenses/
+          cp tools/licenses/XopProtector-NOTICE.txt bundle/licenses/
+
+          cat > bundle/README.md <<EOF
+          # Shellsmith CLI + MCP ${VERSION}
+
+          Platform: ${PLATFORM}
+
+          This bundle contains the `shield` CLI and the `shellsmith-mcp` stdio server.
+          No artifact, certificate or password is uploaded by this package.
+
+          ## Verify
+
+          \`\`\`bash
+          ./bin/shield --version
+          ./bin/shellsmith-mcp --version
+          \`\`\`
+
+          ## MCP client configuration
+
+          Use an absolute path to the extracted bundle:
+
+          \`\`\`json
+          {
+            "mcpServers": {
+              "shellsmith": {
+                "command": "/absolute/path/to/bin/shellsmith-mcp",
+                "args": ["--allow-root", "/absolute/path/to/projects"]
+              }
+            }
+          }
+          \`\`\`
+
+          `shellsmith-mcp` automatically finds the sibling `shield` binary. If you keep
+          the CLI elsewhere, pass `--cli /path/to/shield` or set
+          `SHELLSMITH_MCP_CLI=/path/to/shield`.
+
+          Keystore passwords are read from the MCP server environment only:
+
+          \`\`\`bash
+          export MOCIKA_SHIELD_KS_PASS="..."
+          export MOCIKA_SHIELD_KEY_PASS="..."
+          \`\`\`
+
+          Do not put a plaintext password in the MCP client JSON or tool arguments.
+
+          ## Requirements
+
+          - Java 17+ with \`java\` and \`keytool\` available.
+          - AAB workflows also need \`bundletool.jar\` and \`aapt2\`; pass their paths to the tool.
+          - Android APK/AAB work stays on this machine; iOS archive requires macOS and Xcode.
+          - macOS: if Gatekeeper blocks the unsigned CLI, run
+            \`xattr -rd com.apple.quarantine /path/to/Shellsmith-cli-*\`.
+
+          See \`docs/mcp.md\` in the repository for the full tool list and security model.
+          EOF
+
+      - name: Archive and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          package="Shellsmith-cli-${VERSION}-${PLATFORM}"
+          mv bundle "$package"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            powershell -NoProfile -Command "Compress-Archive -Path '$package' -DestinationPath '$package.zip' -Force"
+            archive="$package.zip"
+          else
+            tar -czf "$package.tar.gz" "$package"
+            archive="$package.tar.gz"
+          fi
+          PYTHON=python3
+          command -v python3 >/dev/null 2>&1 || PYTHON=python
+          "$PYTHON" - "$archive" > "$archive.sha256" <<'PY'
+          import hashlib, pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
+          PY
+          mv "$archive" "$archive.sha256" dist/
+          echo "RELEASE_ARCHIVE=$archive" >> "$GITHUB_ENV"
+          echo "RELEASE_CHECKSUM=$archive.sha256" >> "$GITHUB_ENV"
+
+      - name: Upload release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" \
+            "dist/$RELEASE_ARCHIVE" \
+            "dist/$RELEASE_CHECKSUM" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber

@@ -8,6 +8,29 @@
 - 长任务：立即返回 `job_id`，通过 `shellsmith_job_status` / `shellsmith_job_result` / `shellsmith_job_cancel` 管理
 - 破坏性操作：必须显式传 `confirm: true`
 
+## 从 GitHub Releases 安装
+
+发布页的 `Shellsmith-cli-<version>-<platform>` 包同时包含 `shield` 和 `shellsmith-mcp`。Release 发布后由 `CLI and MCP Release Bundles` 工作流自动构建并上传。
+
+1. 下载对应平台的 `.tar.gz`（Linux/macOS）或 `.zip`（Windows）并解压；
+2. 直接运行 `bin/shellsmith-mcp --allow-root /path/to/projects`；
+3. 不需要额外指定 `--cli`：MCP 会优先查找同目录的 `shield`，找不到时再查 `PATH`。
+
+MCP 客户端配置示例：
+
+```json
+{
+  "mcpServers": {
+    "shellsmith": {
+      "command": "/absolute/path/to/bin/shellsmith-mcp",
+      "args": ["--allow-root", "/absolute/path/to/projects"]
+    }
+  }
+}
+```
+
+发布包中的 `README.md` 也包含同样的配置。密码仍然只从启动环境读取，不要把明文密码写进客户端 JSON。
+
 ## 构建与启动
 
 ```bash
@@ -21,7 +44,7 @@ cargo build --release -p shellsmith-mcp
 
 | 参数 | 环境变量 | 说明 |
 |---|---|---|
-| `--cli PATH` | `SHELLSMITH_MCP_CLI` | `shield` 可执行文件；默认从 `PATH` 查找 `shield` |
+| `--cli PATH` | `SHELLSMITH_MCP_CLI` | `shield` 可执行文件；默认先找同目录，再查 `PATH` |
 | `--allow-root DIR` | `SHELLSMITH_MCP_ALLOWED_ROOTS` | 允许读写的目录，可重复；未配置时不限制路径。环境变量使用平台路径分隔符 |
 
 服务启动后从 stdin 读取 MCP 消息，向 stdout 写响应；诊断信息只写 stderr。

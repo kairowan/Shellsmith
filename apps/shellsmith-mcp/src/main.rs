@@ -14,14 +14,9 @@ use std::sync::Arc;
 #[derive(Debug, Parser)]
 #[command(name = "shellsmith-mcp", version, about)]
 struct Args {
-    /// shellsmith/shield CLI 可执行文件。
-    #[arg(
-        long,
-        env = "SHELLSMITH_MCP_CLI",
-        value_name = "PATH",
-        default_value = "shield"
-    )]
-    cli: PathBuf,
+    /// shellsmith/shield CLI 可执行文件；默认先找同目录的 shield，再找 PATH。
+    #[arg(long, env = "SHELLSMITH_MCP_CLI", value_name = "PATH")]
+    cli: Option<PathBuf>,
 
     /// 允许工具读写的工作目录；可重复。未配置时不限制路径。
     #[arg(long = "allow-root", value_name = "DIR")]
@@ -45,6 +40,26 @@ fn run() -> Result<()> {
         .into_iter()
         .map(|root| root.canonicalize().unwrap_or(root))
         .collect();
-    let server = Arc::new(jobs::Server::new(args.cli, roots));
+    let server = Arc::new(jobs::Server::new(
+        args.cli.unwrap_or_else(default_cli),
+        roots,
+    ));
     protocol::serve(server)
+}
+
+fn default_cli() -> PathBuf {
+    let name = if cfg!(windows) {
+        "shield.exe"
+    } else {
+        "shield"
+    };
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(directory) = executable.parent() {
+            let sibling = directory.join(name);
+            if sibling.is_file() {
+                return sibling;
+            }
+        }
+    }
+    PathBuf::from(name)
 }
