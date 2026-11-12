@@ -1430,11 +1430,11 @@ fn signing_step_message(step: SigningProgressStep) -> &'static str {
     }
 }
 
-pub(crate) fn run_check_apk(path: PathBuf) -> Result<String> {
-    match check_apk(&path, None) {
+pub(crate) fn run_check_apk(path: PathBuf, apksigner: Option<PathBuf>) -> Result<String> {
+    match check_apk(&path, apksigner.as_deref()) {
         Ok(result) => {
             let cert_fingerprint = if result.is_signed {
-                extract_apk_cert_fingerprint(&path, None).ok()
+                extract_apk_cert_fingerprint(&path, apksigner.as_deref()).ok()
             } else {
                 None
             };

@@ -36,8 +36,8 @@ fn execute(cli: Cli) -> Result<()> {
         Commands::ProtectXop(args) => run_protect_xop(args)?,
         Commands::ProtectIos(args) => run_protect_ios(args)?,
         Commands::Sign(args) => run_sign(config.merge_sign(args)?)?,
-        Commands::CheckApk { path } => {
-            let result = run_check_apk(path)?;
+        Commands::CheckApk { path, apksigner } => {
+            let result = run_check_apk(path, apksigner)?;
             println!("{result}");
         }
         Commands::CheckAab {
