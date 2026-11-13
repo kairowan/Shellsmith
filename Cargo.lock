@@ -2202,7 +2202,7 @@ dependencies = [
 
 [[package]]
 name = "mocika-shield"
-version = "1.10.1"
+version = "1.11.0"
 dependencies = [
  "dunce",
  "reqwest 0.12.28",
@@ -2230,7 +2230,7 @@ dependencies = [
 
 [[package]]
 name = "mocikashield"
-version = "1.10.1"
+version = "1.11.0"
 dependencies = [
  "cc",
  "chacha20poly1305",
@@ -3649,7 +3649,7 @@ dependencies = [
 
 [[package]]
 name = "shellsmith-mcp"
-version = "1.10.1"
+version = "1.11.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3662,7 +3662,7 @@ dependencies = [
 
 [[package]]
 name = "shield-cli"
-version = "1.10.1"
+version = "1.11.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3680,7 +3680,7 @@ dependencies = [
 
 [[package]]
 name = "shield-core"
-version = "1.10.1"
+version = "1.11.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
