@@ -608,9 +608,11 @@ fn dispatch(
         "shellsmith_check_aab" => check_aab(server, args),
         "shellsmith_check_ios" => {
             let input: CheckIosInput = parse(args)?;
+            let entry = absolute_entry_path(&input.project)?;
+            let entry_kind = entry.extension().and_then(|value| value.to_str());
             let project = server.resolve_input(&input.project, "Xcode 工程")?;
-            validate_ios_project(server, &project, true)?;
-            let mut cli_args = vec!["check-ios".to_string(), project.display().to_string()];
+            validate_ios_project(server, &project, entry_kind, true)?;
+            let mut cli_args = vec!["check-ios".to_string(), entry.display().to_string()];
             if let Some(scheme) = input.scheme {
                 cli_args.push("--scheme".into());
                 cli_args.push(scheme);
@@ -1715,6 +1717,15 @@ fn resolve_config_path(base: &Path, value: &str) -> PathBuf {
     }
 }
 
+fn absolute_entry_path(value: &str) -> Result<PathBuf> {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(std::env::current_dir()?.join(path))
+    }
+}
+
 const MAX_IOS_BUNDLE_ENTRIES: usize = 50_000;
 const MAX_IOS_BUNDLE_DEPTH: usize = 32;
 
@@ -1847,14 +1858,16 @@ fn ensure_ios_source_root_allowed(server: &Arc<Server>, project: &Path) -> Resul
 fn validate_ios_project(
     server: &Arc<Server>,
     project: &Path,
+    entry_kind: Option<&str>,
     require_source_root: bool,
 ) -> Result<()> {
-    match project.extension().and_then(|value| value.to_str()) {
+    match entry_kind {
         Some("xcodeproj") => {
             if require_source_root {
                 ensure_ios_source_root_allowed(server, project)?;
             }
-            validate_ios_bundle(server, project)
+            validate_ios_bundle(server, project)?;
+            validate_ios_cocoapods_paths(server, project)
         }
         Some("xcworkspace") => {
             ensure_ios_source_root_allowed(server, project)?;
@@ -1866,10 +1879,53 @@ fn validate_ios_project(
                     validate_ios_bundle(server, &project)?;
                 }
             }
-            Ok(())
+            validate_ios_cocoapods_paths(server, project)
         }
-        _ => Ok(()),
+        _ => anyhow::bail!(
+            "iOS 输入必须是 .xcodeproj 或 .xcworkspace: {}",
+            project.display()
+        ),
     }
+}
+
+/// CocoaPods 预检会直接读取源码根目录的锁文件；这些路径也必须受允许目录约束。
+fn validate_ios_cocoapods_paths(server: &Arc<Server>, project: &Path) -> Result<()> {
+    let Some(parent) = project.parent() else {
+        return Ok(());
+    };
+    let internal_workspace =
+        parent.extension().and_then(|value| value.to_str()) == Some("xcodeproj");
+    let root = if internal_workspace {
+        parent.parent().unwrap_or(parent)
+    } else {
+        parent
+    };
+    let project_dir = if internal_workspace { parent } else { project };
+    let pbx = fs::read_to_string(project_dir.join("project.pbxproj")).unwrap_or_default();
+    let uses_pods = root.join("Podfile").is_file()
+        || root.join("podfile").is_file()
+        || root.join("Podfile.lock").is_file()
+        || pbx.contains("PODS_ROOT")
+        || pbx.contains("[CP] Check Pods Manifest.lock");
+    if !uses_pods {
+        return Ok(());
+    }
+
+    for (path, label) in [
+        (root.join("Podfile"), "CocoaPods Podfile"),
+        (root.join("podfile"), "CocoaPods podfile"),
+        (root.join("Podfile.lock"), "CocoaPods Podfile.lock"),
+        (root.join("Pods/Manifest.lock"), "CocoaPods Manifest.lock"),
+        (
+            root.join("Pods/Pods.xcodeproj/project.pbxproj"),
+            "CocoaPods Pods 工程",
+        ),
+    ] {
+        if path.exists() {
+            server.resolve_input(&path.to_string_lossy(), label)?;
+        }
+    }
+    Ok(())
 }
 
 /// iOS 配置中的工程、entrypoint 和 Swift Confidential 路径也必须受允许目录约束。
@@ -1884,11 +1940,10 @@ fn validate_ios_config_paths(server: &Arc<Server>, config: &Path, dry_run: bool)
         .and_then(|project| project.get("path"))
         .and_then(toml::Value::as_str)
         .context("iOS 配置缺少 project.path")?;
-    let project_path = server.resolve_input(
-        &resolve_config_path(base, project).to_string_lossy(),
-        "iOS 工程",
-    )?;
-    validate_ios_project(server, &project_path, true)?;
+    let project_entry = resolve_config_path(base, project);
+    let entry_kind = project_entry.extension().and_then(|value| value.to_str());
+    let project_path = server.resolve_input(&project_entry.to_string_lossy(), "iOS 工程")?;
+    validate_ios_project(server, &project_path, entry_kind, true)?;
 
     let profile = value
         .get("protection")
@@ -1903,7 +1958,7 @@ fn validate_ios_config_paths(server: &Arc<Server>, config: &Path, dry_run: bool)
             .and_then(|project| project.get("entrypoint"))
             .and_then(toml::Value::as_str)
         {
-            let project_root = project_path.parent().unwrap_or(base);
+            let project_root = project_entry.parent().unwrap_or(base);
             server.resolve_input(
                 &resolve_config_path(project_root, entrypoint).to_string_lossy(),
                 "iOS entrypoint",
