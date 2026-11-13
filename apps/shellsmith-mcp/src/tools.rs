@@ -1434,6 +1434,7 @@ fn read_report(server: &Arc<Server>, args: Value) -> Result<ToolResult> {
     if path.extension().and_then(|value| value.to_str()) != Some("json") {
         anyhow::bail!("保护报告必须是 JSON 文件");
     }
+    ensure_regular_file(&path, "保护报告")?;
     let metadata = fs::metadata(&path)?;
     if metadata.len() > 64 * 1024 * 1024 {
         anyhow::bail!("保护报告超过 64 MiB");
@@ -1726,6 +1727,17 @@ fn absolute_entry_path(value: &str) -> Result<PathBuf> {
     }
 }
 
+fn ensure_regular_file(path: &Path, label: &str) -> Result<()> {
+    let metadata =
+        fs::metadata(path).with_context(|| format!("读取{label}元数据失败: {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.is_file(),
+        "{label}不是普通文件: {}",
+        path.display()
+    );
+    Ok(())
+}
+
 const MAX_IOS_BUNDLE_ENTRIES: usize = 50_000;
 const MAX_IOS_BUNDLE_DEPTH: usize = 32;
 
@@ -1903,10 +1915,13 @@ fn validate_ios_cocoapods_paths(server: &Arc<Server>, project: &Path) -> Result<
     let project_dir = if internal_workspace { parent } else { project };
     let pbx_path = project_dir.join("project.pbxproj");
     // 读取前先校验实际路径；内部 workspace 的父工程 pbx 不在 workspace bundle 的扫描范围内。
-    if pbx_path.exists() {
-        server.resolve_input(&pbx_path.to_string_lossy(), "iOS project.pbxproj")?;
-    }
-    let pbx = fs::read_to_string(&pbx_path).unwrap_or_default();
+    let pbx = if pbx_path.exists() {
+        let pbx_path = server.resolve_input(&pbx_path.to_string_lossy(), "iOS project.pbxproj")?;
+        ensure_regular_file(&pbx_path, "iOS project.pbxproj")?;
+        fs::read_to_string(&pbx_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
     let uses_pods = root.join("Podfile").is_file()
         || root.join("podfile").is_file()
         || root.join("Podfile.lock").is_file()
@@ -1935,6 +1950,7 @@ fn validate_ios_cocoapods_paths(server: &Arc<Server>, project: &Path) -> Result<
 
 /// iOS 配置中的工程、entrypoint 和 Swift Confidential 路径也必须受允许目录约束。
 fn validate_ios_config_paths(server: &Arc<Server>, config: &Path, dry_run: bool) -> Result<()> {
+    ensure_regular_file(config, "iOS 配置")?;
     let content = fs::read_to_string(config)
         .with_context(|| format!("读取 iOS 配置失败：{}", config.display()))?;
     let value: toml::Value = toml::from_str(&content).context("解析 iOS 配置失败")?;
