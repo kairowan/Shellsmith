@@ -2,7 +2,7 @@ use crate::jobs::{CommandPlan, JobPlan, Server};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1721,7 +1721,7 @@ const MAX_IOS_BUNDLE_DEPTH: usize = 32;
 /// 校验 iOS 工程 bundle 内实际会被读取的文件路径，重点拦截工程内部的文件级符号链接。
 fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
     let mut pending = vec![(root.to_path_buf(), 0usize)];
-    let mut visited = HashSet::new();
+    let mut visited: HashMap<PathBuf, usize> = HashMap::new();
     let mut entries = 0usize;
     while let Some((directory, depth)) = pending.pop() {
         anyhow::ensure!(
@@ -1730,9 +1730,13 @@ fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
             directory.display()
         );
         let directory = directory.canonicalize().unwrap_or(directory);
-        if !visited.insert(directory.clone()) {
+        if visited
+            .get(&directory)
+            .is_some_and(|previous_depth| *previous_depth <= depth)
+        {
             continue;
         }
+        visited.insert(directory.clone(), depth);
         let children = fs::read_dir(&directory)
             .with_context(|| format!("读取 iOS 工程目录失败: {}", directory.display()))?;
         for child in children {
@@ -1779,14 +1783,9 @@ fn collect_ios_projects(
     server: &Arc<Server>,
     root: &Path,
     depth: usize,
-    visited: &mut HashSet<PathBuf>,
     output: &mut Vec<PathBuf>,
 ) -> Result<()> {
     if depth > 2 {
-        return Ok(());
-    }
-    let root_key = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-    if !visited.insert(root_key) {
         return Ok(());
     }
     let entries = fs::read_dir(root)
@@ -1795,6 +1794,14 @@ fn collect_ios_projects(
         let entry = entry?;
         let path = entry.path();
         let is_project = path.extension().and_then(|value| value.to_str()) == Some("xcodeproj");
+        let skip = matches!(
+            entry.file_name().to_str(),
+            Some(".git" | "Pods" | ".build" | "DerivedData")
+        );
+        // CLI 在工程发现阶段按入口名跳过缓存目录，普通目录和目录链接一致。
+        if skip && !is_project {
+            continue;
+        }
         let metadata = fs::symlink_metadata(&path)
             .with_context(|| format!("读取 iOS workspace 路径失败: {}", path.display()))?;
         if metadata.file_type().is_symlink() {
@@ -1817,19 +1824,14 @@ fn collect_ios_projects(
             };
             if target.is_dir() {
                 server.ensure_allowed(&target, "iOS 工程内部路径")?;
-                collect_ios_projects(server, &target, depth + 1, visited, output)?;
+                collect_ios_projects(server, &target, depth + 1, output)?;
             }
             continue;
         }
         if is_project {
             output.push(path);
-        } else if metadata.is_dir()
-            && !matches!(
-                entry.file_name().to_str(),
-                Some(".git" | "Pods" | ".build" | "DerivedData")
-            )
-        {
-            collect_ios_projects(server, &path, depth + 1, visited, output)?;
+        } else if metadata.is_dir() {
+            collect_ios_projects(server, &path, depth + 1, output)?;
         }
     }
     Ok(())
@@ -1859,8 +1861,7 @@ fn validate_ios_project(
             validate_ios_bundle(server, project)?;
             if let Some(root) = project.parent() {
                 let mut projects = Vec::new();
-                let mut visited = HashSet::new();
-                collect_ios_projects(server, root, 0, &mut visited, &mut projects)?;
+                collect_ios_projects(server, root, 0, &mut projects)?;
                 for project in projects {
                     validate_ios_bundle(server, &project)?;
                 }
