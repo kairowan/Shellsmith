@@ -2,6 +2,7 @@ use crate::jobs::{CommandPlan, JobPlan, Server};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -608,7 +609,7 @@ fn dispatch(
         "shellsmith_check_ios" => {
             let input: CheckIosInput = parse(args)?;
             let project = server.resolve_input(&input.project, "Xcode 工程")?;
-            validate_ios_project(server, &project)?;
+            validate_ios_project(server, &project, true)?;
             let mut cli_args = vec!["check-ios".to_string(), project.display().to_string()];
             if let Some(scheme) = input.scheme {
                 cli_args.push("--scheme".into());
@@ -1720,6 +1721,7 @@ const MAX_IOS_BUNDLE_DEPTH: usize = 32;
 /// 校验 iOS 工程 bundle 内实际会被读取的文件路径，重点拦截工程内部的文件级符号链接。
 fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
     let mut pending = vec![(root.to_path_buf(), 0usize)];
+    let mut visited = HashSet::new();
     let mut entries = 0usize;
     while let Some((directory, depth)) = pending.pop() {
         anyhow::ensure!(
@@ -1727,6 +1729,10 @@ fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
             "iOS 工程目录层级过深，无法完成路径校验: {}",
             directory.display()
         );
+        let directory = directory.canonicalize().unwrap_or(directory);
+        if !visited.insert(directory.clone()) {
+            continue;
+        }
         let children = fs::read_dir(&directory)
             .with_context(|| format!("读取 iOS 工程目录失败: {}", directory.display()))?;
         for child in children {
@@ -1741,10 +1747,25 @@ fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
             let metadata = fs::symlink_metadata(&path)
                 .with_context(|| format!("读取 iOS 工程路径失败: {}", path.display()))?;
             if metadata.file_type().is_symlink() {
-                let target = path
-                    .canonicalize()
-                    .with_context(|| format!("iOS 工程内部符号链接无法解析: {}", path.display()))?;
-                server.ensure_allowed(&target, "iOS 工程内部路径")?;
+                let required = matches!(
+                    path.file_name().and_then(|value| value.to_str()),
+                    Some("project.pbxproj" | "contents.xcworkspacedata")
+                );
+                match path.canonicalize() {
+                    Ok(target) => {
+                        server.ensure_allowed(&target, "iOS 工程内部路径")?;
+                        if target.is_dir() {
+                            pending.push((target, depth + 1));
+                        }
+                    }
+                    Err(error) if required => {
+                        return Err(anyhow::Error::new(error).context(format!(
+                            "iOS 工程必需文件符号链接无法解析: {}",
+                            path.display()
+                        )));
+                    }
+                    Err(_) => {}
+                }
             } else if metadata.is_dir() {
                 pending.push((path, depth + 1));
             }
@@ -1758,9 +1779,14 @@ fn collect_ios_projects(
     server: &Arc<Server>,
     root: &Path,
     depth: usize,
+    visited: &mut HashSet<PathBuf>,
     output: &mut Vec<PathBuf>,
 ) -> Result<()> {
     if depth > 2 {
+        return Ok(());
+    }
+    let root_key = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if !visited.insert(root_key) {
         return Ok(());
     }
     let entries = fs::read_dir(root)
@@ -1768,19 +1794,34 @@ fn collect_ios_projects(
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
+        let is_project = path.extension().and_then(|value| value.to_str()) == Some("xcodeproj");
         let metadata = fs::symlink_metadata(&path)
             .with_context(|| format!("读取 iOS workspace 路径失败: {}", path.display()))?;
         if metadata.file_type().is_symlink() {
-            let target = path
-                .canonicalize()
-                .with_context(|| format!("iOS workspace 符号链接无法解析: {}", path.display()))?;
-            server.ensure_allowed(&target, "iOS 工程内部路径")?;
-            if target.extension().and_then(|value| value.to_str()) == Some("xcodeproj") {
+            if is_project {
+                let target = path.canonicalize().with_context(|| {
+                    format!("iOS workspace 工程符号链接无法解析: {}", path.display())
+                })?;
+                anyhow::ensure!(
+                    target.is_dir(),
+                    "iOS workspace 工程符号链接目标不是目录: {}",
+                    path.display()
+                );
+                server.ensure_allowed(&target, "iOS 工程内部路径")?;
                 output.push(target);
+                continue;
+            }
+            // CLI 只对 path.is_dir() 的链接继续遍历；失效或普通文件链接不会被读取。
+            let Ok(target) = path.canonicalize() else {
+                continue;
+            };
+            if target.is_dir() {
+                server.ensure_allowed(&target, "iOS 工程内部路径")?;
+                collect_ios_projects(server, &target, depth + 1, visited, output)?;
             }
             continue;
         }
-        if path.extension().and_then(|value| value.to_str()) == Some("xcodeproj") {
+        if is_project {
             output.push(path);
         } else if metadata.is_dir()
             && !matches!(
@@ -1788,20 +1829,38 @@ fn collect_ios_projects(
                 Some(".git" | "Pods" | ".build" | "DerivedData")
             )
         {
-            collect_ios_projects(server, &path, depth + 1, output)?;
+            collect_ios_projects(server, &path, depth + 1, visited, output)?;
         }
     }
     Ok(())
 }
 
-fn validate_ios_project(server: &Arc<Server>, project: &Path) -> Result<()> {
+fn ensure_ios_source_root_allowed(server: &Arc<Server>, project: &Path) -> Result<()> {
+    if let Some(root) = project.parent() {
+        server.ensure_allowed(root, "iOS 源码根目录")?;
+    }
+    Ok(())
+}
+
+fn validate_ios_project(
+    server: &Arc<Server>,
+    project: &Path,
+    require_source_root: bool,
+) -> Result<()> {
     match project.extension().and_then(|value| value.to_str()) {
-        Some("xcodeproj") => validate_ios_bundle(server, project),
+        Some("xcodeproj") => {
+            if require_source_root {
+                ensure_ios_source_root_allowed(server, project)?;
+            }
+            validate_ios_bundle(server, project)
+        }
         Some("xcworkspace") => {
+            ensure_ios_source_root_allowed(server, project)?;
             validate_ios_bundle(server, project)?;
             if let Some(root) = project.parent() {
                 let mut projects = Vec::new();
-                collect_ios_projects(server, root, 0, &mut projects)?;
+                let mut visited = HashSet::new();
+                collect_ios_projects(server, root, 0, &mut visited, &mut projects)?;
                 for project in projects {
                     validate_ios_bundle(server, &project)?;
                 }
@@ -1828,7 +1887,7 @@ fn validate_ios_config_paths(server: &Arc<Server>, config: &Path, dry_run: bool)
         &resolve_config_path(base, project).to_string_lossy(),
         "iOS 工程",
     )?;
-    validate_ios_project(server, &project_path)?;
+    validate_ios_project(server, &project_path, true)?;
 
     let profile = value
         .get("protection")
