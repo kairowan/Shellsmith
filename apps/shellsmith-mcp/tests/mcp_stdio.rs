@@ -992,6 +992,286 @@ fn rejects_internal_workspace_parent_pbx_symlink() {
 
 #[cfg(unix)]
 #[test]
+fn validates_uppercase_required_pbx_on_case_insensitive_fs() {
+    use std::os::unix::fs::symlink;
+
+    let sample = tempfile::tempdir().unwrap();
+    fs::write(sample.path().join("CaseProbe"), b"x").unwrap();
+    if !sample.path().join("CASEPROBE").exists() {
+        return;
+    }
+
+    let workspace = sample.path().join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let child = sample.path().join("Child.xcodeproj");
+    fs::create_dir_all(&child).unwrap();
+    let pbx = child.join("PROJECT.PBXPROJ");
+    assert!(Command::new("mkfifo").arg(&pbx).status().unwrap().success());
+    let cli = write_fake_cli(sample.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[sample.path()], &[]);
+    let started = Instant::now();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("不是普通文件"), "{check}");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "大写 FIFO pbx 阻塞了检查"
+    );
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": sample.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], true, "{protect}");
+    assert!(text(&protect).contains("不是普通文件"), "{protect}");
+
+    fs::remove_file(&pbx).unwrap();
+    symlink(sample.path().join("missing.pbxproj"), &pbx).unwrap();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("符号链接无法解析"), "{check}");
+
+    fs::remove_file(&pbx).unwrap();
+    fs::write(&pbx, b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.case;").unwrap();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], false, "{check}");
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_non_regular_cocoapods_locks_without_blocking() {
+    let sample = tempfile::tempdir().unwrap();
+    let workspace = sample.path().join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let project = sample.path().join("Inside.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+    let pods_project = sample.path().join("Pods/Pods.xcodeproj");
+    fs::create_dir_all(&pods_project).unwrap();
+    fs::write(pods_project.join("project.pbxproj"), b"// pods").unwrap();
+    fs::write(sample.path().join("Podfile"), b"platform :ios\n").unwrap();
+    let podfile_lock = sample.path().join("Podfile.lock");
+    let manifest_lock = sample.path().join("Pods/Manifest.lock");
+    fs::write(&manifest_lock, b"PODS:\n").unwrap();
+    assert!(Command::new("mkfifo")
+        .arg(&podfile_lock)
+        .status()
+        .unwrap()
+        .success());
+    let cli = write_fake_cli(sample.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[sample.path()], &[]);
+    let started = Instant::now();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    let check_elapsed = started.elapsed();
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("不是普通文件"), "{check}");
+    assert!(
+        check_elapsed < Duration::from_secs(5),
+        "FIFO 锁文件阻塞了检查: {check_elapsed:?}"
+    );
+
+    let started = Instant::now();
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": sample.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], true, "{protect}");
+    assert!(text(&protect).contains("不是普通文件"), "{protect}");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "FIFO 锁文件阻塞了保护预检"
+    );
+
+    fs::remove_file(&podfile_lock).unwrap();
+    fs::write(&podfile_lock, b"PODS:\n").unwrap();
+    fs::remove_file(&manifest_lock).unwrap();
+    assert!(Command::new("mkfifo")
+        .arg(&manifest_lock)
+        .status()
+        .unwrap()
+        .success());
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("不是普通文件"), "{check}");
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_non_regular_child_project_pbx_without_blocking() {
+    let sample = tempfile::tempdir().unwrap();
+    let workspace = sample.path().join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let child = sample.path().join("Child.xcodeproj");
+    fs::create_dir_all(&child).unwrap();
+    assert!(Command::new("mkfifo")
+        .arg(child.join("project.pbxproj"))
+        .status()
+        .unwrap()
+        .success());
+    let cli = write_fake_cli(sample.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[sample.path()], &[]);
+    let started = Instant::now();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("不是普通文件"), "{check}");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "FIFO 子工程 pbx 阻塞了检查"
+    );
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": sample.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], true, "{protect}");
+    assert!(text(&protect).contains("不是普通文件"), "{protect}");
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_non_regular_parent_pbx_without_blocking() {
+    let allowed = tempfile::tempdir().unwrap();
+    let host = allowed.path().join("Host.xcodeproj");
+    let workspace = host.join("project.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let fifo = host.join("project.pbxproj");
+    let status = Command::new("mkfifo").arg(&fifo).status().unwrap();
+    assert!(status.success(), "创建 FIFO 失败");
+    let cli = write_fake_cli(allowed.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    let started = Instant::now();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    let check_elapsed = started.elapsed();
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("不是普通文件"), "{check}");
+    assert!(
+        check_elapsed < Duration::from_secs(5),
+        "非普通文件阻塞了检查: {check_elapsed:?}"
+    );
+
+    let started = Instant::now();
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": allowed.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    let protect_elapsed = started.elapsed();
+    assert_eq!(protect["isError"], true, "{protect}");
+    assert!(text(&protect).contains("不是普通文件"), "{protect}");
+    assert!(
+        protect_elapsed < Duration::from_secs(5),
+        "非普通文件阻塞了保护预检: {protect_elapsed:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_non_regular_ios_config_and_report() {
+    let temp = tempfile::tempdir().unwrap();
+    let cli = write_fake_cli(temp.path());
+    let config_fifo = temp.path().join("ios.toml");
+    let report_fifo = temp.path().join("report.json");
+    for fifo in [&config_fifo, &report_fifo] {
+        let status = Command::new("mkfifo").arg(fifo).status().unwrap();
+        assert!(status.success(), "创建 FIFO 失败");
+    }
+
+    let mut client = McpClient::start(&cli, &[temp.path()], &[]);
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config_fifo.display().to_string(),
+            "output": temp.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], true, "{protect}");
+    assert!(text(&protect).contains("不是普通文件"), "{protect}");
+
+    let report = client.call(
+        "shellsmith_read_report",
+        json!({"path": report_fifo.display().to_string()}),
+    );
+    assert_eq!(report["isError"], true, "{report}");
+    assert!(text(&report).contains("不是普通文件"), "{report}");
+}
+
+#[cfg(unix)]
+#[test]
 fn rejects_cocoapods_lock_symlink_escape() {
     use std::os::unix::fs::symlink;
 
