@@ -992,7 +992,9 @@ fn rejects_internal_workspace_parent_pbx_symlink() {
 
 #[cfg(unix)]
 #[test]
-fn rejects_uppercase_non_regular_pbx_on_case_insensitive_fs() {
+fn validates_uppercase_required_pbx_on_case_insensitive_fs() {
+    use std::os::unix::fs::symlink;
+
     let sample = tempfile::tempdir().unwrap();
     fs::write(sample.path().join("CaseProbe"), b"x").unwrap();
     if !sample.path().join("CASEPROBE").exists() {
@@ -1003,11 +1005,8 @@ fn rejects_uppercase_non_regular_pbx_on_case_insensitive_fs() {
     fs::create_dir_all(&workspace).unwrap();
     let child = sample.path().join("Child.xcodeproj");
     fs::create_dir_all(&child).unwrap();
-    assert!(Command::new("mkfifo")
-        .arg(child.join("PROJECT.PBXPROJ"))
-        .status()
-        .unwrap()
-        .success());
+    let pbx = child.join("PROJECT.PBXPROJ");
+    assert!(Command::new("mkfifo").arg(&pbx).status().unwrap().success());
     let cli = write_fake_cli(sample.path());
     let config = workspace.join("ios.toml");
     fs::write(
@@ -1042,13 +1041,17 @@ fn rejects_uppercase_non_regular_pbx_on_case_insensitive_fs() {
     assert_eq!(protect["isError"], true, "{protect}");
     assert!(text(&protect).contains("不是普通文件"), "{protect}");
 
-    // 同名普通文件恢复后，大小写不敏感文件系统上应能正常通过。
-    fs::remove_file(child.join("PROJECT.PBXPROJ")).unwrap();
-    fs::write(
-        child.join("PROJECT.PBXPROJ"),
-        b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.case;",
-    )
-    .unwrap();
+    fs::remove_file(&pbx).unwrap();
+    symlink(sample.path().join("missing.pbxproj"), &pbx).unwrap();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("符号链接无法解析"), "{check}");
+
+    fs::remove_file(&pbx).unwrap();
+    fs::write(&pbx, b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.case;").unwrap();
     let check = client.call(
         "shellsmith_check_ios",
         json!({"project": workspace.display().to_string()}),

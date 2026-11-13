@@ -1760,15 +1760,30 @@ fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
             continue;
         }
         visited.insert(directory.clone(), depth);
-        // 直接按 CLI 会打开的小写路径检查类型；大小写不敏感文件系统会命中大写目录项。
+        // 使用 CLI 的读取路径，让文件系统匹配大小写，同时识别必需文件的失效链接。
         for name in ["project.pbxproj", "contents.xcworkspacedata"] {
-            let required = directory.join(name);
-            if required.exists() {
-                let target = required
-                    .canonicalize()
-                    .with_context(|| format!("iOS 工程必需文件无法解析: {}", required.display()))?;
+            let path = directory.join(name);
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("读取 iOS 工程必需文件元数据失败: {}", path.display())
+                    });
+                }
+            };
+            if metadata.file_type().is_symlink() {
+                let target = path.canonicalize().with_context(|| {
+                    format!("iOS 工程必需文件符号链接无法解析: {}", path.display())
+                })?;
                 server.ensure_allowed(&target, "iOS 工程内部路径")?;
                 ensure_regular_file(&target, "iOS 工程必需文件")?;
+            } else {
+                anyhow::ensure!(
+                    metadata.is_file(),
+                    "iOS 工程必需文件不是普通文件: {}",
+                    path.display()
+                );
             }
         }
         let children = fs::read_dir(&directory)
@@ -1782,42 +1797,18 @@ fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
                 root.display()
             );
             let path = child.path();
-            let required = matches!(
-                path.file_name().and_then(|value| value.to_str()),
-                Some("project.pbxproj" | "contents.xcworkspacedata")
-            );
-            let metadata = fs::symlink_metadata(&path)
+            let file_type = child
+                .file_type()
                 .with_context(|| format!("读取 iOS 工程路径失败: {}", path.display()))?;
-            if metadata.file_type().is_symlink() {
-                match path.canonicalize() {
-                    Ok(target) => {
-                        server.ensure_allowed(&target, "iOS 工程内部路径")?;
-                        if required {
-                            anyhow::ensure!(
-                                target.is_file(),
-                                "iOS 工程必需文件不是普通文件: {}",
-                                path.display()
-                            );
-                        }
-                        if target.is_dir() {
-                            pending.push((target, depth + 1));
-                        }
-                    }
-                    Err(error) if required => {
-                        return Err(anyhow::Error::new(error).context(format!(
-                            "iOS 工程必需文件符号链接无法解析: {}",
-                            path.display()
-                        )));
-                    }
-                    Err(_) => {}
+            if file_type.is_symlink() {
+                let Ok(target) = path.canonicalize() else {
+                    continue;
+                };
+                server.ensure_allowed(&target, "iOS 工程内部路径")?;
+                if target.is_dir() {
+                    pending.push((target, depth + 1));
                 }
-            } else if required {
-                anyhow::ensure!(
-                    metadata.is_file(),
-                    "iOS 工程必需文件不是普通文件: {}",
-                    path.display()
-                );
-            } else if metadata.is_dir() {
+            } else if file_type.is_dir() {
                 pending.push((path, depth + 1));
             }
         }
