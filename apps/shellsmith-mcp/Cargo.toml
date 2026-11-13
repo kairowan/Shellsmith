@@ -1,6 +1,6 @@
 [package]
 name = "shellsmith-mcp"
-version = "1.10.1"
+version = "1.11.0"
 edition = "2021"
 authors = ["MocikaDev"]
 license = "MIT OR Apache-2.0"
