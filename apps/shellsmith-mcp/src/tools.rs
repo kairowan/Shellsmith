@@ -1760,6 +1760,17 @@ fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
             continue;
         }
         visited.insert(directory.clone(), depth);
+        // 直接按 CLI 会打开的小写路径检查类型；大小写不敏感文件系统会命中大写目录项。
+        for name in ["project.pbxproj", "contents.xcworkspacedata"] {
+            let required = directory.join(name);
+            if required.exists() {
+                let target = required
+                    .canonicalize()
+                    .with_context(|| format!("iOS 工程必需文件无法解析: {}", required.display()))?;
+                server.ensure_allowed(&target, "iOS 工程内部路径")?;
+                ensure_regular_file(&target, "iOS 工程必需文件")?;
+            }
+        }
         let children = fs::read_dir(&directory)
             .with_context(|| format!("读取 iOS 工程目录失败: {}", directory.display()))?;
         for child in children {
