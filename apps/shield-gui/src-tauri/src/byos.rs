@@ -1,9 +1,10 @@
 use crate::cert_store::CertificateStoreState;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use shield_core::local_secret::{decrypt_secret, encrypt_secret, load_storage_key};
 
 const PREFIX: &str = "byos_profile:";
+const SELECTED: &str = "selected_byos_profile_id";
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +31,13 @@ pub(crate) struct ProfileInput {
     pub auth_mode: String,
     pub runtime_cert: Option<String>,
     pub api_key: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Profiles {
+    profiles: Vec<Profile>,
+    selected_id: Option<String>,
 }
 
 fn record_key(id: &str) -> Result<String, String> {
@@ -122,8 +130,11 @@ fn resolve_input(
 fn save(store: &CertificateStoreState, input: ProfileInput) -> Result<Profile, String> {
     let saved = resolve_input(store, input)?;
     validate(&saved)?;
-    let conn = store.open()?;
-    let count: i64 = conn
+    let mut conn = store.open()?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|_| "保存 BYOS 配置失败")?;
+    let count: i64 = tx
         .query_row(
             "SELECT count(*) FROM app_state WHERE key LIKE 'byos_profile:%'",
             [],
@@ -132,31 +143,74 @@ fn save(store: &CertificateStoreState, input: ProfileInput) -> Result<Profile, S
         .map_err(|_| "读取 BYOS 配置失败")?;
     let key = load_storage_key(&store.byos_key_path(), count == 0)?;
     let json = serde_json::to_string(&saved).map_err(|_| "编码 BYOS 配置失败")?;
-    conn.execute("INSERT INTO app_state(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    tx.execute("INSERT INTO app_state(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         params![record_key(&saved.profile.id)?, encrypt_secret(&key, &json)?]).map_err(|_| "保存 BYOS 配置失败")?;
+    set_selected(&tx, Some(&saved.profile.id))?;
+    tx.commit().map_err(|_| "保存 BYOS 配置失败")?;
     Ok(saved.profile)
 }
 
-#[tauri::command]
-pub(crate) fn list_byos_profiles(
-    store: tauri::State<'_, CertificateStoreState>,
-) -> Result<Vec<Profile>, String> {
+fn set_selected(conn: &Connection, id: Option<&str>) -> Result<(), String> {
+    if let Some(id) = id {
+        let updated = conn.execute(
+            "INSERT INTO app_state(key,value) SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM app_state WHERE key=?3) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![SELECTED, id, record_key(id)?],
+        ).map_err(|_| "保存 BYOS 选择失败")?;
+        if updated == 0 {
+            return Err("未找到 BYOS 配置，请重新选择".into());
+        }
+    } else {
+        conn.execute("DELETE FROM app_state WHERE key=?1", [SELECTED])
+            .map_err(|_| "保存 BYOS 选择失败")?;
+    }
+    Ok(())
+}
+
+fn list(store: &CertificateStoreState) -> Result<Profiles, String> {
     let conn = store.open()?;
+    let selected_id = conn
+        .query_row(
+            "SELECT value FROM app_state WHERE key=?1",
+            [SELECTED],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|_| "读取 BYOS 选择失败")?;
     let mut stmt = conn
         .prepare("SELECT key FROM app_state WHERE key LIKE 'byos_profile:%' ORDER BY key")
         .map_err(|_| "读取 BYOS 配置失败")?;
     let ids = stmt
         .query_map([], |r| r.get::<_, String>(0))
         .map_err(|_| "读取 BYOS 配置失败")?;
-    ids.map(|id| {
-        load(
-            &store,
-            id.map_err(|_| "读取 BYOS 配置失败")?
-                .trim_start_matches(PREFIX),
-        )
-        .map(|v| v.profile)
+    let profiles = ids
+        .map(|id| {
+            load(
+                store,
+                id.map_err(|_| "读取 BYOS 配置失败")?
+                    .trim_start_matches(PREFIX),
+            )
+            .map(|v| v.profile)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Profiles {
+        profiles,
+        selected_id,
     })
-    .collect()
+}
+
+#[tauri::command]
+pub(crate) fn list_byos_profiles(
+    store: tauri::State<'_, CertificateStoreState>,
+) -> Result<Profiles, String> {
+    list(&store)
+}
+
+#[tauri::command]
+pub(crate) fn select_byos_profile(
+    store: tauri::State<'_, CertificateStoreState>,
+    id: Option<String>,
+) -> Result<(), String> {
+    set_selected(&store.open()?, id.as_deref())
 }
 
 #[tauri::command]
@@ -188,9 +242,16 @@ pub(crate) fn delete_byos_profile(
     store: tauri::State<'_, CertificateStoreState>,
     id: String,
 ) -> Result<(), String> {
+    delete(&store, &id)
+}
+
+fn delete(store: &CertificateStoreState, id: &str) -> Result<(), String> {
     store
         .open()?
-        .execute("DELETE FROM app_state WHERE key=?1", [record_key(&id)?])
+        .execute(
+            "DELETE FROM app_state WHERE key=?1 OR (key=?2 AND value=?3)",
+            params![record_key(id)?, SELECTED, id],
+        )
         .map_err(|_| "删除 BYOS 配置失败")?;
     Ok(())
 }
@@ -235,7 +296,11 @@ mod tests {
         let raw: String = store
             .open()
             .unwrap()
-            .query_row("SELECT value FROM app_state", [], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM app_state WHERE key=?1",
+                [record_key(&profile.id).unwrap()],
+                |r| r.get(0),
+            )
             .unwrap();
         assert!(raw.starts_with("enc:v1:"));
         assert!(!raw.contains("private-build-token"));
@@ -258,5 +323,55 @@ mod tests {
         assert!(load(&store, &profile.id).is_err());
         assert!(save(&store, input(None, Some("new-token".into()))).is_err());
         assert!(!store.byos_key_path().exists());
+    }
+
+    #[test]
+    fn 重启后恢复最近选择并保留离线选择() {
+        let dir = tempfile::tempdir().unwrap();
+        let open = || {
+            CertificateStoreState::new(dir.path().join("shield.db"), dir.path().join("keystores"))
+        };
+        let store = open();
+        store
+            .open()
+            .unwrap()
+            .execute_batch("CREATE TABLE app_state(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        let input = |name: &str| ProfileInput {
+            id: None,
+            name: name.into(),
+            endpoint: "https://keys.example".into(),
+            auth_mode: "device_approval".into(),
+            runtime_cert: None,
+            api_key: Some("test-build-token".into()),
+        };
+        let first = save(&store, input("服务一")).unwrap();
+        let second = save(&store, input("服务二")).unwrap();
+        drop(store);
+
+        let reopened = open();
+        let saved = list(&reopened).unwrap();
+        assert_eq!(saved.profiles.len(), 2);
+        assert_eq!(saved.selected_id.as_deref(), Some(second.id.as_str()));
+        assert!(!serde_json::to_string(&saved)
+            .unwrap()
+            .contains("test-build-token"));
+        assert_eq!(
+            load(&reopened, &second.id).unwrap().api_key,
+            "test-build-token"
+        );
+
+        set_selected(&reopened.open().unwrap(), Some(&first.id)).unwrap();
+        delete(&reopened, &second.id).unwrap();
+        assert_eq!(
+            list(&open()).unwrap().selected_id.as_deref(),
+            Some(first.id.as_str())
+        );
+        set_selected(&reopened.open().unwrap(), None).unwrap();
+        assert_eq!(list(&open()).unwrap().selected_id, None);
+        set_selected(&reopened.open().unwrap(), Some(&first.id)).unwrap();
+        delete(&reopened, &first.id).unwrap();
+        assert_eq!(list(&open()).unwrap().selected_id, None);
+        assert!(set_selected(&reopened.open().unwrap(), Some(&first.id)).is_err());
     }
 }

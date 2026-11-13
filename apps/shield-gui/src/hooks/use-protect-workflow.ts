@@ -38,15 +38,16 @@ export function useProtectWorkflow({
   locale,
   certificate,
   buildInfo,
+  byosProfile,
   defaults,
 }: {
   active: boolean;
   locale: Locale;
   certificate: CertificateRecord | null;
   buildInfo: BuildInfo | null;
+  byosProfile: ByosProfile | null;
   defaults: ProtectDefaults;
 }) {
-  const [byosProfile, setByosProfile] = useState<ByosProfile | null>(null);
   const [input, setInput] = useState("");
   const sharing = useApplicationSharing(input);
   const [outputFilename, setOutputFilenameState] = useState("");
@@ -364,7 +365,6 @@ export function useProtectWorkflow({
     : ["CheckTools", "Unpack", "ModifyManifest", "ProcessDex", "InjectRuntime", "Repack", "AlignApk"];
 
   return {
-    byosProfile, setByosProfile,
     sharing,
     excludedAbis,
     input,

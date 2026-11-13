@@ -587,6 +587,7 @@ fn main() {
             protect_aab,
             protect_apk,
             byos::list_byos_profiles,
+            byos::select_byos_profile,
             byos::save_byos_profile,
             byos::test_byos_connection,
             byos::delete_byos_profile,

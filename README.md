@@ -30,6 +30,7 @@ Android 侧提供 APK/AAB 的 DEX 加密、证书绑定、PVM2 方法虚拟化�
 - **加固前检查与失败诊断**：检查签名、已有加固、系统要求、ABI 等兼容信号；失败时给出脱敏诊断摘要，可预览后确认发送。
 - **少重复配置**：记住常用加固选项和证书选择，支持自定义输出目录与文件名，任务开始后固定本次配置。
 - **安装兼容**：处理 APK ZIP 对齐及常见 Native 库问题；标准模式与 Android 4.4 工控模式分开选择。
+- **CLI 与 MCP**：在本机脚本或支持 stdio MCP 的客户端中执行加固、签名、预检和报告读取，可查询和取消长任务。接入方式见 [MCP 指南](docs/mcp.md)。
 
 两条链路都用于提高静态分析、篡改和非法重签的成本，不承诺无法脱壳或逆向。
 
@@ -44,6 +45,8 @@ Android 侧提供 APK/AAB 的 DEX 加密、证书绑定、PVM2 方法虚拟化�
 | Windows | `Shellsmith_x.y.z_windows_x64_setup.exe` |
 | macOS | `Shellsmith_x.y.z_macos_universal.dmg` |
 | Linux | `Shellsmith_x.y.z_linux_amd64.AppImage` 或 `.deb` |
+
+需要命令行或 MCP 时，可下载发布页中可用的 `Shellsmith-cli-<version>-<platform>` 包，或按 [MCP 指南](docs/mcp.md) 从源码构建。
 
 ### 环境要求
 
@@ -157,9 +160,11 @@ BYOS（Bring Your Own Server）把产物 IKM 从 APK 中移出，适合需要自
 
 1. 按协议部署自建 HTTPS 服务端，创建应用策略和构建 API key。源码构建需分别生成设备授权和 Play 资源：`make build-byos`、`make build-byos-play`；正式发布包已包含对应资源。
 2. 在 Shellsmith 的“密钥交付 → 新增服务”中填写 HTTPS 基础地址、构建 API key、授权方式和最终证书 SHA-256。
-3. 测试连接，加固并签名 APK。每个产物注册后获得新的 `token_id`。
+3. 测试连接，点击“保存并使用”，再加固并签名 APK。每个产物注册后获得新的 `token_id`。
 4. 设备模式首次启动会被拒绝，管理员批准设备后重新启动；Play 模式使用 Play 测试轨道 APK 验证。
 5. 撤销设备或产物后，后续取钥失败；已经进入进程的 IKM 和明文代码无法远程收回。
+
+桌面端会在重启后恢复上次选择的服务或本地离线模式。服务资料和构建 API key 在本地加密保存，编辑时可留空沿用已保存的 key。被加固的 APK 每次启动仍按服务端策略取钥。
 
 ### 安全边界
 
@@ -169,7 +174,7 @@ BYOS（Bring Your Own Server）把产物 IKM 从 APK 中移出，适合需要自
 - 构建 API key 只用于加固注册，不进入 APK，也不具备运行时授权能力。
 - AAB、iOS 和 Android 4.4 兼容模式不支持 BYOS。
 
-Shellsmith 不托管 BYOS 服务端。仓库提供一份可独立部署的 Go/PostgreSQL 参考实现，包含设备批准、Play Integrity、防重放、审计、主密钥轮换和 `migrate-backend`，支持本机 `local_aead`、AWS KMS、GCP KMS（含 Cloud HSM）和 PKCS#11 HSM。
+BYOS 由使用者自行部署。仓库记录了独立的 Go/PostgreSQL 服务端参考实现，包含设备批准、Play Integrity、防重放、审计、主密钥轮换和 `migrate-backend`，支持本机 `local_aead`、AWS KMS、GCP KMS（含 Cloud HSM）和 PKCS#11 HSM。管理操作通过服务端 CLI 完成。
 
 - [BYOS HTTPS 密钥服务接入协议](docs/design/byos-key-server.md)
 - [服务端参考实现与部署](docs/design/byos-key-server-reference.md)
@@ -247,7 +252,9 @@ iOS balanced/strict 会让目标应用直接集成 freeRASP；其 `watcherMail`�
 | BYOS 本地验证与真实设备排障 | [本地验证记录](docs/process/byos-local-validation.md) |
 | 后续规划 | [路线图](docs/process/roadmap.md) |
 
-CLI 与 MCP Server 可从源码构建；`make release` / `scripts/release-cli.sh` 生成的本地 CLI 包同时包含 `shield` 和 `shellsmith-mcp`。构建顺序为先 `make build-stub`，再 `make build-cli` 或 `make build-gui`；完整依赖与平台步骤以构建指南为准。
+`apps/shield-gui` 是由 Tauri 承载的桌面前端，提供加固、签名、证书和设置界面。`tools/stats-worker` 提供维护统计、错误报告和用户反馈的 JSON 接口。参见[桌面架构](docs/design/gui.md)和[项目维护统计](docs/ops/project-statistics.md)。
+
+`make release` / `scripts/release-cli.sh` 生成的本地 CLI 包包含 `shield` 和 `shellsmith-mcp`。构建顺序为先 `make build-stub`，再 `make build-cli` 或 `make build-gui`。完整依赖与平台步骤见构建指南。
 
 <details>
 <summary>CI/CD 与跨平台发布</summary>
