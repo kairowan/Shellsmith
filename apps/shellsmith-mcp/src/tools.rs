@@ -1771,16 +1771,23 @@ fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
                 root.display()
             );
             let path = child.path();
+            let required = matches!(
+                path.file_name().and_then(|value| value.to_str()),
+                Some("project.pbxproj" | "contents.xcworkspacedata")
+            );
             let metadata = fs::symlink_metadata(&path)
                 .with_context(|| format!("读取 iOS 工程路径失败: {}", path.display()))?;
             if metadata.file_type().is_symlink() {
-                let required = matches!(
-                    path.file_name().and_then(|value| value.to_str()),
-                    Some("project.pbxproj" | "contents.xcworkspacedata")
-                );
                 match path.canonicalize() {
                     Ok(target) => {
                         server.ensure_allowed(&target, "iOS 工程内部路径")?;
+                        if required {
+                            anyhow::ensure!(
+                                target.is_file(),
+                                "iOS 工程必需文件不是普通文件: {}",
+                                path.display()
+                            );
+                        }
                         if target.is_dir() {
                             pending.push((target, depth + 1));
                         }
@@ -1793,6 +1800,12 @@ fn validate_ios_bundle(server: &Arc<Server>, root: &Path) -> Result<()> {
                     }
                     Err(_) => {}
                 }
+            } else if required {
+                anyhow::ensure!(
+                    metadata.is_file(),
+                    "iOS 工程必需文件不是普通文件: {}",
+                    path.display()
+                );
             } else if metadata.is_dir() {
                 pending.push((path, depth + 1));
             }
@@ -1931,18 +1944,26 @@ fn validate_ios_cocoapods_paths(server: &Arc<Server>, project: &Path) -> Result<
         return Ok(());
     }
 
-    for (path, label) in [
-        (root.join("Podfile"), "CocoaPods Podfile"),
-        (root.join("podfile"), "CocoaPods podfile"),
-        (root.join("Podfile.lock"), "CocoaPods Podfile.lock"),
-        (root.join("Pods/Manifest.lock"), "CocoaPods Manifest.lock"),
+    for (path, label, regular_required) in [
+        (root.join("Podfile"), "CocoaPods Podfile", false),
+        (root.join("podfile"), "CocoaPods podfile", false),
+        (root.join("Podfile.lock"), "CocoaPods Podfile.lock", true),
+        (
+            root.join("Pods/Manifest.lock"),
+            "CocoaPods Manifest.lock",
+            true,
+        ),
         (
             root.join("Pods/Pods.xcodeproj/project.pbxproj"),
             "CocoaPods Pods 工程",
+            false,
         ),
     ] {
         if path.exists() {
-            server.resolve_input(&path.to_string_lossy(), label)?;
+            let resolved = server.resolve_input(&path.to_string_lossy(), label)?;
+            if regular_required {
+                ensure_regular_file(&resolved, label)?;
+            }
         }
     }
     Ok(())
