@@ -15,21 +15,23 @@ Shellsmith is a desktop hardening tool for Android and iOS apps, with two key-de
 
 On Android, Shellsmith provides DEX encryption and certificate binding for APK/AAB, PVM2 method virtualization, baseline anti-debugging, and optional strict protection, then repackages, aligns, and signs the output. On iOS, it works on an isolated copy, integrates Swift Confidential and freeRASP, then archives, exports, and verifies signing. Apart from registration and key fetch against your own service in online mode, APKs, certificates, signing materials, and passwords are never uploaded or sent to Shellsmith maintainers.
 
-A desktop GUI is available for Windows, macOS, and Linux, with Chinese and English interfaces. The CLI is built from source for automation.
+A desktop GUI is available for Windows, macOS, and Linux, with Chinese and English interfaces. Starting with 1.11.0, the CLI and local MCP server are also available as a separate download.
 
 > Use only with applications you own or are authorized to protect. Do not bypass third-party protections or use this tool for unauthorized purposes.
 
-**Quick navigation** · [Capabilities](#core-capabilities) · [Quick Start](#quick-start) · [Compatibility](#compatibility-and-limitations) · [Online Keys (BYOS)](#byos-out-of-package-keys) · [Security Scope](#how-it-works-and-security-scope) · [Documentation](#documentation-and-development)
+**Quick navigation** · [Capabilities](#core-capabilities) · [Quick Start](#quick-start) · [SO Protection](#android-so-protection) · [CLI and MCP](#cli-and-mcp) · [Compatibility](#compatibility-and-limitations) · [Online Keys (BYOS)](#byos-out-of-package-keys) · [Security Scope](#how-it-works-and-security-scope) · [Documentation](#documentation-and-development)
 
 ## Core Capabilities
 
 - **Two key-delivery modes:** **Offline keys** are derived locally and wrapped into the artifact, requiring no network or key service. **Online keys (BYOS)** keep the IKM on your self-hosted HTTPS service; the artifact carries only the service URL and token and fetches the key at launch after device approval or Play Integrity authorization. See [BYOS Out-of-Package Keys](#byos-out-of-package-keys).
 - **Android code protection:** encrypt application DEX files, bind them to the original certificate, and support PVM2 method virtualization, baseline anti-debugging, and optional strict protection; then repackage, align, and sign.
+- **Android SO protection** encrypts eligible function regions in application `.so` files packaged in an APK or AAB in strict mode. See [Android SO Protection](#android-so-protection).
 - **iOS source protection:** modify an isolated working copy with Swift Confidential and freeRASP, then archive, export, and verify it with `xcodebuild`. The original project is left unchanged.
 - **Integrated signing:** import, create, and manage certificates; sign protected output automatically or sign an APK independently.
 - **Preflight checks and diagnostics:** inspect signatures, existing protection, system requirements, and ABIs; on failure, show a sanitized summary that can be previewed before submission.
 - **Reusable settings:** remember protection options and the certificate choice, customize output directory and filename, and freeze each task's configuration.
 - **Installation compatibility:** handle APK ZIP alignment and common native-library cases, with separate standard and Android 4.4 industrial modes.
+- **CLI and MCP** support local automation. MCP provides 16 tools over stdio for preflight checks, hardening, signing, APKS installation, report reading, and job control. See [CLI and MCP](#cli-and-mcp).
 
 Both pipelines raise the cost of static analysis, tampering, and unauthorized re-signing. They do not guarantee that an app cannot be unpacked or reverse engineered.
 
@@ -64,6 +66,16 @@ Signing status depends on how the package was produced:
 4. Review the output directory, filename, automatic signing certificate, and per-app sharing choice, then start protection.
 5. Test the signed output on target devices: installation, launch, core functionality, and upgrade installation.
 
+### Android SO Protection
+
+In **Protect**, select a signed APK and set the protection profile to **Strict code protection (PVM2 required)**. Use the bundled PVM2 Packer and specify your application's class prefixes or a list of critical methods. This requires Java 17 or later. Shellsmith encrypts eligible function regions in the packaged `.so` files and decrypts them at runtime. If any ABI variant of a library lacks suitable function symbols or has incompatible relocations, Shellsmith skips the library across all ABIs. Review the protection log for encrypted and skipped libraries, then test JNI calls and app behavior on target devices.
+
+For an AAB, select **Strict (PVM2 + PAS2 + PSO2)** under **AAB · Google Play**. For a multi-module AAB, native libraries must pass module protection checks before Shellsmith writes the output. [Usage guide](docs/usage.md#基础用法)
+
+APK repackaging preserves the original `android:extractNativeLibs` setting. When explicitly set to `false`, packaged `.so` files are stored uncompressed and aligned to 16 KB in the ZIP. Each library's ELF segments still need to meet the target device's alignment requirements. [Native library packaging](docs/design/native-library-packaging.md)
+
+**Protection for standalone SO files and Android project `jniLibs` directories is in development** and is unavailable in the 1.11.0 release.
+
 ### iOS Quick Start
 
 Install full Xcode on macOS, open **Protect → iOS**, select an `.xcodeproj` or `.xcworkspace`, enter the scheme, Team ID, and Bundle ID, run the check, and choose a separate empty output directory. `confidential.yml`, the freeRASP watcher email, and the App Attest server endpoint are all optional. Strict client hardening works without an endpoint, but it does not include a server-side device-attestation loop.
@@ -86,6 +98,25 @@ xattr -rd com.apple.quarantine /Applications/Shellsmith.app
 This removes quarantine; it does not mean the application is notarized by Apple. Open it again. See the [usage guide](docs/usage.md) for more help.
 
 </details>
+
+### CLI and MCP
+
+Download the matching `Shellsmith-cli-<version>-<platform>` archive for macOS Universal, Linux x86_64, or Windows x86_64. After extraction, run `shield` from `bin/` for CLI use. The `shellsmith-mcp` executable locates `shield` in the same directory. On Windows, both executable names end in `.exe`. [Download CLI and MCP](https://github.com/kairowan/Shellsmith/releases/latest)
+
+In a client that supports stdio MCP, replace the paths below with absolute paths on your machine. The allowed directory should cover the inputs and outputs of your jobs.
+
+```json
+{
+  "mcpServers": {
+    "shellsmith": {
+      "command": "/absolute/path/to/bin/shellsmith-mcp",
+      "args": ["--allow-root", "/absolute/path/to/projects"]
+    }
+  }
+}
+```
+
+Call `shellsmith_version` to verify the connection and `shellsmith_check_apk` to inspect an APK. Pass `confirm: true` when performing hardening, signing, or installation. Long-running jobs return a `job_id` for checking progress, retrieving results, or cancelling. Supply signing passwords and BYOS build API keys through the MCP process environment. [Tool list and iOS setup](docs/mcp.md)
 
 ## Preview
 
@@ -249,7 +280,7 @@ The iOS balanced and strict profiles integrate freeRASP directly into the target
 
 `apps/shield-gui` is the Tauri desktop frontend for hardening, signing, certificate management, and settings. `tools/stats-worker` provides JSON endpoints for maintenance statistics, error reports, and feedback. See the [desktop architecture](docs/design/gui.md) and [maintenance statistics guide](docs/ops/project-statistics.md).
 
-Use the local CLI or stdio MCP server to automate hardening, signing, preflight checks, and report reading. See the [MCP guide](docs/mcp.md) for installation and client setup. Local `make release` / `scripts/release-cli.sh` CLI packages include both `shield` and `shellsmith-mcp`. Run `make build-stub` first, then `make build-cli` or `make build-gui`.
+Local `make release` / `scripts/release-cli.sh` CLI packages include both `shield` and `shellsmith-mcp`. Run `make build-stub` first, then `make build-cli` or `make build-gui`.
 
 <details>
 <summary>CI/CD and Cross-Platform Releases</summary>
