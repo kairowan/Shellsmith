@@ -15,22 +15,23 @@ Shellsmith 是一款面向 Android 与 iOS 的桌面应用加固工具，支持*
 
 Android 侧提供 APK/AAB 的 DEX 加密、证书绑定、PVM2 方法虚拟化、基础反调试与可选的严格保护，并完成重打包、ZIP 对齐和自动签名；iOS 侧在独立工作副本中接入 Swift Confidential 与 freeRASP，完成 Archive、导出和签名验证。除在线密钥模式向你的服务端注册和取钥外，APK、证书、签名材料与密码不会上传，也不会发送给 Shellsmith 维护者。
 
-提供 Windows、macOS、Linux 桌面 GUI（中英文界面），CLI 可从源码构建用于自动化和本地开发。
+提供 Windows、macOS、Linux 桌面 GUI（中英文界面）。从 1.11.0 起，发布页也提供 CLI 与本地 MCP 服务的独立下载包。
 
 > 仅用于保护你拥有合法权利的 Android 与 iOS 应用，请勿用于绕过第三方保护或其他未授权场景。
 
-**快速导航** · [核心能力](#核心能力) · [快速开始](#快速开始) · [兼容性](#兼容性与限制) · [在线密钥（BYOS）](#byos-包外密钥) · [安全边界](#工作原理与安全边界) · [文档](#文档与开发)
+**快速导航** · [核心能力](#核心能力) · [快速开始](#快速开始) · [SO 加固](#android-so-加固) · [CLI 与 MCP](#cli-与-mcp) · [兼容性](#兼容性与限制) · [在线密钥（BYOS）](#byos-包外密钥) · [安全边界](#工作原理与安全边界) · [文档](#文档与开发)
 
 ## 核心能力
 
 - **双密钥交付**：**离线密钥**由本机派生并封装进产物，无需网络和密钥服务；**在线密钥（BYOS）**把 IKM 托管到自建 HTTPS 服务，产物只携带服务地址和 token，启动时经设备批准或 Play Integrity 授权取回。详见 [BYOS 包外密钥](#byos-包外密钥)。
 - **Android 代码保护**：加密业务 DEX 并绑定原签名证书；支持 PVM2 方法虚拟化、基础反调试和可选的严格保护；重新打包、对齐并按需签名。
+- **Android SO 加固**在严格保护模式下加密 APK/AAB 内符合条件的业务 `.so` 函数区域。见 [Android SO 加固](#android-so-加固)。
 - **iOS 源码保护**：在独立工作副本中接入 Swift Confidential 与 freeRASP，再用 `xcodebuild` 完成 Archive、导出和签名验证，原工程不被修改。
 - **加固签名一体化**：导入、新建和管理证书；加固后自动签名，也可独立签名。
 - **加固前检查与失败诊断**：检查签名、已有加固、系统要求、ABI 等兼容信号；失败时给出脱敏诊断摘要，可预览后确认发送。
 - **少重复配置**：记住常用加固选项和证书选择，支持自定义输出目录与文件名，任务开始后固定本次配置。
 - **安装兼容**：处理 APK ZIP 对齐及常见 Native 库问题；标准模式与 Android 4.4 工控模式分开选择。
-- **CLI 与 MCP**：在本机脚本或支持 stdio MCP 的客户端中执行加固、签名、预检和报告读取，可查询和取消长任务。接入方式见 [MCP 指南](docs/mcp.md)。
+- **CLI 与 MCP**支持本地自动化。MCP 通过 stdio 提供 16 个工具，覆盖预检、加固、签名、APKS 安装、报告读取和任务管理。见 [CLI 与 MCP](#cli-与-mcp)。
 
 两条链路都用于提高静态分析、篡改和非法重签的成本，不承诺无法脱壳或逆向。
 
@@ -45,8 +46,6 @@ Android 侧提供 APK/AAB 的 DEX 加密、证书绑定、PVM2 方法虚拟化�
 | Windows | `Shellsmith_x.y.z_windows_x64_setup.exe` |
 | macOS | `Shellsmith_x.y.z_macos_universal.dmg` |
 | Linux | `Shellsmith_x.y.z_linux_amd64.AppImage` 或 `.deb` |
-
-需要命令行或 MCP 时，可下载发布页中可用的 `Shellsmith-cli-<version>-<platform>` 包，或按 [MCP 指南](docs/mcp.md) 从源码构建。
 
 ### 环境要求
 
@@ -66,6 +65,16 @@ Android 侧提供 APK/AAB 的 DEX 加密、证书绑定、PVM2 方法虚拟化�
 3. 选择目标系统和保护策略。一般使用“Android 5.0 及以上”与“标准保护（推荐）”；目标确有 Android 4.4 时再选择工控模式。
 4. 确认输出目录、文件名和自动签名证书，按需调整当前应用的分享选择，再开始加固。
 5. 在目标设备验证安装、启动、主要业务功能和覆盖升级。
+
+### Android SO 加固
+
+在 **加固** 页面选择已签名 APK，将保护级别设为 **严格代码保护（需 PVM2）**，使用内置 PVM2 Packer 并填写自有业务类前缀或关键方法清单。需要 Java 17+。加固时会加密符合条件的业务 `.so` 函数区域，由壳在运行时解密加载。若同名库的任一 ABI 缺少可安全处理的函数符号或含有不兼容的重定位，该库会整体跳过。加固后查看日志中的加密和跳过统计，并在目标设备验证 JNI 与业务功能。
+
+处理 AAB 时，在 **AAB · Google Play** 中选择 **严格保护（PVM2 + PAS2 + PSO2）**。多模块 AAB 的 Native 库必须满足模块保护校验才能生成产物。[使用指南](docs/usage.md#基础用法)
+
+APK 重打包会保留原有 `android:extractNativeLibs` 设置。显式设为 `false` 时，包内 `.so` 保持不压缩并按 16 KB 对齐。目标设备所需的 ELF 段对齐仍取决于各库的构建产物。[Native 库打包说明](docs/design/native-library-packaging.md)
+
+**独立 SO 和 Android 工程 `jniLibs` 目录的加固入口仍在开发中**，1.11.0 发布包尚未提供。
 
 ### iOS 加固流程
 
@@ -89,6 +98,25 @@ xattr -rd com.apple.quarantine /Applications/Shellsmith.app
 该命令移除隔离标记，不代表应用已获 Apple 公证。随后重新打开；其他问题见[使用指南](docs/usage.md)。
 
 </details>
+
+### CLI 与 MCP
+
+下载对应平台的 `Shellsmith-cli-<version>-<platform>` 包，支持 macOS Universal、Linux x86_64 和 Windows x86_64。解压后，`bin/` 内的 `shield` 可直接用于命令行，`shellsmith-mcp` 会自动查找同目录的 `shield`。Windows 下两个程序均带 `.exe` 后缀。[下载 CLI 与 MCP](https://github.com/kairowan/Shellsmith/releases/latest)
+
+在支持 stdio MCP 的客户端中，将下面的路径替换为本机的绝对路径。允许目录应覆盖任务的输入和输出。
+
+```json
+{
+  "mcpServers": {
+    "shellsmith": {
+      "command": "/absolute/path/to/bin/shellsmith-mcp",
+      "args": ["--allow-root", "/absolute/path/to/projects"]
+    }
+  }
+}
+```
+
+接入后，可先调用 `shellsmith_version` 验证连接，再用 `shellsmith_check_apk` 检查 APK。执行加固、签名和安装时传入 `confirm: true`。长任务返回 `job_id`，可查询进度、读取结果或取消。签名密码和 BYOS 构建 API key 通过 MCP 进程的环境变量提供。[工具清单与 iOS 接入](docs/mcp.md)
 
 ## 界面预览
 
