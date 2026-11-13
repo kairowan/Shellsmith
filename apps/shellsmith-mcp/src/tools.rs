@@ -1901,7 +1901,12 @@ fn validate_ios_cocoapods_paths(server: &Arc<Server>, project: &Path) -> Result<
         parent
     };
     let project_dir = if internal_workspace { parent } else { project };
-    let pbx = fs::read_to_string(project_dir.join("project.pbxproj")).unwrap_or_default();
+    let pbx_path = project_dir.join("project.pbxproj");
+    // 读取前先校验实际路径；内部 workspace 的父工程 pbx 不在 workspace bundle 的扫描范围内。
+    if pbx_path.exists() {
+        server.resolve_input(&pbx_path.to_string_lossy(), "iOS project.pbxproj")?;
+    }
+    let pbx = fs::read_to_string(&pbx_path).unwrap_or_default();
     let uses_pods = root.join("Podfile").is_file()
         || root.join("podfile").is_file()
         || root.join("Podfile.lock").is_file()

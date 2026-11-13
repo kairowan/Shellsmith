@@ -922,6 +922,76 @@ fn checks_project_aliases_by_entry_name() {
 
 #[cfg(unix)]
 #[test]
+fn rejects_internal_workspace_parent_pbx_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let host = allowed.path().join("Host.xcodeproj");
+    let workspace = host.join("project.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let outside_pbx = outside.path().join("outside.pbxproj");
+    fs::write(
+        &outside_pbx,
+        b"PODS_ROOT = 1;\n[CP] Check Pods Manifest.lock\n",
+    )
+    .unwrap();
+    let parent_pbx = host.join("project.pbxproj");
+    symlink(&outside_pbx, &parent_pbx).unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    for (tool, arguments) in [
+        (
+            "shellsmith_check_ios",
+            json!({"project": workspace.display().to_string()}),
+        ),
+        (
+            "shellsmith_protect_ios",
+            json!({
+                "ios_config": config.display().to_string(),
+                "output": allowed.path().join("out").display().to_string(),
+                "dry_run": true
+            }),
+        ),
+    ] {
+        let result = client.call(tool, arguments);
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(text(&result).contains("不在允许的目录内"), "{result}");
+    }
+
+    fs::remove_file(&parent_pbx).unwrap();
+    fs::write(&parent_pbx, b"// inside\n").unwrap();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], false, "{check}");
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": allowed.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], false, "{protect}");
+    let job_id = protect["structuredContent"]["job_id"].as_str().unwrap();
+    let job = client.wait_job(job_id);
+    assert_eq!(job["structuredContent"]["status"], "succeeded", "{job}");
+}
+
+#[cfg(unix)]
+#[test]
 fn rejects_cocoapods_lock_symlink_escape() {
     use std::os::unix::fs::symlink;
 
