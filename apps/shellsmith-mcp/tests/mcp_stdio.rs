@@ -661,6 +661,228 @@ fn rejects_ios_project_internal_symlink_escape() {
 }
 
 #[test]
+fn rejects_workspace_scanning_outside_allowed_root() {
+    let sample = tempfile::tempdir().unwrap();
+    let workspace = sample.path().join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let outside_project = sample.path().join("Outside.xcodeproj");
+    fs::create_dir_all(&outside_project).unwrap();
+    fs::write(
+        outside_project.join("project.pbxproj"),
+        b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.sibling.outside;",
+    )
+    .unwrap();
+    let cli = write_fake_cli(sample.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    // 只允许 workspace bundle，不允许其源码根目录。
+    let mut client = McpClient::start(&cli, &[workspace.as_path()], &[]);
+    for (tool, arguments) in [
+        (
+            "shellsmith_check_ios",
+            json!({"project": workspace.display().to_string()}),
+        ),
+        (
+            "shellsmith_protect_ios",
+            json!({
+                "ios_config": config.display().to_string(),
+                "output": workspace.join("out").display().to_string(),
+                "dry_run": true
+            }),
+        ),
+    ] {
+        let result = client.call(tool, arguments);
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(text(&result).contains("iOS 源码根目录"), "{result}");
+    }
+}
+
+#[test]
+fn allows_workspace_when_source_root_is_allowed() {
+    let sample = tempfile::tempdir().unwrap();
+    let workspace = sample.path().join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let project = sample.path().join("Inside.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+    let cli = write_fake_cli(sample.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[sample.path()], &[]);
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], false, "{check}");
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": sample.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], false, "{protect}");
+    let job_id = protect["structuredContent"]["job_id"].as_str().unwrap();
+    let job = client.wait_job(job_id);
+    assert_eq!(job["structuredContent"]["status"], "succeeded", "{job}");
+}
+
+#[cfg(unix)]
+#[test]
+fn checks_projects_reached_through_directory_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let holder = allowed.path().join("holder");
+    let workspace = holder.join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let actual = allowed.path().join("actual");
+    let nested = actual.join("Nested.xcodeproj");
+    fs::create_dir_all(&nested).unwrap();
+    let private = outside.path().join("private.pbxproj");
+    fs::write(&private, b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.skipped;").unwrap();
+    symlink(&private, nested.join("project.pbxproj")).unwrap();
+    symlink(&actual, holder.join("LinkedSources")).unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    for (tool, arguments) in [
+        (
+            "shellsmith_check_ios",
+            json!({"project": workspace.display().to_string()}),
+        ),
+        (
+            "shellsmith_protect_ios",
+            json!({
+                "ios_config": config.display().to_string(),
+                "output": allowed.path().join("out").display().to_string(),
+                "dry_run": true
+            }),
+        ),
+    ] {
+        let result = client.call(tool, arguments);
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(text(&result).contains("不在允许的目录内"), "{result}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn checks_project_aliases_by_entry_name() {
+    use std::os::unix::fs::symlink;
+
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let workspace = allowed.path().join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let target = allowed.path().join("bundle-no-extension");
+    fs::create_dir_all(&target).unwrap();
+    let private = outside.path().join("private.pbxproj");
+    fs::write(&private, b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.alias;").unwrap();
+    symlink(&private, target.join("project.pbxproj")).unwrap();
+    symlink(&target, allowed.path().join("Alias.xcodeproj")).unwrap();
+    let cli = write_fake_cli(allowed.path());
+    let config = workspace.join("ios.toml");
+    fs::write(
+        &config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    let result = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(text(&result).contains("不在允许的目录内"), "{result}");
+}
+
+#[cfg(unix)]
+#[test]
+fn ignores_unrelated_broken_workspace_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let sample = tempfile::tempdir().unwrap();
+    let workspace = sample.path().join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let project = sample.path().join("Inside.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+    symlink(
+        sample.path().join("missing.txt"),
+        sample.path().join("unused.txt"),
+    )
+    .unwrap();
+    symlink(workspace.join("missing.txt"), workspace.join("unused.txt")).unwrap();
+    let cli = write_fake_cli(sample.path());
+
+    let mut client = McpClient::start(&cli, &[sample.path()], &[]);
+    let result = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_ios_bundle_directory_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let project = allowed.path().join("App.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+    let shared = allowed.path().join("shared");
+    fs::create_dir_all(&shared).unwrap();
+    let outside_schemes = outside.path().join("xcschemes");
+    fs::create_dir_all(&outside_schemes).unwrap();
+    symlink(&outside_schemes, shared.join("xcschemes")).unwrap();
+    symlink(&shared, project.join("xcshareddata")).unwrap();
+    let cli = write_fake_cli(allowed.path());
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    let result = client.call(
+        "shellsmith_check_ios",
+        json!({"project": project.display().to_string()}),
+    );
+    assert_eq!(result["isError"], true, "{result}");
+    assert!(text(&result).contains("不在允许的目录内"), "{result}");
+}
+
+#[test]
 fn compat_skips_unused_confidential_and_entrypoint_paths() {
     let allowed = tempfile::tempdir().unwrap();
     let cli = write_fake_cli(allowed.path());
