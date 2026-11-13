@@ -2,6 +2,7 @@ import { byosRequirements, defaultRuntimeUi } from "@/lib/tauri";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Clipboard, FolderOpen, RotateCcw, Square } from "lucide-react";
 import { AppButton, DropZone, SelectedApkCard, StatusMessage, TextInput } from "@/components/app/common";
+import { ByosSettings } from "@/components/app/byos-settings";
 import { ProtectConfigurationPanel } from "@/components/app/protect-configuration-panel";
 import { ApplicationSharingCheckbox } from "@/components/app/application-sharing-checkbox";
 import { PreflightSummary } from "@/components/app/preflight-summary";
@@ -10,8 +11,9 @@ import { useClipboard } from "@/hooks/use-clipboard";
 import { useProtectWorkflow } from "@/hooks/use-protect-workflow";
 import { basename } from "@/lib/path";
 import { buildProtectDiagnostic } from "@/lib/protect-diagnostic";
+import { notifyError } from "@/lib/notify";
 import { t, tf, type Locale } from "@/lib/i18n";
-import { api, openDirectoryDialog, openFileDialog, type BuildInfo, type CertificateRecord, type ProtectDefaults } from "@/lib/tauri";
+import { api, openDirectoryDialog, openFileDialog, type BuildInfo, type ByosProfiles, type CertificateRecord, type ProtectDefaults } from "@/lib/tauri";
 
 export function ProtectPage({
   active,
@@ -41,8 +43,24 @@ export function ProtectPage({
   const { copiedLabel, copy } = useClipboard(locale);
   const [signAfterProtect, setSignAfterProtect] = useState(false);
   const [selectedCertificateId, setSelectedCertificateId] = useState("");
+  const [byos, setByos] = useState<ByosProfiles>({ profiles: [], selectedId: null });
+  const [byosSaving, setByosSaving] = useState(false);
+  const [byosLoaded, setByosLoaded] = useState(false);
+  const [byosLoadError, setByosLoadError] = useState("");
   const initialized = useRef(false);
   const certificateInitialized = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    void api.listByosProfiles().then((saved) => {
+      if (active) setByos(saved);
+    }).catch((error) => {
+      if (active) setByosLoadError(String(error));
+    }).finally(() => {
+      if (active) setByosLoaded(true);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     if (!configLoaded || !certificatesLoaded || initialized.current) return;
@@ -69,11 +87,17 @@ export function ProtectPage({
     () => signAfterProtect ? certificates.find((item) => item.id === selectedCertificateId) ?? null : null,
     [certificates, selectedCertificateId, signAfterProtect],
   );
-  const workflow = useProtectWorkflow({ active, locale, certificate: signingCertificate, buildInfo, defaults: protectDefaults });
+  const byosProfile = byos.profiles.find((profile) => profile.id === byos.selectedId) ?? null;
+  const workflow = useProtectWorkflow({ active, locale, certificate: signingCertificate, buildInfo, byosProfile, defaults: protectDefaults });
   const locked = workflow.taskLocked || workflow.state === "prechecking" || workflow.state === "running";
 
   function updateDefaults(patch: Partial<ProtectDefaults>) {
     onProtectDefaultsChange({ ...protectDefaults, ...patch });
+  }
+
+  function changeByos(saved: ByosProfiles) {
+    setByos(saved);
+    setByosLoadError("");
   }
 
   function updateSignAfterProtect(value: boolean) {
@@ -81,8 +105,17 @@ export function ProtectPage({
     updateDefaults({ sign_after_protect: value });
   }
 
-  function restoreRecommended() {
-    workflow.setByosProfile(null);
+  async function restoreRecommended() {
+    setByosSaving(true);
+    try {
+      await api.selectByosProfile(null);
+      changeByos({ ...byos, selectedId: null });
+    } catch (error) {
+      notifyError(String(error));
+      return;
+    } finally {
+      setByosSaving(false);
+    }
     workflow.setPvm2RequiredMethods("");
     const recommended: ProtectDefaults = {
       runtime_ui: defaultRuntimeUi,
@@ -125,7 +158,7 @@ export function ProtectPage({
   const pvmPrefixesValid = workflow.xopTrueVmpPrefixes.every((prefix) => prefix.length >= 6 && prefix.startsWith("L") && (prefix.endsWith("/") || prefix.endsWith(";")) && !prefix.includes(".."));
   const pvmJavaReady = (buildInfo?.java_major ?? 0) >= (buildInfo?.xop_pvm2_min_java_major ?? 17);
   const pvmReady = workflow.runtimeMode === "standard" && hasPvmPacker && hasPvmSelection && pvmPrefixesValid && pvmJavaReady;
-  const usingRecommendedProtection = !workflow.byosProfile && workflow.runtimeMode === "standard"
+  const usingRecommendedProtection = !byos.selectedId && !byosLoadError && workflow.runtimeMode === "standard"
     && workflow.environmentPolicy === "compatible"
     && workflow.protectionProfile === "balanced"
     && workflow.aiResistance === "balanced"
@@ -133,9 +166,10 @@ export function ProtectPage({
     && !hasPvmSelection
     && JSON.stringify(workflow.runtimeUi) === JSON.stringify(defaultRuntimeUi);
   const pvmConfigurationIncomplete = (hasCustomPvmPacker && !hasPvmSelection) || (hasPvmSelection && !hasPvmPacker);
-  const byosRequired = workflow.byosProfile ? byosRequirements[workflow.byosProfile.authMode] : null;
+  const byosRequired = byosProfile ? byosRequirements[byosProfile.authMode] : null;
   const byosIncompatible = byosRequired && (workflow.runtimeMode !== "standard" || (workflow.preflight?.facts.min_sdk ?? 0) < byosRequired.minSdk);
-  const startDisabled = byosIncompatible || workflow.sharing.pending || !runtimeInfoLoaded || !workflow.preflight || Boolean(workflow.precheck) || workflow.state === "prechecking"
+  const byosUnavailable = byosLoaded && (Boolean(byosLoadError) || Boolean(byos.selectedId && !byosProfile));
+  const startDisabled = !configLoaded || !byosLoaded || byosSaving || byosUnavailable || byosIncompatible || workflow.sharing.pending || !runtimeInfoLoaded || !workflow.preflight || Boolean(workflow.precheck) || workflow.state === "prechecking"
     || workflow.preflight?.verdict === "blocked"
     || Boolean(workflow.outputFilenameError) || (signAfterProtect && !signingCertificate)
     || (workflow.outputDirectoryMode === "fixed" && !workflow.fixedOutputDirectory)
@@ -205,6 +239,7 @@ export function ProtectPage({
               {workflow.warning && <StatusMessage kind="warning">{workflow.warning}</StatusMessage>}
               {workflow.precheck && <StatusMessage kind="error"><b>{t(locale, "precheckFailed")}：</b>{workflow.precheck}</StatusMessage>}
               {workflow.state === "done" && <StatusMessage kind="success" action={<AppButton size="sm" variant="secondary" onClick={() => void api.showInFolder(workflow.output)}><FolderOpen className="h-4 w-4" />{t(locale, "showInFolder")}</AppButton>}>{t(locale, "done")}</StatusMessage>}
+              {byosUnavailable && <StatusMessage kind="warning">{locale === "en" ? "The saved BYOS service is unavailable. Choose a service or explicitly switch to offline mode in protection settings." : "上次使用的 BYOS 服务不可用。请在加固设置中重新选择服务，或切换到本地离线。"}{byosLoadError && ` ${byosLoadError}`}</StatusMessage>}
               {byosIncompatible && <StatusMessage kind="warning">{locale === "zh" ? `所选 BYOS 配置要求 APK 的 minSdkVersion 至少为 ${byosRequired.minSdk}（${byosRequired.platform}），并使用标准运行时。请选择符合条件的 APK，或切回本地离线。` : `Selected BYOS mode requires minSdkVersion ${byosRequired.minSdk} (${byosRequired.platform}) and the standard runtime. Choose a compatible APK or switch to offline mode.`}</StatusMessage>}
               {workflow.error && <StatusMessage kind="error" action={<AppButton size="sm" variant="secondary" onClick={copyDiagnostic}><Clipboard className="h-4 w-4" />{diagnosticCopyLabel}</AppButton>}><b>{t(locale, "errorDetail")}：</b>{workflow.error}</StatusMessage>}
             </div>
@@ -215,10 +250,17 @@ export function ProtectPage({
               </div>
             ) : (
               <ProtectConfigurationPanel
-                byosProfile={workflow.byosProfile} onByosProfileChange={workflow.setByosProfile}
+                byosProfile={byosProfile} byosLoaded={byosLoaded} byosUnavailable={byosUnavailable}
+                byosSettings={<ByosSettings
+                  value={byos}
+                  onChange={changeByos}
+                  onSavingChange={setByosSaving}
+                  locale={locale}
+                  disabled={locked || !byosLoaded}
+                />}
                 runtimeUi={workflow.runtimeUi}
                 onRuntimeUiChange={(value) => { workflow.setRuntimeUi(value); updateDefaults({ runtime_ui: value }); }}
-                locale={locale} disabled={locked} startDisabled={startDisabled}
+                locale={locale} disabled={locked || byosSaving || !byosLoaded} startDisabled={startDisabled}
                 sharingControl={sharingControl}
                 runtimeMode={workflow.runtimeMode} runtimeModeGuidance={runtimeModeGuidance} environmentPolicy={workflow.environmentPolicy}
                 protectionProfile={workflow.protectionProfile} aiResistance={workflow.aiResistance}
@@ -244,7 +286,7 @@ export function ProtectPage({
                 onSignAfterProtectChange={updateSignAfterProtect} onCertificateChange={(value) => { setSelectedCertificateId(value); updateDefaults({ certificate_id: value || null }); }}
                 onOutputDirectoryModeChange={(value) => { workflow.setOutputDirectoryMode(value); updateDefaults({ output_directory_mode: value }); }}
                 onChooseDirectory={() => void chooseOutputDirectory()} onOpenCertificates={onOpenCertificates}
-                onRestoreRecommended={restoreRecommended} onStart={() => void workflow.start()}
+                onRestoreRecommended={() => void restoreRecommended()} onStart={() => { if (!startDisabled) void workflow.start(); }}
               />
             )}
           </div>

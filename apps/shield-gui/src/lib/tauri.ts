@@ -437,6 +437,7 @@ export type { SharingChoice, SharingInspection } from "./application-sharing-sta
 import type { SharingChoice, SharingInspection } from "./application-sharing-state";
 
 export type ByosProfile = { id: string; name: string; endpoint: string; authMode: "device_approval" | "play_integrity"; runtimeCert: string | null };
+export type ByosProfiles = { profiles: ByosProfile[]; selectedId: string | null };
 export const byosRequirements = {
   device_approval: { minSdk: 24, platform: "Android 7.0+" },
   play_integrity: { minSdk: 29, platform: "Android 10+" },
@@ -446,7 +447,8 @@ export type ByosProfileInput = Omit<ByosProfile, "id"> & { id: string | null; ap
 
 export const api = {
   testByosConnection: (input: ByosProfileInput) => invoke<ByosConnectionCheck>("test_byos_connection", { input }),
-  listByosProfiles: () => invoke<ByosProfile[]>("list_byos_profiles"),
+  listByosProfiles: () => invoke<ByosProfiles>("list_byos_profiles"),
+  selectByosProfile: (id: string | null) => invoke<void>("select_byos_profile", { id }),
   saveByosProfile: (input: ByosProfileInput) => invoke<ByosProfile>("save_byos_profile", { input }),
   deleteByosProfile: (id: string) => invoke<void>("delete_byos_profile", { id }),
   inspectApplicationSharing: (path: string) => invoke<SharingInspection | null>("inspect_application_sharing", { path }),

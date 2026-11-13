@@ -138,7 +138,7 @@ Shellsmith offers two key-delivery modes:
 | Local offline key | Derived on the build machine and wrapped into the APK | No network or key service | Fully offline delivery, no backend |
 | Online key (BYOS) | Your self-hosted HTTPS service | Network authorization on every launch | Device approval, Play Integrity, device/artifact revocation |
 
-Local offline keys are the default. To move the IKM out of the APK, select a BYOS service under **Key Delivery**. Choose the mode per protection task; online mode never falls back to offline keys when authorization fails. The rest of this section covers the online key mode.
+Local offline keys are the initial default. To move the IKM out of the APK, select a BYOS service under **Key Delivery**. The desktop app restores the last selected service or offline mode on restart. Service details and the build API key are encrypted in local storage. Leave the key field blank when editing to keep the saved credential.
 
 BYOS (Bring Your Own Server) moves the artifact IKM out of the APK. It is intended for teams that manage their own keys, device authorization, and revocation policy.
 
@@ -247,7 +247,9 @@ The iOS balanced and strict profiles integrate freeRASP directly into the target
 | BYOS local validation and real-device troubleshooting | [Local validation](docs/process/byos-local-validation.md) |
 | Future work | [Roadmap](docs/process/roadmap.md) |
 
-The CLI and MCP server are source-built; local `make release` / `scripts/release-cli.sh` CLI packages include both `shield` and `shellsmith-mcp`. Build `make build-stub` first, then `make build-cli` or `make build-gui`. Refer to the build guide for dependencies and platform-specific steps.
+`apps/shield-gui` is the Tauri desktop frontend for hardening, signing, certificate management, and settings. `tools/stats-worker` provides JSON endpoints for maintenance statistics, error reports, and feedback. See the [desktop architecture](docs/design/gui.md) and [maintenance statistics guide](docs/ops/project-statistics.md).
+
+Use the local CLI or stdio MCP server to automate hardening, signing, preflight checks, and report reading. See the [MCP guide](docs/mcp.md) for installation and client setup. Local `make release` / `scripts/release-cli.sh` CLI packages include both `shield` and `shellsmith-mcp`. Run `make build-stub` first, then `make build-cli` or `make build-gui`.
 
 <details>
 <summary>CI/CD and Cross-Platform Releases</summary>

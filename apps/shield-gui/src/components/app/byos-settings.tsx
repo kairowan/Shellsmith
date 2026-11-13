@@ -1,16 +1,21 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AppButton, SelectInput, TextInput } from "@/components/app/common";
-import { api, byosRequirements, type ByosProfile, type ByosProfileInput, type ByosConnectionCheck } from "@/lib/tauri";
+import { api, byosRequirements, type ByosProfiles, type ByosProfile, type ByosProfileInput, type ByosConnectionCheck } from "@/lib/tauri";
 import type { Locale } from "@/lib/i18n";
 import { notifyError } from "@/lib/notify";
 
-export function ByosSettings({ value, onChange, locale, disabled }: {
-  value: ByosProfile | null; onChange: (value: ByosProfile | null) => void; locale: Locale; disabled: boolean;
+export function ByosSettings({ value: { profiles, selectedId }, onChange, onSavingChange, locale, disabled }: {
+  value: ByosProfiles;
+  onChange: (value: ByosProfiles) => void;
+  onSavingChange: (saving: boolean) => void;
+  locale: Locale;
+  disabled: boolean;
 }) {
   const en = locale === "en";
-  const [profiles, setProfiles] = useState<ByosProfile[]>([]);
+  const value = profiles.find((profile) => profile.id === selectedId) ?? null;
   const [draft, setDraft] = useState<ByosProfileInput | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusyState] = useState(false);
+  const setBusy = (saving: boolean) => { setBusyState(saving); onSavingChange(saving); };
   const [testing, setTesting] = useState(false);
   const [check, setCheck] = useState<ByosConnectionCheck | null>(null);
   const [checkError, setCheckError] = useState("");
@@ -24,21 +29,31 @@ export function ByosSettings({ value, onChange, locale, disabled }: {
     catch (error) { setCheckError(String(error)); }
     finally { setTesting(false); }
   }
-  useEffect(() => { let active = true; void api.listByosProfiles().then((items) => { if (active) setProfiles(items); }).catch(notifyError); return () => { active = false; }; }, []);
+  async function select(id: string | null) {
+    setBusy(true);
+    edit(null);
+    try { await api.selectByosProfile(id); onChange({ selectedId: id, profiles }); }
+    catch (error) { notifyError(String(error)); }
+    finally { setBusy(false); }
+  }
   const change = (patch: Partial<ByosProfileInput>) => { resetCheck(); setDraft((previous) => previous ? { ...previous, ...patch } : previous); };
   async function save() {
     if (!draft) return;
     setBusy(true);
     try {
       const saved = await api.saveByosProfile(draft);
-      setProfiles(await api.listByosProfiles()); onChange(saved); edit(null);
+      const next = profiles.some((profile) => profile.id === saved.id)
+        ? profiles.map((profile) => profile.id === saved.id ? saved : profile)
+        : [...profiles, saved];
+      onChange({ selectedId: saved.id, profiles: next });
+      edit(null);
     } catch (error) { notifyError(String(error)); }
     finally { setBusy(false); }
   }
   async function remove() {
     if (!value || !window.confirm(en ? "Delete this local BYOS configuration? Published app keys are managed on your server." : "删除这套本地 BYOS 配置？已发布应用的密钥仍由你的服务端管理。")) return;
     setBusy(true);
-    try { await api.deleteByosProfile(value.id); setProfiles(await api.listByosProfiles()); onChange(null); edit(null); }
+    try { await api.deleteByosProfile(value.id); onChange({ selectedId: null, profiles: profiles.filter((profile) => profile.id !== value.id) }); edit(null); }
     catch (error) { notifyError(String(error)); }
     finally { setBusy(false); }
   }
@@ -46,8 +61,9 @@ export function ByosSettings({ value, onChange, locale, disabled }: {
     <legend className="px-1 text-sm font-medium">{en ? "Key delivery" : "密钥交付"}</legend>
     <label className="block space-y-2 text-sm">
       <span>{en ? "Configuration" : "使用配置"}</span>
-      <SelectInput value={value?.id ?? ""} onChange={(event) => { onChange(profiles.find((profile) => profile.id === event.target.value) ?? null); edit(null); }}>
+      <SelectInput value={selectedId ?? ""} onChange={(event) => void select(event.target.value || null)}>
         <option value="">{en ? "Offline · no server required" : "本地离线 · 无需服务器"}</option>
+        {selectedId && !value && <option value={selectedId} disabled>{en ? "Saved service unavailable" : "已选服务不可用"}</option>}
         {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.authMode === "device_approval" ? (en ? "Device approval" : "设备授权") : "Google Play"}</option>)}
       </SelectInput>
     </label>
