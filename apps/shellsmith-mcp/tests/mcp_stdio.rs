@@ -864,8 +864,82 @@ fn checks_project_aliases_by_entry_name() {
     let private = outside.path().join("private.pbxproj");
     fs::write(&private, b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.alias;").unwrap();
     symlink(&private, target.join("project.pbxproj")).unwrap();
-    symlink(&target, allowed.path().join("Alias.xcodeproj")).unwrap();
+    let alias = allowed.path().join("Alias.xcodeproj");
+    symlink(&target, &alias).unwrap();
     let cli = write_fake_cli(allowed.path());
+    let alias_config = allowed.path().join("ios-alias.toml");
+    fs::write(
+        &alias_config,
+        format!(
+            "[project]\npath = \"{}\"\nscheme = \"Audit\"\nteam_id = \"ABCDEFGHIJ\"\nbundle_ids = [\"com.example.audit\"]\n[protection]\nprofile = \"compat\"\n",
+            alias.display()
+        ),
+    )
+    .unwrap();
+
+    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": alias.display().to_string()}),
+    );
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("不在允许的目录内"), "{check}");
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": alias_config.display().to_string(),
+            "output": allowed.path().join("alias-out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], true, "{protect}");
+    assert!(text(&protect).contains("不在允许的目录内"), "{protect}");
+
+    fs::remove_file(target.join("project.pbxproj")).unwrap();
+    fs::write(
+        target.join("project.pbxproj"),
+        b"PRODUCT_BUNDLE_IDENTIFIER = com.audit.inside;",
+    )
+    .unwrap();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": alias.display().to_string()}),
+    );
+    assert_eq!(check["isError"], false, "{check}");
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": alias_config.display().to_string(),
+            "output": allowed.path().join("alias-out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], false, "{protect}");
+    let job_id = protect["structuredContent"]["job_id"].as_str().unwrap();
+    let job = client.wait_job(job_id);
+    assert_eq!(job["structuredContent"]["status"], "succeeded", "{job}");
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_cocoapods_lock_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let sample = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let workspace = sample.path().join("Audit.xcworkspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let project = sample.path().join("Inside.xcodeproj");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("project.pbxproj"), b"// inside").unwrap();
+    let pods_project = sample.path().join("Pods/Pods.xcodeproj");
+    fs::create_dir_all(&pods_project).unwrap();
+    fs::write(pods_project.join("project.pbxproj"), b"// pods").unwrap();
+    let outside_lock = outside.path().join("external.lock");
+    fs::write(&outside_lock, b"PODS:\n  - Audit\n").unwrap();
+    let podfile_lock = sample.path().join("Podfile.lock");
+    let manifest_lock = sample.path().join("Pods/Manifest.lock");
+    let cli = write_fake_cli(sample.path());
     let config = workspace.join("ios.toml");
     fs::write(
         &config,
@@ -876,13 +950,44 @@ fn checks_project_aliases_by_entry_name() {
     )
     .unwrap();
 
-    let mut client = McpClient::start(&cli, &[allowed.path()], &[]);
-    let result = client.call(
+    let mut client = McpClient::start(&cli, &[sample.path()], &[]);
+    symlink(&outside_lock, &podfile_lock).unwrap();
+    fs::write(&manifest_lock, b"PODS:\n  - Audit\n").unwrap();
+    let check = client.call(
         "shellsmith_check_ios",
         json!({"project": workspace.display().to_string()}),
     );
-    assert_eq!(result["isError"], true, "{result}");
-    assert!(text(&result).contains("不在允许的目录内"), "{result}");
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("不在允许的目录内"), "{check}");
+    let protect = client.call(
+        "shellsmith_protect_ios",
+        json!({
+            "ios_config": config.display().to_string(),
+            "output": sample.path().join("out").display().to_string(),
+            "dry_run": true
+        }),
+    );
+    assert_eq!(protect["isError"], true, "{protect}");
+    assert!(text(&protect).contains("不在允许的目录内"), "{protect}");
+
+    fs::remove_file(&podfile_lock).unwrap();
+    fs::write(&podfile_lock, b"PODS:\n  - Audit\n").unwrap();
+    fs::remove_file(&manifest_lock).unwrap();
+    symlink(&outside_lock, &manifest_lock).unwrap();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], true, "{check}");
+    assert!(text(&check).contains("不在允许的目录内"), "{check}");
+
+    fs::remove_file(&manifest_lock).unwrap();
+    fs::write(&manifest_lock, b"PODS:\n  - Audit\n").unwrap();
+    let check = client.call(
+        "shellsmith_check_ios",
+        json!({"project": workspace.display().to_string()}),
+    );
+    assert_eq!(check["isError"], false, "{check}");
 }
 
 #[cfg(unix)]
