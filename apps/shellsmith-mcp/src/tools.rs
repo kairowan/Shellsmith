@@ -149,6 +149,7 @@ pub fn tool_definitions() -> Vec<Value> {
             object(
                 json!({
                     "ios_config": string("Shellsmith iOS TOML config"),
+                    "byos_api_key_env": string("Optional environment variable containing the iOS BYOS build key"),
                     "output": string("Output directory"),
                     "freerasp_zip": string("Optional freeRASP source ZIP"),
                     "ios_cache_dir": string("Optional iOS SDK cache directory"),
@@ -313,7 +314,7 @@ fn sign_schema() -> Value {
 }
 
 fn aab_schema() -> Value {
-    json!({
+    let mut properties = json!({
         "input": string("Input AAB"),
         "output": string("Final output AAB"),
         "bundletool": string("bundletool JAR"),
@@ -354,7 +355,12 @@ fn aab_schema() -> Value {
         "smoke_package": string("Optional package for post-install smoke test"),
         "runtime_ui": runtime_ui_schema(),
         "confirm": boolean("Set to true to confirm this destructive operation")
-    })
+    });
+    properties["protected_resource_manifest"] = string("Optional base assets JSON manifest");
+    properties["byos_endpoint"] =
+        string("BYOS device-approval HTTPS endpoint for protected base assets");
+    properties["byos_api_key_env"] = string("Environment variable containing the BYOS build key");
+    properties
 }
 
 fn xop_schema() -> Value {
@@ -448,6 +454,9 @@ struct ProtectApkInput {
 
 #[derive(Debug, Deserialize)]
 struct ProtectAabInput {
+    protected_resource_manifest: Option<String>,
+    byos_endpoint: Option<String>,
+    byos_api_key_env: Option<String>,
     input: String,
     output: String,
     bundletool: String,
@@ -538,6 +547,7 @@ struct ProtectXopInput {
 
 #[derive(Debug, Deserialize)]
 struct ProtectIosInput {
+    byos_api_key_env: Option<String>,
     ios_config: String,
     output: String,
     freerasp_zip: Option<String>,
@@ -1134,6 +1144,30 @@ fn protect_aab(
         input.password_env.as_deref(),
         input.key_password_env.as_deref(),
     )?;
+    if let Some(manifest) = input.protected_resource_manifest.as_deref() {
+        push_path_opt(
+            server,
+            &mut cli_args,
+            "--protected-resource-manifest",
+            Some(manifest),
+            "AAB 必保资源清单",
+        )?;
+        let endpoint = input
+            .byos_endpoint
+            .as_deref()
+            .context("AAB 资源清单需要 BYOS 地址")?;
+        push_opt(&mut cli_args, "--byos-endpoint", Some(endpoint));
+        let name = input
+            .byos_api_key_env
+            .as_deref()
+            .unwrap_or("SHELLSMITH_BYOS_API_KEY");
+        env.push((
+            "SHELLSMITH_BYOS_API_KEY".into(),
+            std::env::var(name).context("缺少 AAB BYOS 构建凭据环境变量")?,
+        ));
+    } else if input.byos_endpoint.is_some() || input.byos_api_key_env.is_some() {
+        anyhow::bail!("AAB 的 BYOS 配置需要业务资源清单");
+    }
     env.extend(stage_env);
     let expected_report = report_path(&output);
     let job_id = server.start_job(
@@ -1279,7 +1313,7 @@ fn protect_ios(
         require_confirm(input.confirm)?;
     }
     let config = server.resolve_input(&input.ios_config, "iOS 配置")?;
-    validate_ios_config_paths(server, &config, input.dry_run)?;
+    let resources_configured = validate_ios_config_paths(server, &config, input.dry_run)?;
     let output = server.resolve_output(&input.output, "iOS 输出目录")?;
     let mut cli_args = vec![
         "protect-ios".to_string(),
@@ -1319,12 +1353,24 @@ fn protect_ios(
     if input.dry_run {
         cli_args.push("--dry-run".into());
     }
+    let env = if resources_configured && !input.dry_run {
+        let name = input
+            .byos_api_key_env
+            .as_deref()
+            .unwrap_or("SHELLSMITH_IOS_BYOS_API_KEY");
+        vec![(
+            "SHELLSMITH_IOS_BYOS_API_KEY".into(),
+            std::env::var(name).context("缺少 iOS BYOS 构建凭据环境变量")?,
+        )]
+    } else {
+        Vec::new()
+    };
     let job_id = server.start_job(
         "shellsmith_protect_ios",
         JobPlan {
             commands: vec![CommandPlan {
                 args: cli_args,
-                env: Vec::new(),
+                env,
                 label: "iOS 保护".into(),
             }],
             result: json!({"output": output}),
@@ -1981,7 +2027,7 @@ fn validate_ios_cocoapods_paths(server: &Arc<Server>, project: &Path) -> Result<
 }
 
 /// iOS 配置中的工程、entrypoint 和 Swift Confidential 路径也必须受允许目录约束。
-fn validate_ios_config_paths(server: &Arc<Server>, config: &Path, dry_run: bool) -> Result<()> {
+fn validate_ios_config_paths(server: &Arc<Server>, config: &Path, dry_run: bool) -> Result<bool> {
     ensure_regular_file(config, "iOS 配置")?;
     let content = fs::read_to_string(config)
         .with_context(|| format!("读取 iOS 配置失败：{}", config.display()))?;
@@ -2038,7 +2084,18 @@ fn validate_ios_config_paths(server: &Arc<Server>, config: &Path, dry_run: bool)
         }
     }
 
-    Ok(())
+    if let Some(resources) = value.get("protected_resources") {
+        let manifest = resources
+            .get("manifest")
+            .and_then(toml::Value::as_str)
+            .context("iOS 业务资源缺少 manifest")?;
+        let manifest = server.resolve_input(
+            &resolve_config_path(base, manifest).to_string_lossy(),
+            "iOS 必保资源清单",
+        )?;
+        ensure_regular_file(&manifest, "iOS 必保资源清单")?;
+    }
+    Ok(value.get("protected_resources").is_some())
 }
 
 fn push_opt(args: &mut Vec<String>, flag: &str, value: Option<&str>) {

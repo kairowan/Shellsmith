@@ -1,7 +1,7 @@
 use crate::confidential;
 use crate::freerasp;
 use crate::project_inspect::IosTargetInspection;
-use crate::ShellsmithIosConfig;
+use crate::{IosProjectConfig, IosResourceConfig, ShellsmithIosConfig};
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -39,10 +39,13 @@ pub(crate) fn integrate_runtime(
     confidential_path: Option<&Path>,
 ) -> Result<()> {
     ensure_within_root(working_root, working_project, "Xcode 工程")?;
-    if source_contains(
-        working_root,
-        "extension SecurityThreatCenter: SecurityThreatHandler",
-    )? {
+    let uses_rasp = config.protection.profile.uses_rasp();
+    if uses_rasp
+        && source_contains(
+            working_root,
+            "extension SecurityThreatCenter: SecurityThreatHandler",
+        )?
+    {
         anyhow::bail!(
             "工程已自行接入 freeRASP SecurityThreatHandler；为避免重复全局协议实现，先移除旧接入或使用 compat"
         );
@@ -53,10 +56,10 @@ pub(crate) fn integrate_runtime(
     let sources = runtime_root.join("Sources").join("ShellsmithRuntime");
     fs::create_dir_all(&sources)?;
     let uses_confidential = config.confidential_enabled();
-    let uses_rasp = config.protection.profile.uses_rasp();
+    let resources = config.protected_resources.is_some();
     fs::write(
         runtime_root.join("Package.swift"),
-        freerasp::package_manifest(uses_confidential, uses_rasp),
+        freerasp::package_manifest(uses_confidential, uses_rasp, resources),
     )?;
     fs::write(
         sources.join("ShellsmithRuntime.swift"),
@@ -66,12 +69,25 @@ pub(crate) fn integrate_runtime(
         sources.join("ShellsmithProtection.swift"),
         freerasp::protection_source(config),
     )?;
-    let attest = freerasp::app_attest_source(matches!(
-        config.protection.profile,
-        crate::IosProtectionProfile::Strict
-    ));
+    let attest = freerasp::app_attest_source(
+        resources
+            || matches!(
+                config.protection.profile,
+                crate::IosProtectionProfile::Strict
+            ),
+    );
     if !attest.is_empty() {
         fs::write(sources.join("ShellsmithAppAttest.swift"), attest)?;
+    }
+    if resources {
+        fs::write(
+            sources.join("ProtectedResourceReader.swift"),
+            include_str!("ProtectedResourceReader.swift"),
+        )?;
+        fs::write(
+            sources.join("ProtectedResourceAuthorization.swift"),
+            include_str!("ProtectedResourceAuthorization.swift"),
+        )?;
     }
     if uses_confidential {
         confidential::copy_and_validate(
@@ -102,6 +118,340 @@ pub(crate) fn integrate_runtime(
         .context("无法确定 Xcode project 目录")?;
     let relative_package = relative_path(project_directory, &runtime_root)?;
     patch_pbxproj(&pbxproj, &target.name, &relative_package)?;
+    Ok(())
+}
+
+pub(crate) fn integrate_protected_resources(
+    working_root: &Path,
+    working_project: &Path,
+    target: &IosTargetInspection,
+    project: &IosProjectConfig,
+    config: &IosResourceConfig,
+    cancel: &AtomicBool,
+) -> Result<shield_core::protected_resources::PreparedResources> {
+    use shield_core::protected_resources::{PreparedResources, RESOURCE_DIRECTORY};
+    let mut source = working_root.to_owned();
+    for component in config.source_root.components() {
+        let Component::Normal(part) = component else {
+            anyhow::bail!("业务资源路径逃逸工作副本")
+        };
+        source.push(part);
+        anyhow::ensure!(
+            source.symlink_metadata()?.is_dir(),
+            "业务资源目录含符号链接或无效组件"
+        );
+    }
+    anyhow::ensure!(
+        source != working_root && !source.starts_with(working_root.join(GENERATED_DIRECTORY)),
+        "业务资源目录与生成目录冲突"
+    );
+    let destination = working_root
+        .join(GENERATED_DIRECTORY)
+        .join("ShellsmithRuntime/Sources/ShellsmithRuntime")
+        .join(RESOURCE_DIRECTORY);
+    let mut prepared = PreparedResources::prepare(&config.manifest, &source, &destination)?;
+    let project_file = find_pbxproj_for_target(working_root, working_project, target)?;
+    ensure_within_root(working_root, &project_file, "project.pbxproj")?;
+    let project_root = project_file
+        .parent()
+        .and_then(Path::parent)
+        .context("iOS target 工程目录无效")?;
+    let relative_source = source
+        .strip_prefix(project_root)
+        .context("必保资源目录必须在主 target 的工程目录内")?;
+    let content = fs::read_to_string(&project_file)?;
+    let updated = remove_owned_resource_references(
+        &content,
+        &target.name,
+        prepared
+            .source_paths()
+            .map(|relative| relative_source.join(relative)),
+    )?;
+    let prefix = config.app_id_prefix.as_deref().unwrap_or(&project.team_id);
+    let app_id = format!("{prefix}.{}", project.bundle_ids[0]);
+    let api_key = std::env::var("SHELLSMITH_IOS_BYOS_API_KEY")
+        .context("缺少 iOS 资源注册凭据 SHELLSMITH_IOS_BYOS_API_KEY")?;
+    anyhow::ensure!(!cancel.load(Ordering::Relaxed), "已取消 iOS 资源保护");
+    prepared.register_ios(
+        config.byos_endpoint.trim(),
+        &api_key,
+        &app_id,
+        config.environment.as_str(),
+        &destination,
+    )?;
+    anyhow::ensure!(!cancel.load(Ordering::Relaxed), "已取消 iOS 资源保护");
+    prepared.remove_originals(&source)?;
+    fs::write(project_file, updated)?;
+    Ok(prepared)
+}
+
+fn remove_owned_resource_references(
+    content: &str,
+    target: &str,
+    sources: impl Iterator<Item = PathBuf>,
+) -> Result<String> {
+    // ponytail: 沿用现有工程对象扫描；超大 pbxproj 重复查找近似平方，必要时先建立对象索引。
+    let section_objects = |section: &str| -> Vec<(&str, &str)> {
+        section_range(content, section)
+            .into_iter()
+            .flat_map(|(start, end)| content[start..end].lines())
+            .filter_map(|line| {
+                if !line.contains(" = {") {
+                    return None;
+                }
+                let id = line.split_whitespace().next()?;
+                if id.len() != 24 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return None;
+                }
+                let (start, end) = object_block(content, id)?;
+                Some((id, &content[start..end]))
+            })
+            .collect()
+    };
+    let references = section_objects("PBXFileReference");
+    let build_files = section_objects("PBXBuildFile");
+    let phases = section_objects("PBXResourcesBuildPhase");
+    let copy_phases = section_objects("PBXCopyFilesBuildPhase");
+    let groups = section_objects("PBXGroup");
+    let main_group = find_first_object_with_isa(content, "PBXProject")
+        .and_then(|id| object_block(content, &id))
+        .and_then(|(start, end)| field_value(&content[start..end], "mainGroup"));
+    let mut parents: std::collections::HashMap<String, Vec<(&str, &str)>> =
+        std::collections::HashMap::new();
+    for (id, group) in groups {
+        for child in list_ids(group, "children") {
+            parents.entry(child).or_default().push((id, group));
+        }
+    }
+    let target_id =
+        find_native_target_id(content, target).context("找不到业务资源的主应用 target")?;
+    let (start, end) = object_block(content, &target_id).context("主应用 target 的工程对象无效")?;
+    let owned_phases = list_ids(&content[start..end], "buildPhases");
+    let synchronized_groups = section_objects("PBXFileSystemSynchronizedRootGroup");
+    let mut foreign_directories = Vec::new();
+    for (id, other_target) in section_objects("PBXNativeTarget") {
+        if id == target_id {
+            continue;
+        }
+        for group_id in list_ids(other_target, "fileSystemSynchronizedGroups") {
+            let (_, group) = synchronized_groups
+                .iter()
+                .find(|(id, _)| *id == group_id)
+                .context("其他 Xcode target 的同步目录引用无效")?;
+            let path = resource_reference_path(&group_id, group, &parents, main_group)
+                .context("无法确定其他 Xcode target 的同步目录实际路径")?;
+            foreign_directories.push(path);
+        }
+    }
+    let mut remove = HashSet::new();
+    for source in sources {
+        let basename = source.file_name().context("资源源路径缺少文件名")?;
+        anyhow::ensure!(
+            !foreign_directories
+                .iter()
+                .any(|directory| source.starts_with(directory)),
+            "必保资源位于其他 Xcode target 的同步目录：{}",
+            basename.to_string_lossy()
+        );
+        for (id, reference) in &references {
+            let Some(path) = field_value(reference, "path") else {
+                continue;
+            };
+            let folder = field_value(reference, "lastKnownFileType") == Some("folder")
+                || field_value(reference, "explicitFileType") == Some("folder");
+            let name = Path::new(path).file_name();
+            if name != Some(basename) && !(folder && source.iter().any(|part| Some(part) == name)) {
+                continue;
+            }
+            let Some(resolved) = resource_reference_path(id, reference, &parents, main_group)
+            else {
+                anyhow::bail!(
+                    "无法确定同名 Xcode 资源引用的实际路径：{}",
+                    basename.to_string_lossy()
+                );
+            };
+            if resolved != source && !(folder && source.starts_with(&resolved)) {
+                continue;
+            }
+            for (build, _) in build_files
+                .iter()
+                .filter(|(_, block)| field_value(block, "fileRef") == Some(*id))
+            {
+                anyhow::ensure!(
+                    !copy_phases.iter().any(|(_, phase)| list_ids(phase, "files")
+                        .iter()
+                        .any(|item| item == *build)),
+                    "必保资源由 Copy Files 阶段使用"
+                );
+                for (phase, block) in &phases {
+                    if list_ids(block, "files").iter().any(|item| item == *build) {
+                        anyhow::ensure!(
+                            owned_phases.iter().any(|owned| owned == *phase),
+                            "必保资源被其他 Xcode target 引用：{}",
+                            basename.to_string_lossy()
+                        );
+                        if !folder {
+                            if let Some((start, end)) = object_block(content, phase) {
+                                remove.insert((start, end, *build));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 构建文件对象和普通工程引用保留，移除的只是主 target 的 Copy Bundle Resources 列表项。
+    let mut offset = 0;
+    let mut output = String::with_capacity(content.len());
+    for line in content.split_inclusive('\n') {
+        let first = line
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(',');
+        if !remove
+            .iter()
+            .any(|(start, end, id)| *start <= offset && offset < *end && *id == first)
+        {
+            output.push_str(line);
+        }
+        offset += line.len();
+    }
+    Ok(output)
+}
+
+fn resource_reference_path<'a>(
+    mut id: &'a str,
+    mut object: &'a str,
+    parents: &std::collections::HashMap<String, Vec<(&'a str, &'a str)>>,
+    main_group: Option<&str>,
+) -> Option<PathBuf> {
+    let mut path = PathBuf::new();
+    for _ in 0..64 {
+        if let Some(part) = field_value(object, "path") {
+            let part = Path::new(part);
+            if !part
+                .components()
+                .all(|piece| matches!(piece, Component::Normal(_)))
+            {
+                return None;
+            }
+            path = part.join(path);
+        }
+        match field_value(object, "sourceTree") {
+            Some("SOURCE_ROOT") => return Some(path),
+            Some("<group>") if main_group == Some(id) => return Some(path),
+            Some("<group>") => {
+                let [(parent, block)] = parents.get(id)?.as_slice() else {
+                    return None;
+                };
+                id = parent;
+                object = block;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn field_value<'a>(object: &'a str, key: &str) -> Option<&'a str> {
+    let tail = object
+        .split_once(&format!("{key} = "))?
+        .1
+        .split(';')
+        .next()?
+        .trim();
+    Some(tail.split(" /*").next()?.trim_matches('"'))
+}
+
+#[cfg(test)]
+#[test]
+fn 资源接线只移除主应用匹配路径的复制项() -> Result<()> {
+    const PROJECT: &str = r#"
+/* Begin PBXFileReference section */
+    A00000000000000000000001 /* rules.json */ = {isa = PBXFileReference; path = rules.json; sourceTree = "<group>"; };
+    A00000000000000000000002 /* rules.json */ = {isa = PBXFileReference; path = Other/rules.json; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+/* Begin PBXBuildFile section */
+    B00000000000000000000001 /* 受保护的 rules.json */ = {isa = PBXBuildFile; fileRef = A00000000000000000000001; };
+    B00000000000000000000002 /* 另一份 rules.json */ = {isa = PBXBuildFile; fileRef = A00000000000000000000002; };
+/* End PBXBuildFile section */
+/* Begin PBXGroup section */
+    C00000000000000000000001 = {
+        isa = PBXGroup;
+        children = (
+            C00000000000000000000002,
+        );
+        sourceTree = "<group>";
+    };
+    C00000000000000000000002 = {
+        isa = PBXGroup;
+        children = (
+            A00000000000000000000001,
+        );
+        path = Resources;
+        sourceTree = "<group>";
+    };
+/* End PBXGroup section */
+/* Begin PBXNativeTarget section */
+    D00000000000000000000001 /* Demo */ = {
+        isa = PBXNativeTarget;
+        buildPhases = (
+            E00000000000000000000001,
+        );
+        name = Demo;
+    };
+/* End PBXNativeTarget section */
+/* Begin PBXProject section */
+    F00000000000000000000001 /* Project object */ = {
+        isa = PBXProject;
+        mainGroup = C00000000000000000000001;
+    };
+/* End PBXProject section */
+/* Begin PBXResourcesBuildPhase section */
+    E00000000000000000000001 = {
+        isa = PBXResourcesBuildPhase;
+        files = (
+            B00000000000000000000001,
+            B00000000000000000000002,
+        );
+    };
+/* End PBXResourcesBuildPhase section */
+"#;
+    let updated = remove_owned_resource_references(
+        PROJECT,
+        "Demo",
+        [PathBuf::from("Resources/rules.json")].into_iter(),
+    )?;
+    assert!(!updated.contains("B00000000000000000000001,"));
+    assert!(updated.contains("B00000000000000000000002,"));
+    assert!(updated.contains("B00000000000000000000001 /*"));
+    let foreign = PROJECT.replace("E00000000000000000000001,", "E00000000000000000000002,");
+    assert!(remove_owned_resource_references(
+        &foreign,
+        "Demo",
+        [PathBuf::from("Resources/rules.json")].into_iter()
+    )
+    .is_err());
+    let shared = PROJECT
+        .replace("/* End PBXNativeTarget section */", r#"
+    D00000000000000000000002 /* Extension */ = {
+        isa = PBXNativeTarget;
+        fileSystemSynchronizedGroups = (
+            C00000000000000000000003,
+        );
+        name = Extension;
+    };
+/* End PBXNativeTarget section */
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+    C00000000000000000000003 = {isa = PBXFileSystemSynchronizedRootGroup; path = Resources; sourceTree = SOURCE_ROOT; };
+/* End PBXFileSystemSynchronizedRootGroup section */"#);
+    assert!(remove_owned_resource_references(
+        &shared,
+        "Demo",
+        [PathBuf::from("Resources/rules.json")].into_iter()
+    )
+    .is_err());
     Ok(())
 }
 
@@ -1173,6 +1523,7 @@ fn list_ids(block: &str, field: &str) -> Vec<String> {
     block[start..end]
         .lines()
         .filter_map(|line| line.split_whitespace().next())
+        .map(|value| value.trim_end_matches(','))
         .filter(|value| value.len() == 24 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .map(str::to_string)
         .collect()
@@ -1626,6 +1977,7 @@ mod tests {
         )
         .unwrap();
         let config = ShellsmithIosConfig {
+            protected_resources: None,
             project: IosProjectConfig {
                 path: project,
                 scheme: "Demo".into(),
@@ -1872,6 +2224,7 @@ mod tests {
         )
         .unwrap();
         let config = ShellsmithIosConfig {
+            protected_resources: None,
             project: IosProjectConfig {
                 path: project.clone(),
                 scheme: "Demo".into(),

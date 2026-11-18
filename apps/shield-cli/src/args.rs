@@ -172,6 +172,13 @@ pub(crate) struct ProtectIosArgs {
 
 #[derive(Args, Default)]
 pub struct ProtectAabArgs {
+    /// base/assets 下的必保资源清单。
+    #[arg(long, value_name = "JSON", requires = "byos_endpoint")]
+    pub protected_resource_manifest: Option<PathBuf>,
+    #[arg(long, requires = "protected_resource_manifest")]
+    pub byos_endpoint: Option<String>,
+    #[arg(long, hide = true, requires = "protected_resource_manifest")]
+    pub byos_api_key: Option<String>,
     #[command(flatten)]
     pub runtime_ui: RuntimeUiArgs,
     #[arg(short, long, value_name = "AAB")]

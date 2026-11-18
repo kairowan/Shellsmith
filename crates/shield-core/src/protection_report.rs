@@ -598,8 +598,7 @@ impl MethodReport {
     pub(crate) fn bind(&mut self, artifact: &Path, aab: bool) -> Result<()> {
         crate::native_vmp::verify_packaged(&self.native_vmp, artifact, aab)?;
         if let Some(resources) = self.build.get("protected_resources") {
-            ensure!(!aab, "当前业务资源授权报告只支持 APK");
-            crate::protected_resources::verify_android_evidence(artifact, resources)?;
+            crate::protected_resources::verify_android_evidence(artifact, resources, aab)?;
         }
         let actual = archive_dexes(artifact)?;
         let expected = self

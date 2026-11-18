@@ -175,6 +175,7 @@ impl IosProtectRequest {
             .map(|mail| mail.trim().to_string())
             .filter(|mail| !mail.is_empty());
         let config = ShellsmithIosConfig {
+            protected_resources: None,
             project: IosProjectConfig {
                 path: PathBuf::from(self.project),
                 scheme: self.scheme,

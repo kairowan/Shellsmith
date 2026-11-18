@@ -209,6 +209,29 @@ pub fn run_protect_aab_with_control(
     }
     let inspection = inspect_aab(&args.input)?;
     validate_aab_for_module_processing(&inspection)?;
+    let mut resource_api_key = None;
+    if args.protected_resource_manifest.is_some() {
+        anyhow::ensure!(
+            matches!(args.engine, ProtectionEngineArg::Mocika),
+            "AAB 业务资源授权仅支持 Shellsmith 单壳"
+        );
+        anyhow::ensure!(
+            args.byos_endpoint.is_some(),
+            "AAB 业务资源授权需要 BYOS 地址"
+        );
+        resource_api_key = Some(
+            args.byos_api_key
+                .clone()
+                .or_else(|| std::env::var("SHELLSMITH_BYOS_API_KEY").ok())
+                .filter(|key| !key.is_empty())
+                .context("AAB 业务资源授权需要 SHELLSMITH_BYOS_API_KEY")?,
+        );
+    } else {
+        anyhow::ensure!(
+            args.byos_endpoint.is_none() && args.byos_api_key.is_none(),
+            "AAB 的 BYOS 配置须与业务资源清单一起提供"
+        );
+    }
     on_progress(
         "InspectBundle",
         "检查 base、dynamic-feature 和 Asset Pack 模块",
@@ -413,10 +436,13 @@ pub fn run_protect_aab_with_control(
     match args.engine {
         ProtectionEngineArg::Mocika => {
             let protect_opts = ProtectOptions {
-                protected_resource_manifest: None,
-                byos_endpoint: None,
-                byos_api_key: None,
-                byos_auth: None,
+                protected_resource_manifest: args.protected_resource_manifest.clone(),
+                byos_endpoint: args.byos_endpoint.clone(),
+                byos_api_key: resource_api_key,
+                byos_auth: args
+                    .protected_resource_manifest
+                    .as_ref()
+                    .map(|_| shield_core::ByosAuth::DeviceApproval),
                 runtime_ui: runtime_ui.clone(),
                 ui_packer_path: args.runtime_ui.ui_packer.clone(),
                 excluded_abis: args.exclude_abis.clone(),
@@ -566,8 +592,17 @@ pub fn run_protect_aab_with_control(
     on_progress("ValidateBundle", "使用 bundletool 校验最终 AAB");
     ensure_aab_not_cancelled(&cancel)?;
     run_bundletool_validate(&args.bundletool, staged_aab.path())?;
+    if let Some(manifest) = args.protected_resource_manifest.as_deref() {
+        shield_core::protected_resources::verify_aab_originals_removed(
+            &args.input,
+            staged_aab.path(),
+            manifest,
+        )?;
+    }
     if matches!(args.engine, ProtectionEngineArg::Mocika)
-        && (args.xop_pvm2_packer.is_some() || args.native_vmp_evidence.is_some())
+        && (args.xop_pvm2_packer.is_some()
+            || args.native_vmp_evidence.is_some()
+            || args.protected_resource_manifest.is_some())
     {
         shield_core::protection_report::rebind_report(
             &protected_apk,
@@ -1987,6 +2022,9 @@ mod tests {
         let tool = temp.path().join("tool");
         std::fs::write(&tool, b"placeholder").unwrap();
         let args = crate::args::ProtectAabArgs {
+            protected_resource_manifest: None,
+            byos_endpoint: None,
+            byos_api_key: None,
             input,
             output: temp.path().join("out.aab"),
             bundletool: tool.clone(),

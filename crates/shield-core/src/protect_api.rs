@@ -287,11 +287,10 @@ fn protect_apk_inner(
     }
     if opts.protected_resource_manifest.is_some()
         && (opts.byos_auth != Some(crate::ByosAuth::DeviceApproval)
-            || !runtime_selection.protected_resources_v1
-            || opts.external_pas2_assets_dir.is_some())
+            || !runtime_selection.protected_resources_v1)
     {
         return Err(ShieldError::from(anyhow::anyhow!(
-            "业务资源动态授权需要支持 SSR1 的设备批准运行时和单 APK 加固"
+            "业务资源动态授权需要支持 SSR1 的设备批准运行时"
         )));
     }
     if opts.runtime_ui.runtime_enabled() && !runtime_selection.runtime_ui {

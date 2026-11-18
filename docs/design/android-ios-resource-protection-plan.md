@@ -1,6 +1,6 @@
 # Android 与 iOS 资源保护迭代实施计划
 
-状态：实施中。分支 `feat/android-ios-resource-protection`，基线 `7a6b2ec`，发布对照为 Shellsmith v1.11.0。本文定义实现、兼容验收与发布顺序。各阶段完成后勾选任务，并把产物、环境、证据位置和未验证项填入发布记录。已实现的 Android 接入方式及外部待验收项见[当前资源协议](protected-resource-protocol.md)。
+状态：APK、AAB base 与 iOS 主应用的业务资源授权已实现。本地回归与外部放行条件分别记录。分支 `feat/android-ios-resource-protection`，基线 `7a6b2ec`，发布对照为 Shellsmith v1.11.0。[当前资源协议及正式验收输入](protected-resource-protocol.md)
 
 ## 目标与首个交付
 
@@ -80,9 +80,10 @@
 
 ### iOS IPA 链路
 
-- [ ] 在现有 iOS 配置结构中增加可选的资源清单。仅对显式启用的主 target 修改工作副本，写入生成的 Swift Package 资源或相应 Xcode 资源引用，Archive 前核对原资源复制入口。验证重复构建以及失败后重试，保留源工程原始摘要。
-- [ ] 在现有 `ShellsmithRuntime` 邻近接入 Swift 读取入口，复用系统 CryptoKit 和已有 App Attest 客户端。支持异步调用、同资源组授权合并、取消和明确的系统不支持状态。服务端验证 App ID、证明环境和当前请求绑定；记录真实设备和测试环境。
-- [ ] 扩展 `archive_verify.rs` 对 Archive 和最终 IPA 的资源核验。保持现有 Team ID、Bundle ID、Entitlements、签名、Extension 和 dSYM 检查。确认导出环节没有从其他 target 或构建资源目录把原件再次带入产物。
+- [x] 工程接线已加入可选清单和生成的 Swift Package 资源。资源清单在工作副本生效。工程夹具验证同名旁路资源保留，其他 target 的明确复制路径或同步目录引用被拒绝。
+- [x] Swift 读取入口复用 CryptoKit 和 App Attest。新增资源专用 Keychain 账户，支持异步、同组请求合并和取消检查。服务端通过签名夹具验证 App ID、证明环境、请求绑定、审批、并发防重放、计数和撤销。代码以实际 iPhoneOS SDK 对 arm64/iOS 14 通过类型检查。
+- [x] Archive 和导出 IPA 的密文、索引、明文残留及签名属性核验已接入。旧配置继续跑现有归档结构验证和工程接线回归。
+- [ ] 用正式签名上机前核对工作副本重建、Archive、Export 与源工程摘要。真实装机仍按下面的出口验收。
 - [ ] 用实际已签名 IPA 跑冷启动、后台恢复、授权读取、错误证明、设备撤销和断网重试。在真机上从已有业务数据的旧 IPA 暂存样本升级，验证用户数据和已在用的 Keychain 项。需要 App Store 渠道声明时执行对应签名和内测分发验证。
 - [ ] **出口**：最终 IPA 结构与签名核验通过，真机在正常和拒绝场景均完成指定业务结果，已有 iOS 项目缺省配置仍能归档并读取原资源。
 
@@ -96,7 +97,8 @@
 ### 按样本扩展随机访问与分发
 
 - [ ] 每次选择一个真实资源消费者，如音频播放器或模型引擎。仅在其明确要求时适配随机读取、私有临时文件或文件描述符。核验 seek、并发、超时、关闭、杀进程后清理、升级缓存隔离，以及已打开句柄遇到撤销后的边界。
-- [ ] Android AAB 增加 base、split 和 install-time 样本，再逐个验证按需模块。沿用 Play App Signing 证书区分，检查真实下发、资源模块更新和卸载。Play Integrity 通过专用模式纳入，不属于设备批准模式发布的默认依赖。
+- [x] Android AAB base 资源组授权已接入 CLI、MCP 和 GUI。残留检查覆盖任意模块里的必保原件副本。无新清单的 AAB 通过本地 bundletool 和 16 KB split 冷启动回归。
+- [ ] 通过 Play 内测验证 base 资源的真实授权和覆盖安装，再按样本检查 install-time 和按需模块的交付、资源模块更新与卸载。Play Integrity 通过专用模式纳入。
 - [ ] iOS 需要 Extension 或 App Group 时逐 target 检查签名、资源归属和共享目录行为。多 target 支持绑定实际消费者与证据后再声明。
 - [ ] **出口**：每种新增方式都有对应真实消费者的业务回归与最终分发证据，报告准确标记密文、运行中明文和必要落盘路径。
 

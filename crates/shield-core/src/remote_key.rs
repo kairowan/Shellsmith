@@ -289,6 +289,34 @@ pub(crate) fn register_resource_group(
     Ok(token)
 }
 
+pub(crate) fn register_ios_resource_group(
+    endpoint: &str,
+    api_key: &str,
+    build_id: &str,
+    group: &str,
+    app_id: &str,
+    environment: &str,
+    key: &[u8; 32],
+) -> Result<String> {
+    let auth = ByosAuth::DeviceApproval;
+    validate_options(Some(endpoint), Some(api_key), Some(auth))?;
+    let token = register(
+        &format!(
+            "{}/v1/ios-resource-keys/register",
+            endpoint.trim_end_matches('/')
+        ),
+        serde_json::json!({"ikm": STANDARD.encode(key), "app_id": app_id, "environment": environment,
+                          "build_id": build_id, "resource_group": group}),
+        api_key,
+        auth,
+    )?;
+    ensure!(
+        token.starts_with("i_") && token.len() == 66,
+        "App Attest 资源组 token 与协议不匹配"
+    );
+    Ok(token)
+}
+
 fn register(url: &str, body: serde_json::Value, api_key: &str, auth: ByosAuth) -> Result<String> {
     // 禁止重定向，避免构建凭据和 IKM 被转发给其他地址。
     let agent = ureq::AgentBuilder::new()

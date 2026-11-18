@@ -25,6 +25,7 @@ import {
   openFileDialog,
   type AabInspection,
   type BuildInfo,
+  type ByosProfile,
   type CertificateRecord,
   type DragDropPayload,
   type TaskSnapshot,
@@ -71,6 +72,9 @@ export function AabProtectPage({
   const [pvm2RequiredMethods, setPvm2RequiredMethods] = useState("");
   const [protectRouteAssets, setProtectRouteAssets] = useState(false);
   const [nativeVmpEvidence, setNativeVmpEvidence] = useState("");
+  const [resourceManifest, setResourceManifest] = useState("");
+  const [resourceByosId, setResourceByosId] = useState("");
+  const [resourceByosProfiles, setResourceByosProfiles] = useState<ByosProfile[]>([]);
   const [prefixesText, setPrefixesText] = useState("");
   const [currentStep, setCurrentStep] = useState("");
   const [currentDetail, setCurrentDetail] = useState("");
@@ -78,6 +82,15 @@ export function AabProtectPage({
   const [finishedAt, setFinishedAt] = useState<number | null>(null);
   const taskId = useRef<string | null>(null);
   const checkSequence = useRef(0);
+
+  useEffect(() => {
+    if (!active) return;
+    let attached = true;
+    void api.listByosProfiles().then(({ profiles }) => {
+      if (attached) setResourceByosProfiles(profiles.filter((item) => item.authMode === "device_approval"));
+    }).catch(() => { if (attached) setResourceByosProfiles([]); });
+    return () => { attached = false; };
+  }, [active]);
 
   useEffect(() => {
     if (!certificatesLoaded) return;
@@ -105,6 +118,7 @@ export function AabProtectPage({
   const locked = state === "running" || state === "prechecking";
   const startDisabled = locked || !runtimeInfoLoaded || !toolsReady || !inspection || !certificate
     || Boolean(filenameError) || !runtimeCertValid || !prefixValid
+    || (Boolean(resourceManifest.trim()) && !resourceByosProfiles.some((item) => item.id === resourceByosId))
     || (profile === "strict" && prefixes.length === 0 && !pvm2RequiredMethods.trim()) || (multiModule && profile !== "strict");
 
   const runPreflight = useCallback(async (path: string) => {
@@ -226,6 +240,8 @@ export function AabProtectPage({
         pvm2RequiredMethods: profile === "strict" ? pvm2RequiredMethods.trim() || null : null,
         protectRouteAssets,
         nativeVmpEvidence: nativeVmpEvidence.trim() || null,
+        protectedResourceManifest: resourceManifest.trim() || null,
+        byosProfileId: resourceManifest.trim() ? resourceByosId || null : null,
       });
       setFinishedAt(Date.now());
       setState("done");
@@ -352,6 +368,14 @@ export function AabProtectPage({
                   <Field label={t(locale, "nativeVmpEvidence")} hint={t(locale, "nativeVmpEvidenceHint")}>
                     <TextInput aria-label={t(locale, "nativeVmpEvidence")} value={nativeVmpEvidence} disabled={locked} onChange={(event) => setNativeVmpEvidence(event.target.value)} />
                     <AppButton className="mt-2 w-full" variant="secondary" disabled={locked} onClick={async () => { const path = await openFileDialog("TSV", ["txt", "tsv"]); if (path) setNativeVmpEvidence(path); }}>{t(locale, "nativeVmpChooseEvidence")}</AppButton>
+                  </Field>
+                  <Field label={t(locale, "protectedResourceManifest")} hint={t(locale, "protectedResourceManifestHint")}>
+                    <TextInput aria-label={t(locale, "protectedResourceManifest")} value={resourceManifest} disabled={locked} onChange={(event) => setResourceManifest(event.target.value)} />
+                    <AppButton className="mt-2 w-full" variant="secondary" disabled={locked} onClick={async () => { const path = await openFileDialog("JSON", ["json"]); if (path) setResourceManifest(path); }}>{t(locale, "protectedResourceChooseManifest")}</AppButton>
+                    {resourceManifest.trim() && <SelectInput aria-label={t(locale, "aabResourceByos")} value={resourceByosId} disabled={locked} onChange={(event) => setResourceByosId(event.target.value)}>
+                      <option value="">{t(locale, "aabResourceByos")}</option>
+                      {resourceByosProfiles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                    </SelectInput>}
                   </Field>
                   <Field label={t(locale, "aabRuntimeBinding")}>
                     <CheckRow checked={allowUploadCertBinding} disabled={locked} label={t(locale, "aabLocalUploadBinding")} hint={t(locale, "aabLocalUploadBindingHint")} onChange={setAllowUploadCertBinding} />

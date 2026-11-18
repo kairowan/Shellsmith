@@ -81,6 +81,34 @@ pub struct IosConfidentialConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IosResourceConfig {
+    pub manifest: PathBuf,
+    /// 相对 Xcode 工程源码根目录的资源目录。
+    pub source_root: PathBuf,
+    pub byos_endpoint: String,
+    pub environment: IosAttestEnvironment,
+    #[serde(default)]
+    pub app_id_prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IosAttestEnvironment {
+    Development,
+    Production,
+}
+
+impl IosAttestEnvironment {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Development => "development",
+            Self::Production => "production",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IosRaspConfig {
     #[serde(default = "default_rasp_provider")]
     pub provider: String,
@@ -105,6 +133,8 @@ pub struct ShellsmithIosConfig {
     pub confidential: Option<IosConfidentialConfig>,
     #[serde(default)]
     pub rasp: Option<IosRaspConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protected_resources: Option<IosResourceConfig>,
 }
 
 impl ShellsmithIosConfig {
@@ -132,6 +162,11 @@ impl ShellsmithIosConfig {
                 confidential.config = base.join(&confidential.config);
             }
         }
+        if let Some(resources) = &mut config.protected_resources {
+            if resources.manifest.is_relative() {
+                resources.manifest = base.join(&resources.manifest);
+            }
+        }
         config.validate()?;
         Ok(config)
     }
@@ -157,6 +192,34 @@ impl ShellsmithIosConfig {
         }
         for bundle_id in &self.project.bundle_ids {
             validate_bundle_id(bundle_id)?;
+        }
+        if let Some(resources) = &self.protected_resources {
+            validate_https_endpoint(resources.byos_endpoint.trim())?;
+            anyhow::ensure!(
+                self.project.bundle_ids.len() == 1,
+                "业务资源授权需要一个明确的主应用 Bundle ID"
+            );
+            anyhow::ensure!(
+                resources.manifest.symlink_metadata()?.is_file(),
+                "iOS 必保资源清单必须为普通文件"
+            );
+            anyhow::ensure!(
+                !resources.source_root.as_os_str().is_empty()
+                    && resources
+                        .source_root
+                        .components()
+                        .all(|part| matches!(part, std::path::Component::Normal(_))),
+                "资源根目录必须位于 iOS 工作副本内"
+            );
+            if let Some(prefix) = resources.app_id_prefix.as_deref() {
+                anyhow::ensure!(
+                    prefix.len() == 10
+                        && prefix
+                            .bytes()
+                            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()),
+                    "App ID 前缀必须为 10 位字母或数字"
+                );
+            }
         }
         if self.confidential_enabled() {
             let confidential = self
@@ -365,7 +428,11 @@ where
         dependency_cache::install_sdk(&sdk, &working_root, &cancel)?;
     }
 
-    if options.config.confidential_enabled() || options.config.protection.profile.uses_rasp() {
+    let mut protected_resources = None;
+    if options.config.confidential_enabled()
+        || options.config.protection.profile.uses_rasp()
+        || options.config.protected_resources.is_some()
+    {
         progress(
             &on_progress,
             "IntegrateProtection",
@@ -387,6 +454,21 @@ where
             &options.config,
             confidential_path,
         )?;
+        if let Some(resources) = options.config.protected_resources.as_ref() {
+            progress(
+                &on_progress,
+                "ProtectResources",
+                "正在加密业务资源并注册 App Attest 授权组",
+            );
+            protected_resources = Some(project_patch::integrate_protected_resources(
+                &working_root,
+                &working_project,
+                target,
+                &options.config.project,
+                resources,
+                &cancel,
+            )?);
+        }
     }
 
     progress(
@@ -461,6 +543,27 @@ where
         &options.config.project.bundle_ids,
     )?;
     checks.extend(verification.checks.clone());
+    if let Some(resources) = protected_resources.as_ref() {
+        let policy = options.config.protected_resources.as_ref().unwrap();
+        if let Err(error) = archive_verify::verify_protected_resources(
+            resources,
+            &verification.app_path,
+            &ipa,
+            policy.environment.as_str(),
+            &options.config.project.bundle_ids[0],
+            policy
+                .app_id_prefix
+                .as_deref()
+                .unwrap_or(&options.config.project.team_id),
+        ) {
+            fs::remove_file(&ipa).context("清理未通过资源验证的 IPA 失败")?;
+            return Err(error);
+        }
+        checks.push(IosCheck::ready(
+            "protected_resources",
+            "Archive 和 IPA 的业务资源密文与 App Attest 签名能力已核验",
+        ));
+    }
     let report = IosProtectionReport {
         schema_version: IOS_REPORT_SCHEMA_VERSION,
         profile: options.config.protection.profile,
@@ -677,6 +780,7 @@ mod tests {
     fn strict_allows_missing_app_attest_server() {
         let confidential = tempfile::NamedTempFile::new().unwrap();
         let config = ShellsmithIosConfig {
+            protected_resources: None,
             project: IosProjectConfig {
                 path: PathBuf::from("App.xcodeproj"),
                 scheme: "App".into(),
@@ -718,6 +822,7 @@ mod tests {
     #[test]
     fn balanced_allows_optional_confidential_and_watcher_mail() {
         let config = ShellsmithIosConfig {
+            protected_resources: None,
             project: IosProjectConfig {
                 path: PathBuf::from("App.xcodeproj"),
                 scheme: "App".into(),

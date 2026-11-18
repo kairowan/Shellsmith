@@ -18,7 +18,11 @@ pub(crate) const KNOWN_THREATS: &[&str] = &[
     "timeSpoofing",
 ];
 
-pub(crate) fn package_manifest(confidential: bool, rasp: bool) -> String {
+pub(crate) fn package_manifest(
+    confidential: bool,
+    rasp: bool,
+    protected_resources: bool,
+) -> String {
     let mut dependencies = Vec::new();
     let mut target_dependencies = Vec::new();
     let mut plugins = Vec::new();
@@ -56,7 +60,7 @@ pub(crate) fn package_manifest(confidential: bool, rasp: bool) -> String {
                      name: \"ShellsmithRuntime\",\n\
                      dependencies: [\n{target_dependencies}\n                     ],\n\
                      exclude: [{exclude}],\n\
-                     plugins: [{plugins}]\n\
+                     {resources}plugins: [{plugins}]\n\
                  )\n\
              ],\n\
              swiftLanguageModes: [.v5]\n\
@@ -65,6 +69,11 @@ pub(crate) fn package_manifest(confidential: bool, rasp: bool) -> String {
         target_dependencies = indent_items(&target_dependencies, 24),
         exclude = exclude.join(", "),
         plugins = plugins.join(", "),
+        resources = if protected_resources {
+            "resources: [.copy(\"shellsmith-resources\")],\n                     "
+        } else {
+            ""
+        },
     )
 }
 
@@ -328,12 +337,31 @@ public enum ShellsmithAppAttest {
     public static var isSupported: Bool { DCAppAttestService.shared.isSupported }
 
     public static func keyId() async throws -> String {
-        if let stored = try readKeyId() {
+        try await keyId(account: Bundle.main.bundleIdentifier ?? "app")
+    }
+
+    static func resourceKeyId(appId: String, environment: String) async throws -> String {
+        try await keyId(account: resourceAccount(appId: appId, environment: environment))
+    }
+
+    static func forgetResourceKey(appId: String, environment: String) throws {
+        let status = SecItemDelete(keyQuery(account: resourceAccount(appId: appId, environment: environment)) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw ShellsmithAppAttestError.keychain(status)
+        }
+    }
+
+    private static func resourceAccount(appId: String, environment: String) -> String {
+        "resource-v1:" + appId + ":" + environment
+    }
+
+    private static func keyId(account: String) async throws -> String {
+        if let stored = try readKeyId(account: account) {
             return stored
         }
         let generated = try await generateKey()
-        try saveKeyId(generated)
-        return try readKeyId() ?? generated
+        try saveKeyId(generated, account: account)
+        return try readKeyId(account: account) ?? generated
     }
 
     public static func generateKey() async throws -> String {
@@ -418,14 +446,18 @@ public enum ShellsmithAppAttest {
         }
     }
 
-    private static func readKeyId() throws -> String? {
-        let query: [String: Any] = [
+    private static func keyQuery(account: String) -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: Bundle.main.bundleIdentifier ?? "app",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecAttrAccount as String: account
         ]
+    }
+
+    private static func readKeyId(account: String) throws -> String? {
+        var query = keyQuery(account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
@@ -435,14 +467,10 @@ public enum ShellsmithAppAttest {
         return String(data: data, encoding: .utf8)
     }
 
-    private static func saveKeyId(_ keyId: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: Bundle.main.bundleIdentifier ?? "app",
-            kSecValueData as String: Data(keyId.utf8),
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
+    private static func saveKeyId(_ keyId: String, account: String) throws {
+        var query = keyQuery(account: account)
+        query[kSecValueData as String] = Data(keyId.utf8)
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess || status == errSecDuplicateItem else {
             throw ShellsmithAppAttestError.keychain(status)
@@ -503,7 +531,7 @@ mod tests {
 
     #[test]
     fn package_versions_are_exact_and_equal() {
-        let manifest = package_manifest(true, true);
+        let manifest = package_manifest(true, true, false);
         assert!(manifest.contains("exact: \"0.5.2\""));
         assert!(manifest.contains(".package(path: \"../Dependencies/Free-RASP-iOS\")"));
         assert!(!manifest.contains("github.com/talsec"));
@@ -516,21 +544,27 @@ mod tests {
             return;
         }
         let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join("Package.swift"),
-            package_manifest(true, true),
-        )
-        .unwrap();
-        let output = Command::new("swift")
-            .args(["package", "dump-package"])
-            .current_dir(temp.path())
-            .output()
+        for resources in [false, true] {
+            fs::write(
+                temp.path().join("Package.swift"),
+                package_manifest(true, true, resources),
+            )
             .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+            let output = Command::new("swift")
+                .args(["package", "dump-package"])
+                .current_dir(temp.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout).contains("shellsmith-resources"),
+                resources
+            );
+        }
     }
 
     #[test]
@@ -565,6 +599,7 @@ mod tests {
     #[test]
     fn protection_source_passes_opt_in_blocking_flag() {
         let config = ShellsmithIosConfig {
+            protected_resources: None,
             project: IosProjectConfig {
                 path: PathBuf::from("App.xcodeproj"),
                 scheme: "App".into(),
@@ -630,6 +665,7 @@ mod tests {
             return;
         }
         let config = ShellsmithIosConfig {
+            protected_resources: None,
             project: IosProjectConfig {
                 path: PathBuf::from("App.xcodeproj"),
                 scheme: "App".into(),

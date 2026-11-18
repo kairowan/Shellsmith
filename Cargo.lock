@@ -3715,6 +3715,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "shield-core",
  "tempfile",
  "toml 0.8.2",
  "zip 9.3.0",

@@ -314,6 +314,8 @@ export type AabProtectRequest = {
   xopTrueVmpPrefixes: string[];
   pvm2RequiredMethods?: string | null;
   nativeVmpEvidence?: string | null;
+  protectedResourceManifest?: string | null;
+  byosProfileId?: string | null;
   protectRouteAssets?: boolean;
 };
 

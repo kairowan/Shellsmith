@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use zip::ZipArchive;
@@ -380,6 +381,82 @@ fn validate_ipa_structure(path: &Path) -> Result<()> {
     if !has_info || !has_executable_container {
         anyhow::bail!("IPA 缺少 Payload/*.app/Info.plist");
     }
+    Ok(())
+}
+
+pub(crate) fn verify_protected_resources(
+    resources: &shield_core::protected_resources::PreparedResources,
+    app: &Path,
+    ipa: &Path,
+    environment: &str,
+    bundle_id: &str,
+    app_id_prefix: &str,
+) -> Result<()> {
+    const RESOURCE_BUNDLE: &str = "ShellsmithRuntime_ShellsmithRuntime.bundle/";
+    resources.verify_directory(app, RESOURCE_BUNDLE)?;
+    let plist = read_plist_json(&app.join("Info.plist"))?;
+    anyhow::ensure!(
+        plist.get("CFBundleIdentifier").and_then(Value::as_str) == Some(bundle_id),
+        "Archive 主应用身份不匹配"
+    );
+    let executable = plist
+        .get("CFBundleExecutable")
+        .and_then(Value::as_str)
+        .context("Archive 缺少主可执行文件名")?;
+    anyhow::ensure!(
+        executable != "."
+            && executable != ".."
+            && !executable.is_empty()
+            && !executable.contains(['/', '\\']),
+        "主可执行文件名无效"
+    );
+    let app_name = app
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("Archive 主应用路径无效")?;
+    let expected_app_id = format!("{app_id_prefix}.{bundle_id}");
+    verify_attest_signing(&app.join(executable), None, &expected_app_id)?;
+    let ipa_prefix = format!("Payload/{app_name}/");
+    resources.verify_zip(ipa, &format!("{ipa_prefix}{RESOURCE_BUNDLE}"))?;
+    let mut archive = shield_core::protection_report::checked_archive(ipa)?;
+    let mut entry = archive.by_name(&format!("{ipa_prefix}{executable}"))?;
+    const MAX_EXECUTABLE: u64 = 512 * 1024 * 1024;
+    let size = entry.size();
+    anyhow::ensure!(size <= MAX_EXECUTABLE, "IPA 主可执行文件超出检查上限");
+    let mut binary = tempfile::NamedTempFile::new()?;
+    let copied = std::io::copy(
+        &mut (&mut entry).take(MAX_EXECUTABLE + 1),
+        binary.as_file_mut(),
+    )?;
+    anyhow::ensure!(copied == size, "IPA 主可执行文件长度与声明不一致");
+    binary.as_file_mut().flush()?;
+    verify_attest_signing(binary.path(), Some(environment), &expected_app_id)
+}
+
+fn verify_attest_signing(binary: &Path, environment: Option<&str>, app_id: &str) -> Result<()> {
+    let output = Command::new("codesign")
+        .args(["-d", "--entitlements", ":-"])
+        .arg(binary)
+        .output()?;
+    anyhow::ensure!(
+        output.status.success() && !output.stdout.is_empty() && output.stdout.len() <= 256 * 1024,
+        "无法读取 App Attest 签名权限"
+    );
+    let mut entitlements = tempfile::NamedTempFile::new()?;
+    entitlements.write_all(&output.stdout)?;
+    entitlements.flush()?;
+    let values = read_plist_json(entitlements.path())?;
+    let attestation = values
+        .get("com.apple.developer.devicecheck.appattest-environment")
+        .and_then(Value::as_str);
+    anyhow::ensure!(
+        values.get("application-identifier").and_then(Value::as_str) == Some(app_id)
+            && (match environment {
+                Some(expected) => attestation == Some(expected),
+                None => matches!(attestation, Some("development" | "production")),
+            }),
+        "签名中的 App Attest 环境或 App ID 与资源策略不一致"
+    );
     Ok(())
 }
 

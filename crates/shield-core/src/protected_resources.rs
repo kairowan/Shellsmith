@@ -221,6 +221,12 @@ impl PreparedResources {
         self.resources.iter().map(|resource| &resource.evidence)
     }
 
+    pub fn source_paths(&self) -> impl Iterator<Item = &str> {
+        self.resources
+            .iter()
+            .map(|resource| resource.resource.source.as_str())
+    }
+
     pub(crate) fn index_digest(&self) -> Option<String> {
         self.index_sha256.as_ref().map(|digest| hex(digest))
     }
@@ -239,6 +245,42 @@ impl PreparedResources {
             )?;
             tokens.insert(group, token);
         }
+        self.write_index(
+            serde_json::json!({"server_url": endpoint.trim_end_matches('/'), "groups": tokens}),
+            destination,
+        )
+    }
+
+    pub fn register_ios(
+        &mut self,
+        endpoint: &str,
+        api_key: &str,
+        app_id: &str,
+        environment: &str,
+        destination: &Path,
+    ) -> Result<()> {
+        let build_id = self.build_id();
+        let mut tokens = BTreeMap::new();
+        for (group, key) in self.group_keys() {
+            let token = crate::remote_key::register_ios_resource_group(
+                endpoint,
+                api_key,
+                &build_id,
+                group,
+                app_id,
+                environment,
+                key,
+            )?;
+            tokens.insert(group, token);
+        }
+        self.write_index(
+            serde_json::json!({"server_url": endpoint.trim_end_matches('/'), "groups": tokens,
+            "app_id": app_id, "environment": environment}),
+            destination,
+        )
+    }
+
+    fn write_index(&mut self, mut metadata: serde_json::Value, destination: &Path) -> Result<()> {
         let resources: BTreeMap<_, _> = self
             .evidence()
             .map(|entry| {
@@ -248,10 +290,10 @@ impl PreparedResources {
                 )
             })
             .collect();
-        let index = serde_json::to_vec(&serde_json::json!({
-            "version": 1, "build_id": build_id, "server_url": endpoint.trim_end_matches('/'),
-            "groups": tokens, "resources": resources,
-        }))?;
+        metadata["version"] = 1.into();
+        metadata["build_id"] = self.build_id().into();
+        metadata["resources"] = serde_json::to_value(resources)?;
+        let index = serde_json::to_vec(&metadata)?;
         File::create_new(destination.join("index.json"))?.write_all(&index)?;
         self.index_sha256 = Some(Sha256::digest(&index).into());
         Ok(())
@@ -347,9 +389,56 @@ impl PreparedResources {
         );
         Ok(())
     }
+
+    /// 在 Archive 内检查 Swift Package 资源目录和所有同内容明文条目。
+    pub fn verify_directory(&self, app: &Path, prefix: &str) -> Result<()> {
+        let directory = app.join(prefix).join(RESOURCE_DIRECTORY);
+        for resource in &self.resources {
+            let path = directory.join(format!("{}.ssr", resource.resource.id));
+            let hash = digest_bounded(&mut File::open(path)?, resource.ciphertext_len)?;
+            ensure!(
+                hex(&hash) == resource.evidence.ciphertext_sha256,
+                "Archive 密文摘要不匹配"
+            );
+        }
+        if let Some(expected) = self.index_sha256 {
+            let mut index = File::open(directory.join("index.json"))?;
+            let length = index.metadata()?.len();
+            ensure!(
+                length <= MAX_MANIFEST_SIZE && digest_bounded(&mut index, length)? == expected,
+                "Archive 资源索引无效"
+            );
+        }
+        for entry in walkdir::WalkDir::new(app).follow_links(false) {
+            let entry = entry?;
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let size = entry.metadata()?.len();
+            if self
+                .resources
+                .iter()
+                .any(|resource| resource.plaintext_size == size)
+            {
+                let hash = digest_bounded(&mut File::open(entry.path())?, size)?;
+                ensure!(
+                    !self
+                        .resources
+                        .iter()
+                        .any(|resource| resource.plaintext_sha256 == hash),
+                    "Archive 含有必保资源的明文副本"
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
-pub(crate) fn verify_android_evidence(artifact: &Path, report: &serde_json::Value) -> Result<()> {
+pub(crate) fn verify_android_evidence(
+    artifact: &Path,
+    report: &serde_json::Value,
+    aab: bool,
+) -> Result<()> {
     #[derive(Deserialize)]
     struct Evidence {
         format: u32,
@@ -362,7 +451,10 @@ pub(crate) fn verify_android_evidence(artifact: &Path, report: &serde_json::Valu
         evidence.format == 1 && (1..=MAX_RESOURCES).contains(&evidence.resources.len()),
         "业务资源保护报告版本或条目数无效"
     );
-    let prefix = format!("assets/{RESOURCE_DIRECTORY}/");
+    let prefix = format!(
+        "{}assets/{RESOURCE_DIRECTORY}/",
+        if aab { "base/" } else { "" }
+    );
     let mut expected = BTreeMap::from([(format!("{prefix}index.json"), evidence.index_sha256)]);
     for resource in evidence.resources {
         ensure!(identifier(&resource.id), "报告中的业务资源 ID 无效");
@@ -394,6 +486,55 @@ pub(crate) fn verify_android_evidence(artifact: &Path, report: &serde_json::Valu
         );
     }
     ensure!(expected.is_empty(), "最终产物缺少已验证的业务资源");
+    Ok(())
+}
+
+/// 检查重组后的所有模块，防止 base 必保原件通过其他模块被重新交付。
+pub fn verify_aab_originals_removed(input: &Path, output: &Path, manifest: &Path) -> Result<()> {
+    ensure!(
+        manifest.symlink_metadata()?.is_file(),
+        "资源清单必须是普通文件"
+    );
+    let mut raw = Vec::new();
+    File::open(manifest)?
+        .take(MAX_MANIFEST_SIZE + 1)
+        .read_to_end(&mut raw)?;
+    ensure!(raw.len() as u64 <= MAX_MANIFEST_SIZE, "资源清单过大");
+    let manifest: Manifest = serde_json::from_slice(&raw)?;
+    ensure!(
+        manifest.version == 1 && (1..=MAX_RESOURCES).contains(&manifest.resources.len()),
+        "资源清单无效"
+    );
+    let mut source = crate::protection_report::checked_archive(input)?;
+    let mut hashes = BTreeMap::<u64, HashSet<[u8; 32]>>::new();
+    let mut names = HashSet::new();
+    for resource in manifest.resources {
+        ensure!(relative_source(&resource.source), "必保资源路径无效");
+        let path = format!("base/assets/{}", resource.source);
+        let mut entry = source.by_name(&path).context("AAB base 缺少必保资源")?;
+        let size = entry.size();
+        ensure!((1..=MAX_RESOURCE_SIZE).contains(&size), "必保资源大小超限");
+        hashes
+            .entry(size)
+            .or_default()
+            .insert(digest_bounded(&mut entry, size)?);
+        names.insert(path);
+    }
+    let mut final_bundle = crate::protection_report::checked_archive(output)?;
+    for i in 0..final_bundle.len() {
+        let mut entry = final_bundle.by_index(i)?;
+        ensure!(
+            !names.contains(entry.name()?.as_ref()),
+            "AAB 保留了必保资源的原路径"
+        );
+        let size = entry.size();
+        if let Some(digests) = hashes.get(&size) {
+            ensure!(
+                !digests.contains(&digest_bounded(&mut entry, size)?),
+                "AAB 其他条目保留了必保资源的明文副本"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -455,6 +596,35 @@ fn seal_resource(
 mod tests {
     use super::*;
     use zip::{write::SimpleFileOptions, ZipWriter};
+
+    #[test]
+    fn aab_base_原件不能由其他模块重新分发() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let input = temp.path().join("input.aab");
+        let output = temp.path().join("output.aab");
+        let manifest = temp.path().join("assets.json");
+        fs::write(&manifest, br#"{"version":1,"resources":[{"id":"rules","group":"policy","source":"rules.json","version":1,"read":"stream"}]}"#)?;
+        let write_bundle = |path: &Path, entry: &str, data: &[u8]| -> Result<()> {
+            let mut archive = ZipWriter::new(File::create(path)?);
+            archive.start_file(entry, SimpleFileOptions::default())?;
+            archive.write_all(data)?;
+            archive.finish()?;
+            Ok(())
+        };
+        write_bundle(&input, "base/assets/rules.json", b"original")?;
+        for (entry, data, allowed) in [
+            ("feature/assets/renamed.json", b"original", false),
+            ("base/assets/rules.json", b"modified", false),
+            ("feature/assets/unrelated.json", b"modified", true),
+        ] {
+            write_bundle(&output, entry, data)?;
+            assert_eq!(
+                verify_aab_originals_removed(&input, &output, &manifest).is_ok(),
+                allowed
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn 必保资源分片认证与最终产物验证() -> Result<()> {

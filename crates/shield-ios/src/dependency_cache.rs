@@ -444,7 +444,7 @@ mod tests {
             fs::create_dir_all(package.join("Sources/ShellsmithRuntime")).unwrap();
             fs::write(
                 package.join("Package.swift"),
-                crate::freerasp::package_manifest(false, true),
+                crate::freerasp::package_manifest(false, true, false),
             )
             .unwrap();
             fs::write(

@@ -122,6 +122,20 @@ async fn protect_aab(
     let certificate = certificate_state
         .get_certificate(&request.certificate_id)?
         .ok_or_else(|| "未找到 AAB 签名证书".to_string())?;
+    let resource_byos = match (
+        request.protected_resource_manifest.as_ref(),
+        request.byos_profile_id.as_deref(),
+    ) {
+        (Some(_), Some(id)) => {
+            let loaded = byos::load(&certificate_state, id)?;
+            if loaded.profile.auth_mode != "device_approval" {
+                return Err("AAB 资源组授权需要设备批准 BYOS 配置".into());
+            }
+            Some(loaded)
+        }
+        (None, None) => None,
+        _ => return Err("AAB 资源清单和设备批准 BYOS 配置必须同时选择".into()),
+    };
     task_manager.begin(
         &window,
         request.task_id.clone(),
@@ -136,6 +150,7 @@ async fn protect_aab(
         window.clone(),
         request,
         certificate,
+        resource_byos,
         cancel_handle,
         task_manager.inner().clone(),
     )

@@ -39,6 +39,8 @@ pub(crate) struct AabProtectRequest {
     pub(crate) xop_true_vmp_prefixes: Vec<String>,
     pub(crate) pvm2_required_methods: Option<String>,
     pub(crate) native_vmp_evidence: Option<String>,
+    pub(crate) protected_resource_manifest: Option<String>,
+    pub(crate) byos_profile_id: Option<String>,
     #[serde(default)]
     pub(crate) protect_route_assets: bool,
 }
@@ -64,6 +66,7 @@ pub(crate) async fn execute_protect_aab(
     window: tauri::Window,
     request: AabProtectRequest,
     certificate: CertificateRecord,
+    resource_byos: Option<crate::byos::SavedProfile>,
     cancel_handle: tauri::State<'_, CancelHandle>,
     task_manager: TaskManager,
 ) -> Result<(), ExecutionFailure> {
@@ -75,8 +78,16 @@ pub(crate) async fn execute_protect_aab(
         .ok_or_else(|| ExecutionFailure::from("当前安装包缺少 aapt2".to_string()))?;
     let apktool = find_apktool_path(&app)
         .ok_or_else(|| ExecutionFailure::from("当前安装包缺少 apktool".to_string()))?;
-    let resources = find_resources_path(&app)
+    let mut resources = find_resources_path(&app)
         .ok_or_else(|| ExecutionFailure::from("当前安装包缺少 Android 运行时资源".to_string()))?;
+    if resource_byos.is_some() {
+        resources = resources.with_file_name("resources-byos.zip");
+        if !resources.is_file() {
+            return Err(ExecutionFailure::from(
+                "缺少设备批准 BYOS 运行时资源".to_string(),
+            ));
+        }
+    }
     let apksigner = find_apksigner_path(&app)
         .ok_or_else(|| ExecutionFailure::from("当前安装包缺少 apksigner".to_string()))?;
     let ui_packer = find_xop_pvm2_packer_path(&app);
@@ -97,6 +108,14 @@ pub(crate) async fn execute_protect_aab(
         let key_password =
             (!certificate.key_password.is_empty()).then_some(certificate.key_password);
         let args = ProtectAabArgs {
+            protected_resource_manifest: request
+                .protected_resource_manifest
+                .map(PathBuf::from)
+                .map(strip_unc_prefix),
+            byos_endpoint: resource_byos
+                .as_ref()
+                .map(|item| item.profile.endpoint.clone()),
+            byos_api_key: resource_byos.map(|item| item.api_key),
             runtime_ui: shield_cli::RuntimeUiArgs::from_options(request.runtime_ui, ui_packer),
             input: strip_unc_prefix(PathBuf::from(request.input)),
             output: strip_unc_prefix(PathBuf::from(request.output)),
