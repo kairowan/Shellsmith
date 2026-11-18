@@ -454,6 +454,15 @@ fn protect_apk_inner(
     let mut protected_resources =
         if let Some(manifest) = opts.protected_resource_manifest.as_deref() {
             let assets = apk_dir.join("assets");
+            if !assets
+                .try_exists()
+                .map_err(anyhow::Error::from)
+                .map_err(ShieldError::from)?
+            {
+                fs::create_dir(&assets)
+                    .map_err(anyhow::Error::from)
+                    .map_err(ShieldError::from)?;
+            }
             if assets
                 .join(crate::protected_resources::RESOURCE_DIRECTORY)
                 .symlink_metadata()
@@ -463,14 +472,15 @@ fn protect_apk_inner(
                     "APK 占用了业务资源保留目录"
                 )));
             }
-            let prepared = crate::protected_resources::PreparedResources::prepare(
+            let prepared = crate::protected_resources::PreparedResources::prepare_with_modules(
                 manifest,
                 &assets,
                 &resource_stage,
+                opts.external_pvm2_dex_dir.as_deref(),
             )
             .map_err(ShieldError::from)?;
             prepared
-                .remove_originals(&assets)
+                .remove_originals_with_modules(&assets, opts.external_pvm2_dex_dir.as_deref())
                 .map_err(ShieldError::from)?;
             Some(prepared)
         } else {
@@ -576,6 +586,9 @@ fn protect_apk_inner(
             &apk_dir,
             opts.external_pas2_assets_dir.as_deref(),
             &opts.deferred_pas2_asset_modules,
+            protected_resources
+                .as_ref()
+                .is_some_and(|resources| resources.contains_module_resources()),
         )
         .map_err(ShieldError::from)?;
         let staged_external_native =
@@ -944,6 +957,9 @@ fn protect_apk_inner(
                 &resource_stage,
             )
             .map_err(ShieldError::from)?;
+        prepared
+            .place_module_resources(&resource_stage, opts.external_pvm2_dex_dir.as_deref())
+            .map_err(ShieldError::from)?;
         fs::rename(
             &resource_stage,
             apk_dir
@@ -1135,6 +1151,7 @@ fn stage_external_pas2_assets(
     apk_dir: &Path,
     external_root: Option<&Path>,
     deferred_modules: &[String],
+    allow_empty: bool,
 ) -> anyhow::Result<Vec<StagedExternalAsset>> {
     let Some(external_root) = external_root else {
         return Ok(Vec::new());
@@ -1199,6 +1216,9 @@ fn stage_external_pas2_assets(
         }
     }
     if staged.is_empty() {
+        if allow_empty {
+            return Ok(staged);
+        }
         anyhow::bail!("AAB 外部模块未包含可保护的 assets 文件");
     }
     let deferred_index = apk_dir.join("assets/protector/deferred-assets.sha256");
@@ -1569,9 +1589,13 @@ mod tests {
         std::fs::create_dir_all(original.parent().unwrap()).unwrap();
         std::fs::write(&original, b"plain").unwrap();
 
-        let staged =
-            stage_external_pas2_assets(&apk, Some(temp.path().join("modules").as_path()), &[])
-                .unwrap();
+        let staged = stage_external_pas2_assets(
+            &apk,
+            Some(temp.path().join("modules").as_path()),
+            &[],
+            false,
+        )
+        .unwrap();
         assert!(!apk.join("assets/protector/deferred-assets.sha256").exists());
         assert_eq!(std::fs::read(&staged[0].staged_plain).unwrap(), b"plain");
         assert!(restore_external_pas2_assets(&staged).is_err());
@@ -1603,6 +1627,7 @@ mod tests {
             &apk,
             Some(temp.path().join("modules").as_path()),
             &["on_demand".to_string()],
+            false,
         )
         .unwrap();
         assert_eq!(staged.iter().filter(|item| item.deferred).count(), 1);

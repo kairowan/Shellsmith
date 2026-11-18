@@ -11,7 +11,9 @@ fn rust_产物由_java_和_swift_验证() -> Result<()> {
     let root = fixture.path();
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let manifest = root.join("manifest.json");
-    let plaintext = vec![0x42; 65_536 + 17];
+    let plaintext: Vec<u8> = (0..65_536 + 17)
+        .map(|index| 0x42 ^ (index % 251) as u8)
+        .collect();
     fs::write(root.join("rules.json"), plaintext)?;
     fs::write(&manifest, br#"{"version":1,"resources":[{"id":"rules","group":"policy","source":"rules.json","version":3,"read":"stream"}]}"#)?;
     let destination = root.join("sealed");

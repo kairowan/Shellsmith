@@ -90,6 +90,17 @@ pub struct IosResourceConfig {
     pub environment: IosAttestEnvironment,
     #[serde(default)]
     pub app_id_prefix: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_group: Option<IosResourceAppGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IosResourceAppGroup {
+    pub identifier: String,
+    pub keychain_access_group: String,
+    pub extension_target: String,
+    pub extension_bundle_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -196,9 +207,34 @@ impl ShellsmithIosConfig {
         if let Some(resources) = &self.protected_resources {
             validate_https_endpoint(resources.byos_endpoint.trim())?;
             anyhow::ensure!(
-                self.project.bundle_ids.len() == 1,
+                self.project.bundle_ids.len() == 1 + usize::from(resources.app_group.is_some()),
                 "业务资源授权需要一个明确的主应用 Bundle ID"
             );
+            if let Some(shared) = &resources.app_group {
+                validate_bundle_id(&shared.identifier)?;
+                validate_bundle_id(&shared.keychain_access_group)?;
+                validate_bundle_id(&shared.extension_bundle_id)?;
+                let prefix = resources
+                    .app_id_prefix
+                    .as_deref()
+                    .unwrap_or(&self.project.team_id);
+                anyhow::ensure!(
+                    shared.identifier.starts_with("group.")
+                        && shared
+                            .keychain_access_group
+                            .starts_with(&format!("{prefix}."))
+                        && (1..=128).contains(&shared.extension_target.len())
+                        && shared
+                            .extension_target
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b" _-".contains(&b))
+                        && self.project.bundle_ids.get(1) == Some(&shared.extension_bundle_id)
+                        && shared
+                            .extension_bundle_id
+                            .starts_with(&format!("{}.", self.project.bundle_ids[0])),
+                    "App Group、共享 Keychain 或 Extension 身份无效"
+                );
+            }
             anyhow::ensure!(
                 resources.manifest.symlink_metadata()?.is_file(),
                 "iOS 必保资源清单必须为普通文件"
@@ -555,6 +591,7 @@ where
                 .app_id_prefix
                 .as_deref()
                 .unwrap_or(&options.config.project.team_id),
+            policy.app_group.as_ref(),
         ) {
             fs::remove_file(&ipa).context("清理未通过资源验证的 IPA 失败")?;
             return Err(error);

@@ -40,6 +40,15 @@ final class RuntimeSecurity {
 
     static void block() { Ld.y(0); }
 
+    static String observeResources() {
+        if (android.os.Debug.isDebuggerConnected()) return "debugger";
+        try {
+            return Ld.r() == 0 ? "clear" : "runtime_signal";
+        } catch (RuntimeException | LinkageError unavailable) {
+            return "unavailable";
+        }
+    }
+
     /** 可疑信号写入日志供诊断，不改变启动结果。 */
     private static void reportSuspect(int signals) {
         if ((signals & SIGNAL_SUSPECT) != 0) {

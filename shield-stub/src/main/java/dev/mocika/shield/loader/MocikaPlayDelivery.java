@@ -146,7 +146,14 @@ public final class MocikaPlayDelivery {
 
     private static File encryptedAsset(Context context, String packName, String path)
             throws IOException {
-        String normalized = MocikaAssets.normalize(path);
+        return packFile(context, packName, ENCRYPTED_PREFIX + MocikaAssets.normalize(path));
+    }
+
+    static InputStream openProtectedResource(Context context, String pack, String path) throws IOException {
+        return new BufferedInputStream(new FileInputStream(packFile(context, pack, path)));
+    }
+
+    private static File packFile(Context context, String packName, String path) throws IOException {
         File root;
         try {
             root = resolveAssetsRoot(context, checkedPackName(packName));
@@ -155,7 +162,7 @@ public final class MocikaPlayDelivery {
         }
         if (root == null) throw new IOException("Play asset pack is not available: " + packName);
         File canonicalRoot = root.getCanonicalFile();
-        File encrypted = new File(canonicalRoot, ENCRYPTED_PREFIX + normalized).getCanonicalFile();
+        File encrypted = new File(canonicalRoot, path).getCanonicalFile();
         String rootPrefix = canonicalRoot.getPath() + File.separator;
         if (!encrypted.getPath().startsWith(rootPrefix) || !encrypted.isFile()) {
             throw new IOException("protected Play asset is missing");

@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.Arrays;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
@@ -26,6 +27,7 @@ final class ProtectedResourceStream extends InputStream {
     private byte[] chunk = new byte[0];
     private int position;
     private boolean closed;
+    private Consumer<String> result;
 
     static ProtectedResourceStream open(InputStream input, byte[] build, String group,
             String resource, long version, byte[] key, BooleanSupplier authorized) throws IOException {
@@ -89,10 +91,17 @@ final class ProtectedResourceStream extends InputStream {
 
     private boolean availableChunk() throws IOException {
         if (closed) throw new IOException("业务资源已关闭");
+        String failureResult = "invalid";
         try {
-            if (!authorized.getAsBoolean()) throw new IOException("业务资源授权已失效");
+            if (!authorized.getAsBoolean()) {
+                failureResult = "policy_or_lease_ended";
+                throw new IOException("业务资源授权已失效");
+            }
             if (position < chunk.length) return true;
-            if (remaining == 0) return false;
+            if (remaining == 0) {
+                finish("verified");
+                return false;
+            }
             int length = Math.min(remaining, CHUNK_SIZE);
             byte[] nonce = readBytes(12);
             byte[] encrypted = readBytes(length + 16);
@@ -103,18 +112,58 @@ final class ProtectedResourceStream extends InputStream {
             cipher.updateAAD(aad);
             Arrays.fill(chunk, (byte) 0);
             chunk = cipher.doFinal(encrypted);
-            if (!authorized.getAsBoolean()) throw new IOException("业务资源授权已失效");
+            if (!authorized.getAsBoolean()) {
+                failureResult = "policy_or_lease_ended";
+                throw new IOException("业务资源授权已失效");
+            }
             position = 0;
             remaining -= length;
             sequence++;
             return true;
         } catch (GeneralSecurityException | IOException | RuntimeException failure) {
+            finish(failure instanceof GeneralSecurityException ? "authentication_failed" : failureResult);
             try {
                 close();
             } catch (IOException closeFailure) {
                 failure.addSuppressed(closeFailure);
             }
             throw new IOException("业务资源读取失败", failure);
+        }
+    }
+
+    void observeResult(Consumer<String> observer) {
+        result = observer;
+    }
+
+    private void finish(String state) {
+        if (result != null) {
+            Consumer<String> observer = result;
+            result = null;
+            observer.accept(state);
+        }
+    }
+
+    /** 返回选定范围，整份 SSR1 认证通过后才交给调用者。 */
+    byte[] readRange(long offset, int count) throws IOException {
+        if (offset < 0 || count < 0 || offset > remaining || count > remaining - offset) {
+            throw new IOException("业务资源读取范围无效");
+        }
+        // ponytail: 现有容器最多 16 MiB，按顺序认证全部记录；大型媒体需要带认证索引的独立格式。
+        byte[] selected = new byte[count];
+        try {
+            long position = 0;
+            while (availableChunk()) {
+                long start = Math.max(position, offset);
+                long end = Math.min(position + chunk.length, offset + count);
+                if (end > start) System.arraycopy(chunk, (int) (start - position), selected,
+                        (int) (start - offset), (int) (end - start));
+                position += chunk.length;
+                this.position = chunk.length;
+            }
+            return selected;
+        } catch (IOException | RuntimeException failure) {
+            Arrays.fill(selected, (byte) 0);
+            throw failure;
         }
     }
 
@@ -137,7 +186,7 @@ final class ProtectedResourceStream extends InputStream {
             closed = true;
             Arrays.fill(chunk, (byte) 0);
             Arrays.fill(key, (byte) 0);
-            input.close();
+            try { input.close(); } finally { finish("closed"); }
         }
     }
 }

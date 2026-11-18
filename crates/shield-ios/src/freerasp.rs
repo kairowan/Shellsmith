@@ -79,7 +79,7 @@ pub(crate) fn package_manifest(
 
 pub(crate) fn runtime_source(rasp: bool) -> String {
     if !rasp {
-        return "import Foundation\n\npublic enum ShellsmithRuntime {}\n".to_string();
+        return "import Foundation\n\npublic enum ShellsmithRuntime {\n    static func resourceSignal() -> String { \"unavailable\" }\n}\n".to_string();
     }
     r#"import Dispatch
 import Foundation
@@ -177,6 +177,15 @@ public enum ShellsmithRuntime {
         return events.values.contains { event in
             event.severity == .restrict || event.severity == .critical
         }
+    }
+
+    static func resourceSignal() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        guard state == .started else { return "unavailable" }
+        if events["debugger"] != nil { return "debugger" }
+        if events["signature"] != nil || events["runtimeManipulation"] != nil { return "runtime_integrity" }
+        return events.isEmpty ? "clear" : "runtime_signal"
     }
 
     static func receive(_ threat: SecurityThreat) {

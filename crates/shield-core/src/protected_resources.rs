@@ -34,12 +34,15 @@ struct Resource {
     group: String,
     version: u32,
     read: ReadMode,
+    #[serde(default)]
+    module: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ReadMode {
     Stream,
+    Range,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -48,6 +51,8 @@ pub struct ResourceEvidence {
     pub group: String,
     pub version: u32,
     pub ciphertext_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
 }
 
 struct PreparedResource {
@@ -71,6 +76,43 @@ fn identifier(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_".contains(&byte))
+}
+
+fn valid_module(value: &str) -> bool {
+    (1..=50).contains(&value.len())
+        && value.as_bytes()[0].is_ascii_alphabetic()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn assets_for(
+    base: &Path,
+    modules: Option<&Path>,
+    resource: &Resource,
+) -> Result<std::path::PathBuf> {
+    let Some(module) = resource.module.as_deref() else {
+        return Ok(base.to_owned());
+    };
+    ensure!(valid_module(module), "AAB 资源模块名无效");
+    let module_root = modules.context("当前产物只支持主模块资源")?.join(module);
+    ensure!(
+        module_root
+            .symlink_metadata()
+            .context("找不到清单指定的 AAB 模块")?
+            .is_dir(),
+        "AAB 资源模块路径无效"
+    );
+    let assets = module_root.join("assets");
+    ensure!(
+        assets
+            .symlink_metadata()
+            .context("找不到清单指定模块的 assets 目录")?
+            .is_dir()
+            && !assets.join(RESOURCE_DIRECTORY).try_exists()?,
+        "AAB 模块的 assets 无效或占用了业务资源保留目录"
+    );
+    Ok(assets)
 }
 
 fn relative_source(value: &str) -> bool {
@@ -120,6 +162,15 @@ fn hex(bytes: &[u8]) -> String {
 impl PreparedResources {
     /// 从可丢弃的工作副本读取资源，密文写入独立暂存目录。
     pub fn prepare(manifest_path: &Path, root: &Path, destination: &Path) -> Result<Self> {
+        Self::prepare_with_modules(manifest_path, root, destination, None)
+    }
+
+    pub(crate) fn prepare_with_modules(
+        manifest_path: &Path,
+        root: &Path,
+        destination: &Path,
+        modules: Option<&Path>,
+    ) -> Result<Self> {
         ensure!(
             manifest_path.symlink_metadata()?.is_file(),
             "资源清单必须是普通文件"
@@ -145,16 +196,21 @@ impl PreparedResources {
                 identifier(&resource.id) && identifier(&resource.group),
                 "资源或组 ID 无效"
             );
-            ensure!(
-                resource.version > 0 && matches!(resource.read, ReadMode::Stream),
-                "资源版本或读取方式无效"
-            );
+            ensure!(resource.version > 0, "资源版本无效");
             ensure!(relative_source(&resource.source), "必保资源路径无效");
             ensure!(
-                ids.insert(resource.id.clone()) && sources.insert(resource.source.to_lowercase()),
+                ids.insert(resource.id.clone())
+                    && sources.insert((
+                        resource
+                            .module
+                            .as_deref()
+                            .unwrap_or("base")
+                            .to_ascii_lowercase(),
+                        resource.source.to_lowercase()
+                    )),
                 "必保资源 ID 或路径重复"
             );
-            let input = regular_file(root, &resource.source)?;
+            let input = regular_file(&assets_for(root, modules, &resource)?, &resource.source)?;
             let size = input.metadata()?.len();
             ensure!(
                 (1..=MAX_RESOURCE_SIZE).contains(&size),
@@ -190,6 +246,7 @@ impl PreparedResources {
                 group: resource.group.clone(),
                 version: resource.version,
                 ciphertext_sha256: hex(&Sha256::digest(&sealed)),
+                module: resource.module.clone(),
             };
             let filename = format!("{}.ssr", resource.id);
             File::create_new(destination.join(filename))?.write_all(&sealed)?;
@@ -281,13 +338,12 @@ impl PreparedResources {
     }
 
     fn write_index(&mut self, mut metadata: serde_json::Value, destination: &Path) -> Result<()> {
-        let resources: BTreeMap<_, _> = self
-            .evidence()
+        let resources: BTreeMap<_, _> = self.resources.iter()
             .map(|entry| {
-                (
-                    entry.id.as_str(),
-                    serde_json::json!({"group": entry.group, "version": entry.version}),
-                )
+                let mut row = serde_json::json!({"group": entry.resource.group, "version": entry.resource.version});
+                if let Some(module) = &entry.resource.module { row["module"] = module.clone().into(); }
+                if matches!(entry.resource.read, ReadMode::Range) { row["read"] = "range".into(); }
+                (entry.resource.id.as_str(), row)
             })
             .collect();
         metadata["version"] = 1.into();
@@ -300,16 +356,57 @@ impl PreparedResources {
     }
 
     pub fn remove_originals(&self, root: &Path) -> Result<()> {
+        self.remove_originals_with_modules(root, None)
+    }
+
+    pub(crate) fn remove_originals_with_modules(
+        &self,
+        root: &Path,
+        modules: Option<&Path>,
+    ) -> Result<()> {
+        let mut paths = Vec::with_capacity(self.resources.len());
         for prepared in &self.resources {
-            let mut file = regular_file(root, &prepared.resource.source)?;
+            let assets = assets_for(root, modules, &prepared.resource)?;
+            let mut file = regular_file(&assets, &prepared.resource.source)?;
             let digest = digest_bounded(&mut file, prepared.plaintext_size)?;
             ensure!(
                 digest == prepared.plaintext_sha256,
                 "必保资源在暂存期间发生变化"
             );
+            paths.push(assets.join(&prepared.resource.source));
         }
-        for prepared in &self.resources {
-            fs::remove_file(root.join(&prepared.resource.source))?;
+        for path in paths {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn contains_module_resources(&self) -> bool {
+        self.resources
+            .iter()
+            .any(|resource| resource.resource.module.is_some())
+    }
+
+    pub(crate) fn place_module_resources(
+        &self,
+        staging: &Path,
+        modules: Option<&Path>,
+    ) -> Result<()> {
+        let mut destinations = BTreeMap::new();
+        for prepared in self
+            .resources
+            .iter()
+            .filter(|resource| resource.resource.module.is_some())
+        {
+            let module = prepared.resource.module.as_ref().unwrap();
+            if !destinations.contains_key(module) {
+                let assets = assets_for(staging, modules, &prepared.resource)?;
+                let directory = assets.join(RESOURCE_DIRECTORY);
+                fs::create_dir(&directory)?;
+                destinations.insert(module, directory);
+            }
+            let name = format!("{}.ssr", prepared.resource.id);
+            fs::rename(staging.join(&name), destinations[module].join(&name))?;
         }
         Ok(())
     }
@@ -320,6 +417,7 @@ impl PreparedResources {
         let expected: BTreeMap<_, _> = self
             .resources
             .iter()
+            .filter(|prepared| prepared.resource.module.is_none())
             .map(|prepared| {
                 (
                     format!("{prefix}{RESOURCE_DIRECTORY}/{}.ssr", prepared.resource.id),
@@ -330,6 +428,7 @@ impl PreparedResources {
         let originals: HashSet<_> = self
             .resources
             .iter()
+            .filter(|prepared| prepared.resource.module.is_none())
             .map(|prepared| format!("{prefix}{}", prepared.resource.source))
             .collect();
         let mut found = HashSet::new();
@@ -458,10 +557,20 @@ pub(crate) fn verify_android_evidence(
     let mut expected = BTreeMap::from([(format!("{prefix}index.json"), evidence.index_sha256)]);
     for resource in evidence.resources {
         ensure!(identifier(&resource.id), "报告中的业务资源 ID 无效");
+        if !aab && resource.module.is_some() {
+            continue;
+        }
+        let location = match resource.module.as_deref() {
+            Some(module) => {
+                ensure!(valid_module(module), "报告中的资源模块无效");
+                format!("{module}/assets/{RESOURCE_DIRECTORY}/")
+            }
+            None => prefix.clone(),
+        };
         ensure!(
             expected
                 .insert(
-                    format!("{prefix}{}.ssr", resource.id),
+                    format!("{location}{}.ssr", resource.id),
                     resource.ciphertext_sha256
                 )
                 .is_none(),
@@ -472,7 +581,12 @@ pub(crate) fn verify_android_evidence(
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
         let name = entry.name()?;
-        if !name.starts_with(&prefix) || entry.is_dir() {
+        let resource_entry = name.starts_with(&prefix)
+            || (aab
+                && name.split_once('/').is_some_and(|(_, path)| {
+                    path.starts_with(&format!("assets/{RESOURCE_DIRECTORY}/"))
+                }));
+        if !resource_entry || entry.is_dir() {
             continue;
         }
         let digest = expected
@@ -489,7 +603,7 @@ pub(crate) fn verify_android_evidence(
     Ok(())
 }
 
-/// 检查重组后的所有模块，防止 base 必保原件通过其他模块被重新交付。
+/// 检查重组后的所有模块，防止必保原件通过其他路径被重新交付。
 pub fn verify_aab_originals_removed(input: &Path, output: &Path, manifest: &Path) -> Result<()> {
     ensure!(
         manifest.symlink_metadata()?.is_file(),
@@ -510,8 +624,10 @@ pub fn verify_aab_originals_removed(input: &Path, output: &Path, manifest: &Path
     let mut names = HashSet::new();
     for resource in manifest.resources {
         ensure!(relative_source(&resource.source), "必保资源路径无效");
-        let path = format!("base/assets/{}", resource.source);
-        let mut entry = source.by_name(&path).context("AAB base 缺少必保资源")?;
+        let module = resource.module.as_deref().unwrap_or("base");
+        ensure!(valid_module(module), "AAB 资源模块名无效");
+        let path = format!("{module}/assets/{}", resource.source);
+        let mut entry = source.by_name(&path).context("AAB 模块缺少必保资源")?;
         let size = entry.size();
         ensure!((1..=MAX_RESOURCE_SIZE).contains(&size), "必保资源大小超限");
         hashes
@@ -686,4 +802,49 @@ mod tests {
         assert!(PreparedResources::prepare(&manifest, &root, &output).is_err());
         Ok(())
     }
+}
+#[test]
+fn aab_交付模块保留独立密文且索引仍在_base() -> Result<()> {
+    use zip::{write::SimpleFileOptions, ZipWriter};
+
+    let temp = tempfile::tempdir()?;
+    let base = temp.path().join("base");
+    let modules = temp.path().join("modules");
+    let assets = modules.join("voices/assets");
+    let stage = temp.path().join("stage");
+    let manifest = temp.path().join("resources.json");
+    fs::create_dir_all(&base)?;
+    fs::create_dir_all(&assets)?;
+    fs::write(assets.join("sound.bin"), b"play sample")?;
+    fs::write(&manifest, br#"{"version":1,"resources":[{"id":"sound","group":"media","source":"sound.bin","module":"voices","version":1,"read":"range"}]}"#)?;
+    assert!(PreparedResources::prepare(&manifest, &base, &stage).is_err());
+    let mut prepared =
+        PreparedResources::prepare_with_modules(&manifest, &base, &stage, Some(&modules))?;
+    prepared.remove_originals_with_modules(&base, Some(&modules))?;
+    prepared.write_index(serde_json::json!({"groups":{"media":"r_fixture"}}), &stage)?;
+    prepared.place_module_resources(&stage, Some(&modules))?;
+    assert!(!assets.join("sound.bin").exists() && !stage.join("sound.ssr").exists());
+    let mut zip = ZipWriter::new(File::create(temp.path().join("candidate.aab"))?);
+    for (path, file) in [
+        (
+            "base/assets/shellsmith-resources/index.json",
+            stage.join("index.json"),
+        ),
+        (
+            "voices/assets/shellsmith-resources/sound.ssr",
+            assets.join("shellsmith-resources/sound.ssr"),
+        ),
+    ] {
+        zip.start_file(path, SimpleFileOptions::default())?;
+        zip.write_all(&fs::read(file)?)?;
+    }
+    zip.finish()?;
+    verify_android_evidence(
+        &temp.path().join("candidate.aab"),
+        &serde_json::json!({
+            "format":1, "index_sha256":prepared.index_digest(), "resources":prepared.evidence().collect::<Vec<_>>()
+        }),
+        true,
+    )?;
+    Ok(())
 }

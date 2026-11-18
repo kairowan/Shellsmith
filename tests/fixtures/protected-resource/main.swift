@@ -6,16 +6,19 @@ let build = Data(stride(from: 0, to: id.count, by: 2).map { UInt8(String(id[$0..
 let key = try Data(contentsOf: root.appendingPathComponent("fixture-key"))
 let expected = try Data(contentsOf: root.appendingPathComponent("rules.json"))
 
-func read(_ name: String, active: () -> Bool, consume: (Data) throws -> Void) throws {
+func read(_ name: String, range: Range<Int>? = nil, active: () -> Bool, consume: (Data) throws -> Void) throws {
     let file = try FileHandle(forReadingFrom: root.appendingPathComponent(name))
     defer { try? file.close() }
     try ProtectedResourceReader.read(from: file, build: build, group: "policy",
-        resource: "rules", version: 3, key: key, authorized: active, consume: consume)
+        resource: "rules", version: 3, key: key, range: range, authorized: active, consume: consume)
 }
 
 var plaintext = Data()
 try read("sealed/rules.ssr", active: { true }) { plaintext.append($0) }
 precondition(plaintext == expected)
+var range = Data()
+try read("sealed/rules.ssr", range: 65_530..<65_547, active: { true }) { range.append($0) }
+precondition(range == expected.subdata(in: 65_530..<65_547))
 for invalid in ["extended", "truncated", "tampered"] {
     var consumed = 0
     do {
@@ -24,6 +27,10 @@ for invalid in ["extended", "truncated", "tampered"] {
     } catch {
         precondition(consumed == 65_536)
     }
+    do {
+        try read(invalid, range: 0..<1, active: { true }) { _ in }
+        preconditionFailure("选择部分字节仍应认证末片")
+    } catch {}
 }
 var valid = true
 var consumed = 0

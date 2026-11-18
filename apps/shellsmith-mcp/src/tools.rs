@@ -356,9 +356,10 @@ fn aab_schema() -> Value {
         "runtime_ui": runtime_ui_schema(),
         "confirm": boolean("Set to true to confirm this destructive operation")
     });
-    properties["protected_resource_manifest"] = string("Optional base assets JSON manifest");
+    properties["protected_resource_manifest"] =
+        string("Optional base or named module assets JSON manifest");
     properties["byos_endpoint"] =
-        string("BYOS device-approval HTTPS endpoint for protected base assets");
+        string("BYOS device-approval HTTPS endpoint for protected AAB assets");
     properties["byos_api_key_env"] = string("Environment variable containing the BYOS build key");
     properties
 }

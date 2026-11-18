@@ -20,6 +20,7 @@ enum ProtectedResourceReader {
         resource: String,
         version: UInt32,
         key: Data,
+        range: Range<Int>? = nil,
         authorized: () -> Bool,
         consume: (Data) throws -> Void
     ) throws {
@@ -48,6 +49,9 @@ enum ProtectedResourceReader {
         guard version == actualVersion, length > 0, length <= maximumLength else {
             throw ProtectedResourceReadError.invalidFormat
         }
+        if let range, range.lowerBound < 0 || range.upperBound > Int(length) {
+            throw ProtectedResourceReadError.invalidContext
+        }
         let cipherKey = SymmetricKey(data: key)
         var remaining = Int(length)
         var index: UInt32 = 0
@@ -70,7 +74,15 @@ enum ProtectedResourceReader {
                 throw ProtectedResourceReadError.authentication
             }
             guard authorized() else { throw ProtectedResourceReadError.expired }
-            try consume(plaintext)
+            if let range {
+                // ponytail: 当前容器最多 16 MiB，逐片认证后只交付请求范围；大型媒体需要认证索引。
+                let offset = Int(length) - remaining
+                let start = max(range.lowerBound, offset)
+                let end = min(range.upperBound, offset + count)
+                if end > start { try consume(plaintext.subdata(in: (start - offset)..<(end - offset))) }
+            } else {
+                try consume(plaintext)
+            }
             remaining -= count
             index += 1
         }

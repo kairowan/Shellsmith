@@ -391,6 +391,7 @@ pub(crate) fn verify_protected_resources(
     environment: &str,
     bundle_id: &str,
     app_id_prefix: &str,
+    shared: Option<&crate::IosResourceAppGroup>,
 ) -> Result<()> {
     const RESOURCE_BUNDLE: &str = "ShellsmithRuntime_ShellsmithRuntime.bundle/";
     resources.verify_directory(app, RESOURCE_BUNDLE)?;
@@ -415,11 +416,64 @@ pub(crate) fn verify_protected_resources(
         .and_then(|name| name.to_str())
         .context("Archive 主应用路径无效")?;
     let expected_app_id = format!("{app_id_prefix}.{bundle_id}");
-    verify_attest_signing(&app.join(executable), None, &expected_app_id)?;
+    let archive_host = signed_entitlements(&app.join(executable))?;
+    verify_attest_signing(&archive_host, None, &expected_app_id)?;
     let ipa_prefix = format!("Payload/{app_name}/");
     resources.verify_zip(ipa, &format!("{ipa_prefix}{RESOURCE_BUNDLE}"))?;
     let mut archive = shield_core::protection_report::checked_archive(ipa)?;
-    let mut entry = archive.by_name(&format!("{ipa_prefix}{executable}"))?;
+    let ipa_host = zip_entitlements(&mut archive, &format!("{ipa_prefix}{executable}"))?;
+    verify_attest_signing(&ipa_host, Some(environment), &expected_app_id)?;
+    if let Some(shared) = shared {
+        let mut matching = Vec::new();
+        for item in fs::read_dir(app.join("PlugIns")).context("Archive 缺少 Extension 目录")? {
+            let path = item?.path();
+            if path.extension().and_then(|part| part.to_str()) != Some("appex") {
+                continue;
+            }
+            let info = read_plist_json(&path.join("Info.plist"))?;
+            if info.get("CFBundleIdentifier").and_then(Value::as_str)
+                != Some(&shared.extension_bundle_id)
+            {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .context("Extension 文件名无效")?;
+            let executable = info
+                .get("CFBundleExecutable")
+                .and_then(Value::as_str)
+                .filter(|name| {
+                    !name.is_empty() && !name.contains(['/', '\\']) && !matches!(*name, "." | "..")
+                })
+                .context("Extension 可执行文件名无效")?;
+            let archived = signed_entitlements(&path.join(executable))?;
+            let exported = zip_entitlements(
+                &mut archive,
+                &format!("{ipa_prefix}PlugIns/{name}/{executable}"),
+            )?;
+            matching.push((archived, exported));
+        }
+        anyhow::ensure!(
+            matching.len() == 1,
+            "Archive 中缺少唯一的 App Group Extension"
+        );
+        let (archive_extension, ipa_extension) = matching.pop().unwrap();
+        let extension_id = format!("{app_id_prefix}.{}", shared.extension_bundle_id);
+        for (entitlements, app_id) in [
+            (&archive_host, &expected_app_id),
+            (&ipa_host, &expected_app_id),
+            (&archive_extension, &extension_id),
+            (&ipa_extension, &extension_id),
+        ] {
+            verify_shared_entitlements(entitlements, app_id, shared)?;
+        }
+    }
+    Ok(())
+}
+
+fn zip_entitlements(archive: &mut ZipArchive<File>, entry: &str) -> Result<Value> {
+    let mut entry = archive.by_name(entry)?;
     const MAX_EXECUTABLE: u64 = 512 * 1024 * 1024;
     let size = entry.size();
     anyhow::ensure!(size <= MAX_EXECUTABLE, "IPA 主可执行文件超出检查上限");
@@ -430,10 +484,10 @@ pub(crate) fn verify_protected_resources(
     )?;
     anyhow::ensure!(copied == size, "IPA 主可执行文件长度与声明不一致");
     binary.as_file_mut().flush()?;
-    verify_attest_signing(binary.path(), Some(environment), &expected_app_id)
+    signed_entitlements(binary.path())
 }
 
-fn verify_attest_signing(binary: &Path, environment: Option<&str>, app_id: &str) -> Result<()> {
+fn signed_entitlements(binary: &Path) -> Result<Value> {
     let output = Command::new("codesign")
         .args(["-d", "--entitlements", ":-"])
         .arg(binary)
@@ -445,7 +499,10 @@ fn verify_attest_signing(binary: &Path, environment: Option<&str>, app_id: &str)
     let mut entitlements = tempfile::NamedTempFile::new()?;
     entitlements.write_all(&output.stdout)?;
     entitlements.flush()?;
-    let values = read_plist_json(entitlements.path())?;
+    read_plist_json(entitlements.path())
+}
+
+fn verify_attest_signing(values: &Value, environment: Option<&str>, app_id: &str) -> Result<()> {
     let attestation = values
         .get("com.apple.developer.devicecheck.appattest-environment")
         .and_then(Value::as_str);
@@ -456,6 +513,26 @@ fn verify_attest_signing(binary: &Path, environment: Option<&str>, app_id: &str)
                 None => matches!(attestation, Some("development" | "production")),
             }),
         "签名中的 App Attest 环境或 App ID 与资源策略不一致"
+    );
+    Ok(())
+}
+
+fn verify_shared_entitlements(
+    values: &Value,
+    app_id: &str,
+    config: &crate::IosResourceAppGroup,
+) -> Result<()> {
+    let contains = |key: &str, expected: &str| {
+        values
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(expected)))
+    };
+    anyhow::ensure!(
+        values.get("application-identifier").and_then(Value::as_str) == Some(app_id)
+            && contains("com.apple.security.application-groups", &config.identifier)
+            && contains("keychain-access-groups", &config.keychain_access_group),
+        "主应用或 Extension 的已签名 App Group、Keychain 权限或 App ID 与配置不符"
     );
     Ok(())
 }
@@ -583,4 +660,23 @@ mod tests {
         assert!(contains_bytes(b"abc-secret-xyz", b"secret"));
         assert!(!contains_bytes(b"abc", b"long-secret"));
     }
+}
+#[test]
+fn app_group_要求两个已签名权限及匹配身份() {
+    let cfg = crate::IosResourceAppGroup {
+        identifier: "group.com.example".into(),
+        keychain_access_group: "ABCDEF1234.com.example.shared".into(),
+        extension_target: "Share Extension".into(),
+        extension_bundle_id: "com.example.share".into(),
+    };
+    let expected = "ABCDEF1234.com.example.share";
+    let mut signed = serde_json::json!({
+        "application-identifier": expected,
+        "com.apple.security.application-groups": [cfg.identifier],
+        "keychain-access-groups": [cfg.keychain_access_group],
+    });
+    assert!(verify_shared_entitlements(&signed, expected, &cfg).is_ok());
+    assert!(verify_shared_entitlements(&signed, "ABCDEF1234.com.example", &cfg).is_err());
+    signed["keychain-access-groups"] = serde_json::json!(["ABCDEF1234.wrong"]);
+    assert!(verify_shared_entitlements(&signed, expected, &cfg).is_err());
 }

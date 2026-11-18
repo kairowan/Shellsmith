@@ -53,7 +53,7 @@ final class ByosKeyClient {
     }
 
     private static byte[] fetchWithContext(Context ctx, String endpoint, String token, String certificate) {
-        FutureTask<byte[]> request = new FutureTask<>(() -> fetchOnWorker(ctx, endpoint, token, certificate, null, null));
+        FutureTask<byte[]> request = new FutureTask<>(() -> fetchOnWorker(ctx, endpoint, token, certificate, null, null, null));
         Thread worker = new Thread(request, "byos-key");
         worker.setDaemon(true);
         worker.start();
@@ -107,7 +107,7 @@ final class ByosKeyClient {
     }
 
     static byte[] fetchOnWorker(Context ctx, String endpoint, String token, String certificate,
-            String build, String group) throws Exception {
+            String build, String group, String traceId) throws Exception {
         endpoint(endpoint);
         while (endpoint.endsWith("/")) endpoint = endpoint.substring(0, endpoint.length() - 1);
         if (token == null || !token.matches("[A-Za-z0-9_-]{1,256}") || certificate == null
@@ -142,7 +142,7 @@ final class ByosKeyClient {
             challengeProof.update(challengeDigest);
             String challenge = post(endpoint, "/v1/resource-keys/challenge", scope
                     .put("device_public_key", devicePublicKey).put("timestamp", timestamp).put("request_id", requestId)
-                    .put("device_signature", Base64.getEncoder().encodeToString(challengeProof.sign())))
+                    .put("device_signature", Base64.getEncoder().encodeToString(challengeProof.sign())), traceId)
                     .getString("challenge");
             if (!challenge.matches("[A-Za-z0-9_-]{43}")) throw new SecurityException("K04");
             String message = String.join("\n", "shellsmith-resource-v1", endpoint, token, ctx.getPackageName(),
@@ -166,7 +166,7 @@ final class ByosKeyClient {
             body.put("integrity_token", ByosProof.integrityToken(ctx, nonce));
         }
         try {
-            JSONObject response = post(endpoint, route, body);
+            JSONObject response = post(endpoint, route, body, traceId);
             if (!token.equals(response.getString("token_id")) || !nonce.equals(response.getString("nonce"))) throw new SecurityException("K04");
             if (response.has("ikm") || response.getInt("fetch_protocol") != 2
                     || !ByosProof.MODE.equals(response.getString("auth_mode"))) throw new SecurityException("K04");
@@ -177,7 +177,7 @@ final class ByosKeyClient {
         }
     }
 
-    private static JSONObject post(String endpoint, String route, JSONObject body) throws Exception {
+    private static JSONObject post(String endpoint, String route, JSONObject body, String traceId) throws Exception {
         HttpsURLConnection connection = (HttpsURLConnection) new URI(endpoint + route).toURL().openConnection();
         try {
             connection.setRequestMethod("POST");
@@ -185,6 +185,7 @@ final class ByosKeyClient {
             connection.setConnectTimeout(3000); connection.setReadTimeout(3000);
             connection.setUseCaches(false); connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "application/json");
+            if (traceId != null) connection.setRequestProperty("X-Shellsmith-Request-ID", traceId);
             byte[] json = body.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(json.length);
             try (OutputStream output = connection.getOutputStream()) { output.write(json); }

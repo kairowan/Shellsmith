@@ -22,12 +22,26 @@ public final class ReaderCheck {
                 Files.newInputStream(sealed), build, "policy", "rules", 3, key, () -> true)) {
             assert Arrays.equals(expected, reader.readAllBytes());
         }
+        try (ProtectedResourceStream reader = ProtectedResourceStream.open(
+                Files.newInputStream(sealed), build, "policy", "rules", 3, key, () -> true)) {
+            java.util.ArrayList<String> events = new java.util.ArrayList<>();
+            reader.observeResult(events::add);
+            assert Arrays.equals(Arrays.copyOfRange(expected, 65_530, 65_547), reader.readRange(65_530, 17));
+            assert events.equals(java.util.Collections.singletonList("verified"));
+        }
         for (String malformed : new String[]{"truncated", "extended", "tampered"}) {
             try (ProtectedResourceStream reader = ProtectedResourceStream.open(
                     Files.newInputStream(root.resolve(malformed)), build, "policy", "rules", 3, key, () -> true)) {
                 assert reader.readNBytes(65_536).length == 65_536;
                 reader.read();
                 throw new AssertionError("无效末片仍可读取");
+            } catch (IOException expectedFailure) {
+                assert "业务资源读取失败".equals(expectedFailure.getMessage());
+            }
+            try (ProtectedResourceStream reader = ProtectedResourceStream.open(
+                    Files.newInputStream(root.resolve(malformed)), build, "policy", "rules", 3, key, () -> true)) {
+                reader.readRange(0, 1);
+                throw new AssertionError("选择部分字节仍应认证末片");
             } catch (IOException expectedFailure) {
                 assert "业务资源读取失败".equals(expectedFailure.getMessage());
             }

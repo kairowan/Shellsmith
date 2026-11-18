@@ -167,6 +167,21 @@ pub(crate) fn integrate_protected_resources(
             .source_paths()
             .map(|relative| relative_source.join(relative)),
     )?;
+    if let Some(shared) = &config.app_group {
+        let host_id = find_native_target_id(&updated, &target.name).context("缺少主应用 target")?;
+        let extension = find_native_target_id(&updated, &shared.extension_target)
+            .and_then(|id| {
+                (id != host_id)
+                    .then(|| object_block(&updated, &id))
+                    .flatten()
+            })
+            .context("App Group Extension 必须在主应用同一个 Xcode project 中")?;
+        anyhow::ensure!(
+            field_value(&updated[extension.0..extension.1], "productType")
+                == Some("com.apple.product-type.app-extension"),
+            "App Group 配置需要普通 iOS App Extension target"
+        );
+    }
     let prefix = config.app_id_prefix.as_deref().unwrap_or(&project.team_id);
     let app_id = format!("{prefix}.{}", project.bundle_ids[0]);
     let api_key = std::env::var("SHELLSMITH_IOS_BYOS_API_KEY")
@@ -181,7 +196,60 @@ pub(crate) fn integrate_protected_resources(
     )?;
     anyhow::ensure!(!cancel.load(Ordering::Relaxed), "已取消 iOS 资源保护");
     prepared.remove_originals(&source)?;
-    fs::write(project_file, updated)?;
+    fs::write(&project_file, updated)?;
+    if let Some(shared) = &config.app_group {
+        let generated = working_root.join(GENERATED_DIRECTORY);
+        let package = generated.join("ShellsmithSharedResources");
+        let extension = package.join("Sources/ShellsmithSharedResources");
+        let host = generated.join("ShellsmithRuntime/Sources/ShellsmithRuntime");
+        fs::create_dir_all(&extension)?;
+        fs::write(
+            package.join("Package.swift"),
+            r#"// swift-tools-version: 6.0
+import PackageDescription
+let package = Package(name: "ShellsmithSharedResources", platforms: [.iOS(.v14)],
+    products: [.library(name: "ShellsmithSharedResources", targets: ["ShellsmithSharedResources"])],
+    targets: [.target(name: "ShellsmithSharedResources")], swiftLanguageModes: [.v5])
+"#,
+        )?;
+        let settings = format!(
+            "enum SharedResourceSettings {{\n static let group = \"{}\"\n static let keychain = \"{}\"\n static let host = \"{}\"\n static let build = \"{}\"\n}}\n",
+            shared.identifier, shared.keychain_access_group, project.bundle_ids[0], prepared.build_id()
+        );
+        for target_directory in [&host, &extension] {
+            fs::write(
+                target_directory.join("SharedResourceSettings.swift"),
+                &settings,
+            )?;
+            fs::write(
+                target_directory.join("ShellsmithSharedResources.swift"),
+                include_str!("ShellsmithSharedResources.swift"),
+            )?;
+        }
+        fs::write(
+            host.join("SharedResourcePublication.swift"),
+            r#"
+@available(iOS 14.0, *)
+public extension ShellsmithProtectedResources {
+    static func publishToExtension(_ id: String, blockRuntimeGroups: Set<String> = []) async throws {
+        let (data, until) = try await authorizedData(id, range: nil, blockRuntimeGroups: blockRuntimeGroups)
+        try ShellsmithSharedResources.publish(data, id: id, until: until)
+    }
+
+    static func invalidateExtensionResource(_ id: String) throws {
+        try ShellsmithSharedResources.invalidate(id)
+    }
+}
+"#,
+        )?;
+        let relative = relative_path(project_root, &package)?;
+        patch_package_product(
+            &project_file,
+            &shared.extension_target,
+            &relative,
+            "ShellsmithSharedResources",
+        )?;
+    }
     Ok(prepared)
 }
 
@@ -1383,9 +1451,18 @@ fn collect_pbxproj(root: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
 }
 
 fn patch_pbxproj(path: &Path, target_name: &str, package_path: &Path) -> Result<()> {
+    patch_package_product(path, target_name, package_path, "ShellsmithRuntime")
+}
+
+fn patch_package_product(
+    path: &Path,
+    target_name: &str,
+    package_path: &Path,
+    product: &str,
+) -> Result<()> {
     let mut content = fs::read_to_string(path)
         .with_context(|| format!("读取 project.pbxproj 失败：{}", path.display()))?;
-    if content.contains("ShellsmithRuntime in Frameworks") {
+    if content.contains(&format!("{product} in Frameworks")) {
         return Ok(());
     }
     let package_display = package_path.to_string_lossy().replace('\\', "/");
@@ -1411,13 +1488,13 @@ fn patch_pbxproj(path: &Path, target_name: &str, package_path: &Path) -> Result<
         &mut content,
         &framework_phase,
         "files",
-        &format!("{build_id} /* ShellsmithRuntime in Frameworks */"),
+        &format!("{build_id} /* {product} in Frameworks */"),
     )?;
     insert_list_item_in_object(
         &mut content,
         &target_id,
         "packageProductDependencies",
-        &format!("{product_id} /* ShellsmithRuntime */"),
+        &format!("{product_id} /* {product} */"),
     )?;
     let project_id = find_first_object_with_isa(&content, "PBXProject")
         .context("project.pbxproj 缺少 PBXProject")?;
@@ -1435,7 +1512,7 @@ fn patch_pbxproj(path: &Path, target_name: &str, package_path: &Path) -> Result<
         &mut content,
         "PBXBuildFile",
         &format!(
-            "\t\t{build_id} /* ShellsmithRuntime in Frameworks */ = {{isa = PBXBuildFile; productRef = {product_id} /* ShellsmithRuntime */; }};\n"
+            "\t\t{build_id} /* {product} in Frameworks */ = {{isa = PBXBuildFile; productRef = {product_id} /* {product} */; }};\n"
         ),
     )?;
     insert_section_entry(
@@ -1449,7 +1526,7 @@ fn patch_pbxproj(path: &Path, target_name: &str, package_path: &Path) -> Result<
         &mut content,
         "XCSwiftPackageProductDependency",
         &format!(
-            "\t\t{product_id} /* ShellsmithRuntime */ = {{\n\t\t\tisa = XCSwiftPackageProductDependency;\n\t\t\tpackage = {package_id} /* XCLocalSwiftPackageReference \"{package_display}\" */;\n\t\t\tproductName = ShellsmithRuntime;\n\t\t}};\n"
+            "\t\t{product_id} /* {product} */ = {{\n\t\t\tisa = XCSwiftPackageProductDependency;\n\t\t\tpackage = {package_id} /* XCLocalSwiftPackageReference \"{package_display}\" */;\n\t\t\tproductName = {product};\n\t\t}};\n"
         ),
     )?;
     fs::write(path, content)?;
@@ -2160,17 +2237,41 @@ mod tests {
         assert!(content[project_section.0..project_section.1].contains("packageReferences = ("));
         let frameworks_section = section_range(&content, "PBXFrameworksBuildPhase").unwrap();
         assert!(!content[frameworks_section.0..frameworks_section.1].contains("packageReferences"));
+        let shared = temp.path().join("shared.pbxproj");
+        fs::copy(&path, &shared).unwrap();
+        for _ in 0..2 {
+            patch_package_product(
+                &shared,
+                "Share Extension",
+                Path::new(".shellsmith/ShellsmithSharedResources"),
+                "ShellsmithSharedResources",
+            )
+            .unwrap();
+        }
+        let shared_content = fs::read_to_string(&shared).unwrap();
+        let host = object_block(&shared_content, "AAAAAAAAAAAAAAAAAAAAAAAA").unwrap();
+        let extension = object_block(&shared_content, "EEEEEEEEEEEEEEEEEEEEEEEE").unwrap();
+        assert!(!shared_content[host.0..host.1].contains("ShellsmithSharedResources"));
+        assert!(shared_content[extension.0..extension.1].contains("ShellsmithSharedResources"));
+        assert_eq!(
+            shared_content
+                .matches("productName = ShellsmithSharedResources;")
+                .count(),
+            1
+        );
         if cfg!(target_os = "macos") {
-            let output = std::process::Command::new("plutil")
-                .arg("-lint")
-                .arg(&path)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stdout)
-            );
+            for fixture in [&path, &shared] {
+                let output = std::process::Command::new("plutil")
+                    .arg("-lint")
+                    .arg(fixture)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+            }
         }
 
         // 本地结构检查始终执行；CI 另外启用完整 Xcode、上游依赖和无签名归档检查。

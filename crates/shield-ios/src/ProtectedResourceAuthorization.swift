@@ -15,6 +15,21 @@ public enum ShellsmithProtectedResources {
     private static let authorization = ResourceAuthorization()
 
     public static func data(_ id: String) async throws -> Data {
+        try await data(id, range: nil)
+    }
+
+    public static func observeEnvironment(_ observer: @Sendable ([String: String]) -> Void) {
+        observer(["version": "1", "source": "ios", "phase": "lifecycle",
+                  "result": ShellsmithRuntime.resourceSignal()])
+    }
+
+    public static func data(_ id: String, range: Range<Int>?, blockRuntimeGroups: Set<String> = [],
+                            observer: (@Sendable ([String: String]) -> Void)? = nil) async throws -> Data {
+        try await authorizedData(id, range: range, blockRuntimeGroups: blockRuntimeGroups, observer: observer).0
+    }
+
+    static func authorizedData(_ id: String, range: Range<Int>?, blockRuntimeGroups: Set<String>,
+                               observer: (@Sendable ([String: String]) -> Void)? = nil) async throws -> (Data, TimeInterval) {
         guard id.range(of: #"\A[a-z0-9_-]{1,64}\z"#, options: .regularExpression) != nil,
               let directory = Bundle.module.resourceURL?.appendingPathComponent("shellsmith-resources") else {
             throw ShellsmithResourceError.unavailable
@@ -29,17 +44,68 @@ public enum ShellsmithProtectedResources {
               let build = hexBytes(index.build_id), build.count == 16 else {
             throw ShellsmithResourceError.invalidResponse
         }
-        let lease = try await authorization.obtain(index: index, token: token, group: row.group)
+        let readId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let block = blockRuntimeGroups.contains(row.group)
+        func report(_ phase: String, _ result: String, _ authorizationId: String? = nil) {
+            guard let observer else { return }
+            var event = ["version": "1", "source": "ios", "phase": phase, "group": row.group,
+                         "read_id": readId, "result": result]
+            event["authorization_id"] = authorizationId
+            observer(event)
+        }
+        func allowsRead(_ signal: String) -> Bool {
+            !block || (signal != "debugger" && signal != "runtime_integrity")
+        }
+        if observer != nil || block {
+            let signal = ShellsmithRuntime.resourceSignal()
+            report("environment", signal)
+            guard allowsRead(signal) else {
+                report("read", "local_policy_denied")
+                throw ShellsmithResourceError.denied
+            }
+        }
+        let lease: ResourceLease
+        do {
+            let (value, result) = try await authorization.obtain(index: index, token: token, group: row.group)
+            lease = value
+            report("authorization", result, lease.traceId)
+        } catch let failure as ResourceAuthorizationFailure {
+            let result: String
+            switch failure.cause {
+            case ShellsmithResourceError.pendingApproval: result = "pending"
+            case ShellsmithResourceError.denied: result = "denied"
+            case ResourceTransportError.serverUnavailable: result = "server_unavailable"
+            case ResourceTransportError.rateLimited: result = "rate_limited"
+            case is URLError: result = "transport_error"
+            default: result = "unavailable"
+            }
+            report("authorization", result, failure.traceId)
+            if failure.cause is ResourceTransportError { throw ShellsmithResourceError.invalidResponse }
+            throw failure.cause
+        }
         try Task.checkCancellation()
         let file = try FileHandle(forReadingFrom: directory.appendingPathComponent(id + ".ssr"))
         defer { try? file.close() }
         var content = Data()
-        try ProtectedResourceReader.read(from: file, build: build, group: row.group,
-            resource: id, version: row.version, key: lease.key,
-            authorized: { ProcessInfo.processInfo.systemUptime < lease.until && !Task.isCancelled }) {
-                content.append($0)
+        do {
+            try ProtectedResourceReader.read(from: file, build: build, group: row.group,
+                resource: id, version: row.version, key: lease.key, range: range,
+                authorized: {
+                    ProcessInfo.processInfo.systemUptime < lease.until && !Task.isCancelled
+                        && (!block || allowsRead(ShellsmithRuntime.resourceSignal()))
+                }) { content.append($0) }
+            report("read", "verified", lease.traceId)
+        } catch {
+            let result: String
+            switch error {
+            case ProtectedResourceReadError.authentication: result = "authentication_failed"
+            case ProtectedResourceReadError.expired: result = "policy_or_lease_ended"
+            default: result = "invalid"
             }
-        return content
+            report("read", result, lease.traceId)
+            throw error
+        }
+        return (content, lease.until)
     }
 
     private static func hexBytes(_ text: String) -> Data? {
@@ -68,7 +134,15 @@ private struct ResourceIndex: Decodable, Sendable {
 private struct ResourceLease: Sendable {
     let key: Data
     let until: TimeInterval
+    let traceId: String
 }
+
+private struct ResourceAuthorizationFailure: Error {
+    let cause: Error
+    let traceId: String
+}
+
+private enum ResourceTransportError: Error { case serverUnavailable, rateLimited }
 
 @available(iOS 14.0, *)
 private actor ResourceAuthorization {
@@ -76,16 +150,18 @@ private actor ResourceAuthorization {
     private var pending: [String: Task<ResourceLease, Error>] = [:]
     private var previous: Task<Void, Never>?
 
-    func obtain(index: ResourceIndex, token: String, group: String) async throws -> ResourceLease {
+    func obtain(index: ResourceIndex, token: String, group: String) async throws -> (ResourceLease, String) {
         try Task.checkCancellation()
-        if let lease = cached[token], lease.until > ProcessInfo.processInfo.systemUptime { return lease }
+        if let lease = cached[token], lease.until > ProcessInfo.processInfo.systemUptime { return (lease, "cached") }
         cached[token] = nil
-        if let existing = pending[token] { return try await existing.value }
+        if let existing = pending[token] { return (try await existing.value, "coalesced") }
         // 同一设备的所有断言按生成顺序提交，防止跨组并发把旧计数送到服务端。
         let preceding = previous
+        let traceId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         let task = Task {
             await preceding?.value
-            return try await Self.request(index: index, token: token, group: group)
+            do { return try await Self.request(index: index, token: token, group: group, traceId: traceId) }
+            catch { throw ResourceAuthorizationFailure(cause: error, traceId: traceId) }
         }
         previous = Task { _ = try? await task.value }
         pending[token] = task
@@ -97,10 +173,10 @@ private actor ResourceAuthorization {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             if cached[token]?.until == lease.until { cached[token] = nil }
         }
-        return lease
+        return (lease, "granted")
     }
 
-    private static func request(index: ResourceIndex, token: String, group: String) async throws -> ResourceLease {
+    private static func request(index: ResourceIndex, token: String, group: String, traceId: String) async throws -> ResourceLease {
         guard ShellsmithAppAttest.isSupported else { throw ShellsmithResourceError.unavailable }
         let keyID = try await ShellsmithAppAttest.resourceKeyId(appId: index.app_id, environment: index.environment)
         guard let keyIDBytes = Data(base64Encoded: keyID), keyIDBytes.count == 32 else { throw ShellsmithResourceError.invalidResponse }
@@ -117,7 +193,7 @@ private actor ResourceAuthorization {
         var body = ["token_id": token, "build_id": index.build_id, "resource_group": group,
                     "key_id": keyField, "response_public_key": responseKey]
         let started = ProcessInfo.processInfo.systemUptime
-        let challengeResponse: Challenge = try await post(index.server_url, "challenge", body)
+        let challengeResponse: Challenge = try await post(index.server_url, "challenge", body, traceId)
         let action = challengeResponse.action
         let challenge = challengeResponse.challenge
         guard (action == "assert" || action == "attest"), challenge.count == 96,
@@ -141,7 +217,7 @@ private actor ResourceAuthorization {
         body["action"] = action
         body["challenge"] = challenge
         body["proof"] = proof.base64EncodedString()
-        let response: LeaseResponse = try await post(index.server_url, "fetch", body)
+        let response: LeaseResponse = try await post(index.server_url, "fetch", body, traceId)
         if response.status == "pending" { throw ShellsmithResourceError.pendingApproval }
         guard action == "assert", response.status == "granted", let ttl = response.ttl_seconds,
               (1...60).contains(ttl), let envelope = response.wrapped_ikm,
@@ -152,7 +228,7 @@ private actor ResourceAuthorization {
         }
         let expires = started + Double(ttl)
         guard expires > ProcessInfo.processInfo.systemUptime else { throw ShellsmithResourceError.denied }
-        return ResourceLease(key: Data(decrypted.suffix(32)), until: expires)
+        return ResourceLease(key: Data(decrypted.suffix(32)), until: expires, traceId: traceId)
     }
 
     private struct Challenge: Decodable { let action: String; let challenge: String }
@@ -165,7 +241,8 @@ private actor ResourceAuthorization {
         return Data([tag, 0x82, UInt8(count >> 8), UInt8(truncatingIfNeeded: count)]) + body
     }
 
-    private static func post<T: Decodable>(_ endpoint: String, _ operation: String, _ body: [String: String]) async throws -> T {
+    private static func post<T: Decodable>(_ endpoint: String, _ operation: String, _ body: [String: String],
+                                           _ traceId: String) async throws -> T {
         guard let url = URL(string: endpoint + "/v1/ios-resource-keys/" + operation),
               url.scheme == "https", url.user == nil, url.password == nil, url.query == nil, url.fragment == nil else {
             throw ShellsmithResourceError.invalidResponse
@@ -174,6 +251,7 @@ private actor ResourceAuthorization {
         request.httpMethod = "POST"
         request.timeoutInterval = 10
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(traceId, forHTTPHeaderField: "X-Shellsmith-Request-ID")
         request.httpBody = try JSONEncoder().encode(body)
         let session = URLSession(configuration: .ephemeral, delegate: NoRedirects(), delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
@@ -183,7 +261,10 @@ private actor ResourceAuthorization {
                 if (response as? HTTPURLResponse)?.statusCode == 403 {
                     continuation.resume(throwing: ShellsmithResourceError.denied); return
                 }
-                guard (response as? HTTPURLResponse)?.statusCode == 200, let data, data.count <= 4096 else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if status == 429 { continuation.resume(throwing: ResourceTransportError.rateLimited); return }
+                if (500...599).contains(status) { continuation.resume(throwing: ResourceTransportError.serverUnavailable); return }
+                guard status == 200, let data, data.count <= 4096 else {
                     continuation.resume(throwing: ShellsmithResourceError.invalidResponse); return
                 }
                 continuation.resume(returning: data)

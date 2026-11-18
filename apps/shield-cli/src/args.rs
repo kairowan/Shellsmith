@@ -172,7 +172,7 @@ pub(crate) struct ProtectIosArgs {
 
 #[derive(Args, Default)]
 pub struct ProtectAabArgs {
-    /// base/assets 下的必保资源清单。
+    /// 必保资源清单；省略 module 时选择 base/assets。
     #[arg(long, value_name = "JSON", requires = "byos_endpoint")]
     pub protected_resource_manifest: Option<PathBuf>,
     #[arg(long, requires = "protected_resource_manifest")]
