@@ -53,9 +53,22 @@ fn rust_产物由_java_和_swift_验证() -> Result<()> {
         .arg(root)
         .status()?;
     ensure!(java.success(), "Java 资源读取回归失败");
+    let settings = root.join("SharedResourceSettings.swift");
+    fs::write(
+        &settings,
+        r#"enum SharedResourceSettings {
+        static let group = "group.dev.fixture"
+        static let host = "dev.fixture"
+        static let build = "fixture-build"
+        static let keychain = "ABCDE12345.dev.fixture"
+    }"#,
+    )?;
     let check = root.join("swift-check");
     let swiftc = Command::new("swiftc")
         .arg(repo.join("crates/shield-ios/src/ProtectedResourceReader.swift"))
+        .arg(repo.join("crates/shield-ios/src/ProtectedResourceClock.swift"))
+        .arg(repo.join("crates/shield-ios/src/ShellsmithSharedResources.swift"))
+        .arg(settings)
         .arg(repo.join("tests/fixtures/protected-resource/main.swift"))
         .arg("-o")
         .arg(&check)

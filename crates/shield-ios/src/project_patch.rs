@@ -81,6 +81,10 @@ pub(crate) fn integrate_runtime(
     }
     if resources {
         fs::write(
+            sources.join("ProtectedResourceClock.swift"),
+            include_str!("ProtectedResourceClock.swift"),
+        )?;
+        fs::write(
             sources.join("ProtectedResourceReader.swift"),
             include_str!("ProtectedResourceReader.swift"),
         )?;
@@ -203,6 +207,10 @@ pub(crate) fn integrate_protected_resources(
         let extension = package.join("Sources/ShellsmithSharedResources");
         let host = generated.join("ShellsmithRuntime/Sources/ShellsmithRuntime");
         fs::create_dir_all(&extension)?;
+        fs::write(
+            extension.join("ProtectedResourceClock.swift"),
+            include_str!("ProtectedResourceClock.swift"),
+        )?;
         fs::write(
             package.join("Package.swift"),
             r#"// swift-tools-version: 6.0

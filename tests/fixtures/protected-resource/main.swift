@@ -43,3 +43,30 @@ do {
 } catch ProtectedResourceReadError.expired {
     precondition(consumed == 65_536)
 }
+
+let grant = ShellsmithSharedResources.Grant(
+    key: key, build: SharedResourceSettings.build, issued: 100, until: 160, boot: 1_000, snapshot: UUID())
+precondition(grant.active(at: 150, wall: 1_150))
+precondition(!grant.active(at: 160, wall: 1_160))
+precondition(!grant.active(at: 90, wall: 1_090))
+precondition(!grant.active(at: 150, wall: 1_160))
+var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(grant)) as! [String: Any]
+legacy.removeValue(forKey: "snapshot")
+let legacyGrant = try JSONDecoder().decode(
+    ShellsmithSharedResources.Grant.self, from: JSONSerialization.data(withJSONObject: legacy))
+precondition(legacyGrant.snapshot == nil && legacyGrant.active(at: 150, wall: 1_150))
+
+let oldSnapshot = root.appendingPathComponent("previous.ssg")
+let candidate = root.appendingPathComponent("candidate.ssg")
+try Data([0xA1]).write(to: oldSnapshot)
+do {
+    try ShellsmithSharedResources.writeSnapshot(Data([0xB2]), to: candidate) {
+        precondition(FileManager.default.fileExists(atPath: candidate.path))
+        throw CocoaError(.fileWriteNoPermission)
+    }
+    preconditionFailure("Keychain 写入失败不应提交新快照")
+} catch let error as CocoaError where error.code == .fileWriteNoPermission {
+    precondition(!FileManager.default.fileExists(atPath: candidate.path))
+    let previous = try Data(contentsOf: oldSnapshot)
+    precondition(previous == Data([0xA1]))
+}

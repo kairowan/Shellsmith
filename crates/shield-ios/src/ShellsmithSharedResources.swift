@@ -7,19 +7,23 @@ import Security
 public enum ShellsmithSharedResources {
     public enum Failure: Error { case invalidResource, unavailable, expired, invalidSnapshot }
 
-    private struct Grant: Codable {
+    struct Grant: Codable, Equatable {
         let key: Data
         let build: String
         let issued: TimeInterval
         let until: TimeInterval
         let boot: TimeInterval
+        let snapshot: UUID?
 
         var active: Bool {
-            let uptime = ProcessInfo.processInfo.systemUptime
-            let estimatedBoot = Date().timeIntervalSince1970 - uptime
+            let uptime = snapshot == nil ? ProcessInfo.processInfo.systemUptime : ProtectedResourceClock.now
+            return active(at: uptime, wall: Date().timeIntervalSince1970)
+        }
+
+        func active(at uptime: TimeInterval, wall: TimeInterval) -> Bool {
             return build == SharedResourceSettings.build && key.count == 32
                 && until - issued <= 60 && issued <= uptime && uptime < until
-                && abs(estimatedBoot - boot) <= 2
+                && abs((wall - uptime) - boot) <= 2
         }
     }
 
@@ -27,23 +31,39 @@ public enum ShellsmithSharedResources {
     private static let limit = 16 * 1024 * 1024
 
     public static func data(_ id: String) throws -> Data {
-        let (url, query, aad) = try location(id)
+        let (base, query, aad) = try location(id)
+        // 旧文件可能刚被成功发布的新快照替换，最多重新加载一次 Keychain 指针。
+        for _ in 0..<2 {
+            guard let grant = try loadGrant(query) else { throw Failure.unavailable }
+            guard grant.active else { throw Failure.expired }
+            let url = snapshotURL(base, grant)
+            let file: FileHandle
+            do { file = try FileHandle(forReadingFrom: url) }
+            catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+                if try loadGrant(query) != grant { continue }
+                throw Failure.unavailable
+            }
+            defer { try? file.close() }
+            guard let ciphertext = try file.read(upToCount: limit + 29), ciphertext.count <= limit + 28 else {
+                throw Failure.invalidSnapshot
+            }
+            let sealed = try AES.GCM.SealedBox(combined: ciphertext)
+            let data = try AES.GCM.open(sealed, using: SymmetricKey(data: grant.key), authenticating: aad)
+            if try loadGrant(query) != grant { continue }
+            guard grant.active else { throw Failure.expired }
+            return data
+        }
+        throw Failure.unavailable
+    }
+
+    private static func loadGrant(_ query: [String: Any]) throws -> Grant? {
         var attributes = query
         attributes[kSecReturnData as String] = true
         var result: CFTypeRef?
-        guard SecItemCopyMatching(attributes as CFDictionary, &result) == errSecSuccess,
-              let encoded = result as? Data else { throw Failure.unavailable }
-        let grant = try JSONDecoder().decode(Grant.self, from: encoded)
-        guard grant.active else { throw Failure.expired }
-        let file = try FileHandle(forReadingFrom: url)
-        defer { try? file.close() }
-        guard let ciphertext = try file.read(upToCount: limit + 29), ciphertext.count <= limit + 28 else {
-            throw Failure.invalidSnapshot
-        }
-        let sealed = try AES.GCM.SealedBox(combined: ciphertext)
-        let data = try AES.GCM.open(sealed, using: SymmetricKey(data: grant.key), authenticating: aad)
-        guard grant.active else { throw Failure.expired }
-        return data
+        let status = SecItemCopyMatching(attributes as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let encoded = result as? Data else { throw Failure.unavailable }
+        return try JSONDecoder().decode(Grant.self, from: encoded)
     }
 
     static func publish(_ data: Data, id: String, until: TimeInterval) throws {
@@ -51,12 +71,13 @@ public enum ShellsmithSharedResources {
         let (url, query, aad) = try location(id)
         writer.lock()
         defer { writer.unlock() }
-        let now = ProcessInfo.processInfo.systemUptime
+        let previous = try? loadGrant(query)
+        let now = ProtectedResourceClock.now
         guard until > now && until - now <= 60 else { throw Failure.expired }
         let key = SymmetricKey(size: .bits256)
         let grant = Grant(key: key.withUnsafeBytes { Data($0) }, build: SharedResourceSettings.build,
                           issued: now, until: until,
-                          boot: Date().timeIntervalSince1970 - now)
+                          boot: Date().timeIntervalSince1970 - now, snapshot: UUID())
         let encrypted = try AES.GCM.seal(data, using: key, authenticating: aad)
         guard let ciphertext = encrypted.combined else { throw Failure.invalidSnapshot }
 
@@ -68,7 +89,24 @@ public enum ShellsmithSharedResources {
         resourceValues.isExcludedFromBackup = true
         try excluded.setResourceValues(resourceValues)
         guard grant.active else { throw Failure.expired }
+        try writeSnapshot(ciphertext, to: snapshotURL(url, grant)) {
+            guard grant.active else { throw Failure.expired }
+            try saveGrant(grant, query: query)
+        }
+        if let previous { try? FileManager.default.removeItem(at: snapshotURL(url, previous)) }
+    }
+
+    static func writeSnapshot(_ ciphertext: Data, to url: URL, commit: () throws -> Void) throws {
         try ciphertext.write(to: url, options: [.atomic, .completeFileProtection])
+        do {
+            try commit()
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
+    }
+
+    private static func saveGrant(_ grant: Grant, query: [String: Any]) throws {
         let value = try JSONEncoder().encode(grant)
         let update = [kSecValueData as String: value]
         let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
@@ -86,10 +124,18 @@ public enum ShellsmithSharedResources {
         let (url, query, _) = try location(id)
         writer.lock()
         defer { writer.unlock() }
+        let previous = try? loadGrant(query)
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw Failure.unavailable }
-        do { try FileManager.default.removeItem(at: url) }
+        let file = previous.map { snapshotURL(url, $0) } ?? url
+        do { try FileManager.default.removeItem(at: file) }
         catch let error as CocoaError where error.code == .fileNoSuchFile {}
+    }
+
+    private static func snapshotURL(_ base: URL, _ grant: Grant) -> URL {
+        guard let snapshot = grant.snapshot else { return base }
+        return base.deletingPathExtension().appendingPathExtension(snapshot.uuidString)
+            .appendingPathExtension("ssg")
     }
 
     private static func location(_ id: String) throws -> (URL, [String: Any], Data) {

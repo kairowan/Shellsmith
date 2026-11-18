@@ -168,7 +168,10 @@ final class ProtectedResourceStream extends InputStream {
     }
 
     @Override public int read() throws IOException {
-        return availableChunk() ? chunk[position++] & 255 : -1;
+        if (!availableChunk()) return -1;
+        int value = chunk[position] & 255;
+        advance(1);
+        return value;
     }
 
     @Override public int read(byte[] buffer, int offset, int length) throws IOException {
@@ -177,8 +180,13 @@ final class ProtectedResourceStream extends InputStream {
         if (!availableChunk()) return -1;
         int count = Math.min(length, chunk.length - position);
         System.arraycopy(chunk, position, buffer, offset, count);
-        position += count;
+        advance(count);
         return count;
+    }
+
+    private void advance(int count) {
+        position += count;
+        if (remaining == 0 && position == chunk.length) finish("verified");
     }
 
     @Override public void close() throws IOException {

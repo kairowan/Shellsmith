@@ -56,32 +56,35 @@ enum ProtectedResourceReader {
         var remaining = Int(length)
         var index: UInt32 = 0
         while remaining > 0 {
-            guard authorized() else { throw ProtectedResourceReadError.expired }
             let count = min(Self.chunkSize, remaining)
-            let nonce = try exactly(12, from: file)
-            let encrypted = try exactly(count, from: file)
-            let tag = try exactly(16, from: file)
-            if remaining == count, let extra = try file.read(upToCount: 1), !extra.isEmpty {
-                throw ProtectedResourceReadError.invalidFormat
-            }
-            var aad = header
-            withUnsafeBytes(of: index.bigEndian) { aad.append(contentsOf: $0) }
-            let plaintext: Data
-            do {
-                let sealed = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: nonce), ciphertext: encrypted, tag: tag)
-                plaintext = try AES.GCM.open(sealed, using: cipherKey, authenticating: aad)
-            } catch {
-                throw ProtectedResourceReadError.authentication
-            }
-            guard authorized() else { throw ProtectedResourceReadError.expired }
-            if let range {
-                // ponytail: 当前容器最多 16 MiB，逐片认证后只交付请求范围；大型媒体需要认证索引。
-                let offset = Int(length) - remaining
-                let start = max(range.lowerBound, offset)
-                let end = min(range.upperBound, offset + count)
-                if end > start { try consume(plaintext.subdata(in: (start - offset)..<(end - offset))) }
-            } else {
-                try consume(plaintext)
+            // FileHandle 桥接 Foundation 对象，连续读取时需要按分片释放临时对象。
+            try autoreleasepool {
+                guard authorized() else { throw ProtectedResourceReadError.expired }
+                let nonce = try exactly(12, from: file)
+                let encrypted = try exactly(count, from: file)
+                let tag = try exactly(16, from: file)
+                if remaining == count, let extra = try file.read(upToCount: 1), !extra.isEmpty {
+                    throw ProtectedResourceReadError.invalidFormat
+                }
+                var aad = header
+                withUnsafeBytes(of: index.bigEndian) { aad.append(contentsOf: $0) }
+                let plaintext: Data
+                do {
+                    let sealed = try AES.GCM.SealedBox(nonce: AES.GCM.Nonce(data: nonce), ciphertext: encrypted, tag: tag)
+                    plaintext = try AES.GCM.open(sealed, using: cipherKey, authenticating: aad)
+                } catch {
+                    throw ProtectedResourceReadError.authentication
+                }
+                guard authorized() else { throw ProtectedResourceReadError.expired }
+                if let range {
+                    // ponytail: 当前容器最多 16 MiB，逐片认证后只交付请求范围；大型媒体需要认证索引。
+                    let offset = Int(length) - remaining
+                    let start = max(range.lowerBound, offset)
+                    let end = min(range.upperBound, offset + count)
+                    if end > start { try consume(plaintext.subdata(in: (start - offset)..<(end - offset))) }
+                } else {
+                    try consume(plaintext)
+                }
             }
             remaining -= count
             index += 1

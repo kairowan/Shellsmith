@@ -91,7 +91,7 @@ public enum ShellsmithProtectedResources {
             try ProtectedResourceReader.read(from: file, build: build, group: row.group,
                 resource: id, version: row.version, key: lease.key, range: range,
                 authorized: {
-                    ProcessInfo.processInfo.systemUptime < lease.until && !Task.isCancelled
+                    ProtectedResourceClock.now < lease.until && !Task.isCancelled
                         && (!block || allowsRead(ShellsmithRuntime.resourceSignal()))
                 }) { content.append($0) }
             report("read", "verified", lease.traceId)
@@ -152,7 +152,7 @@ private actor ResourceAuthorization {
 
     func obtain(index: ResourceIndex, token: String, group: String) async throws -> (ResourceLease, String) {
         try Task.checkCancellation()
-        if let lease = cached[token], lease.until > ProcessInfo.processInfo.systemUptime { return (lease, "cached") }
+        if let lease = cached[token], lease.until > ProtectedResourceClock.now { return (lease, "cached") }
         cached[token] = nil
         if let existing = pending[token] { return (try await existing.value, "coalesced") }
         // 同一设备的所有断言按生成顺序提交，防止跨组并发把旧计数送到服务端。
@@ -168,7 +168,7 @@ private actor ResourceAuthorization {
         defer { pending[token] = nil }
         let lease = try await task.value
         cached[token] = lease
-        let delay = max(0, lease.until - ProcessInfo.processInfo.systemUptime)
+        let delay = max(0, lease.until - ProtectedResourceClock.now)
         Task {
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             if cached[token]?.until == lease.until { cached[token] = nil }
@@ -192,7 +192,7 @@ private actor ResourceAuthorization {
         let responseKey = der(0x30, algorithm + der(0x03, Data([0]) + rsa)).base64EncodedString()
         var body = ["token_id": token, "build_id": index.build_id, "resource_group": group,
                     "key_id": keyField, "response_public_key": responseKey]
-        let started = ProcessInfo.processInfo.systemUptime
+        let started = ProtectedResourceClock.now
         let challengeResponse: Challenge = try await post(index.server_url, "challenge", body, traceId)
         let action = challengeResponse.action
         let challenge = challengeResponse.challenge
@@ -227,7 +227,7 @@ private actor ResourceAuthorization {
             throw ShellsmithResourceError.invalidResponse
         }
         let expires = started + Double(ttl)
-        guard expires > ProcessInfo.processInfo.systemUptime else { throw ShellsmithResourceError.denied }
+        guard expires > ProtectedResourceClock.now else { throw ShellsmithResourceError.denied }
         return ResourceLease(key: Data(decrypted.suffix(32)), until: expires, traceId: traceId)
     }
 

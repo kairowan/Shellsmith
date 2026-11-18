@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class ReaderCheck {
@@ -24,10 +26,27 @@ public final class ReaderCheck {
         }
         try (ProtectedResourceStream reader = ProtectedResourceStream.open(
                 Files.newInputStream(sealed), build, "policy", "rules", 3, key, () -> true)) {
-            java.util.ArrayList<String> events = new java.util.ArrayList<>();
+            ArrayList<String> events = new ArrayList<>();
             reader.observeResult(events::add);
             assert Arrays.equals(Arrays.copyOfRange(expected, 65_530, 65_547), reader.readRange(65_530, 17));
-            assert events.equals(java.util.Collections.singletonList("verified"));
+            assert events.equals(Collections.singletonList("verified"));
+        }
+        for (boolean bulk : new boolean[]{false, true}) {
+            ArrayList<String> events = new ArrayList<>();
+            try (ProtectedResourceStream reader = ProtectedResourceStream.open(
+                    Files.newInputStream(sealed), build, "policy", "rules", 3, key, () -> true)) {
+                reader.observeResult(events::add);
+                assert Arrays.equals(Arrays.copyOf(expected, expected.length - 1),
+                        reader.readNBytes(expected.length - 1));
+                assert events.isEmpty();
+                if (bulk) {
+                    byte[] last = new byte[1];
+                    assert reader.read(last) == 1 && last[0] == expected[expected.length - 1];
+                } else {
+                    assert reader.read() == (expected[expected.length - 1] & 255);
+                }
+            }
+            assert events.equals(Collections.singletonList("verified")) : events;
         }
         for (String malformed : new String[]{"truncated", "extended", "tampered"}) {
             try (ProtectedResourceStream reader = ProtectedResourceStream.open(

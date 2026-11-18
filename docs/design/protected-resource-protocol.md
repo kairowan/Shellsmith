@@ -59,6 +59,8 @@ extension_bundle_id = "com.example.app.Share"
 
 主应用调用 `try await ShellsmithProtectedResources.publishToExtension("rules")` 完成 App Attest 授权，并使用单独的 AES-GCM 密钥生成加密副本。扩展导入生成的 `ShellsmithSharedResources` 产品，调用 `try ShellsmithSharedResources.data("rules")`。快照使用原授权的剩余时间，最多 60 秒。加密文件保存在 App Group，短期密钥保存在双方指定的共享 Keychain。切换账号或主动撤销共享时，主应用可调用 `invalidateExtensionResource`。已返回给业务的字节由业务生命周期管理。Archive 和 IPA 都会核对两个可执行文件的 App ID、App Group 及 Keychain 权限。
 
+iOS 资源租约使用包含设备睡眠时间的连续时钟。主应用先写入带独立文件名的密文，再提交共享 Keychain 指针。提交失败保留之前仍有效的快照。扩展返回数据前复核同一授权记录和有效期。
+
 ## 运行时事件与范围读取
 
 - Android 可通过 `observeEnvironment` 在应用启动及恢复前台采样，通过 `openObserved` 或 `readRangeObserved` 接收授权与读取结果。传入待拦截的组 ID 时，平台报告已连接调试器将拒绝该组。其他本地信号用于记录。
@@ -90,6 +92,10 @@ iOS 使用 `/v1/ios-resource-keys/*` 和独立的 `i_` token。服务端验证 A
 | 多模块 AAB | 隔离 HTTPS 服务登记四个独立组，分别检查条件功能模块、install-time、fast-follow 和 on-demand Asset Pack 的 SSR1 落位、原件残留、索引和 split 生成。相同输入使用旧配置仍产出四个 PAS2 资源，旧 split 在 16 KB 模拟器上通过功能模块与 install-time 读取。 |
 | 范围读取与运行时 | Java 与 Swift 用同一份 SSR1 验证跨分片读取及未选分片篡改。服务端回归验证新关联 ID 可串联挑战、批准或拒绝，旧取钥路由沿用原契约。4 KB 真机与 16 KB 模拟器重复启动保留的历史严格模式 APK。 |
 | App Group | 主应用和 Extension 通过 iPhoneOS SDK 类型检查，包含 `-application-extension` 检查。工程夹具验证包仅接入指定扩展，权限夹具验证签名身份、App Group 和共享 Keychain 匹配。正式签名和跨进程 Keychain 访问留待项目真机。 |
+| 离线同签升级 | 在 API 35 的 4 KB 真机和 API 37 的 16 KB 模拟器上，测试包从已加固版本 21 覆盖安装到已加固版本 22。升级前写入的业务数据在升级后首次与二次启动均保留，secondary DEX、Native 和 `openFd` 检查通过。 |
+| 离线读取与快照回归 | 16 MiB SSR1 在两台 Android 测试设备的 ART 中通过完整读取、64 字节范围读取和未选中末片篡改拒绝。恰好读到末字节后关闭只记录一次 `verified`。Swift 夹具覆盖旧快照记录解码、有效期和 Keychain 写入失败时保留旧快照；主应用与扩展产出 iPhoneOS arm64 目标文件。 |
+
+同一份 16 MiB 夹具连续选择 64 字节范围并认证全文件。预热后采样 20 次，Android 4 KB 真机 P95 为 51.53 ms，16 KB 模拟器 P95 为 21.90 ms。macOS Swift 测试中，按分片释放临时对象后，整段进程峰值 RSS 从约 377 MiB 降至 7.3 MiB，P95 从 13.18 ms 变为 15.05 ms。这些数值用于本机回归对照，iPhone 的性能与内存仍需在真机验收。
 
 ### 正式验收前需要的输入
 
