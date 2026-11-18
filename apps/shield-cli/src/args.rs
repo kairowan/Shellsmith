@@ -349,6 +349,9 @@ pub(crate) struct ProtectXopArgs {
 
 #[derive(Args, Default)]
 pub(crate) struct ProtectArgs {
+    /// 显式必保的业务资源清单，需要支持资源组授权的 BYOS 服务。
+    #[arg(long, value_name = "JSON")]
+    pub protected_resource_manifest: Option<PathBuf>,
     /// 用户自有 HTTPS 密钥服务；与 --byos-auth 配套，默认离线加固不需要。
     #[arg(long, requires_all = ["byos_api_key", "byos_auth"])]
     pub byos_endpoint: Option<String>,

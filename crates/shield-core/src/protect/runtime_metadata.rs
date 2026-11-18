@@ -17,6 +17,7 @@ pub(crate) struct RuntimeMetadata {
     pub(crate) memory_dex: bool,
     pub(crate) byos_remote_key: bool,
     pub(crate) byos_auth: Option<crate::ByosAuth>,
+    pub(crate) protected_resources_v1: bool,
     pub(crate) xop_pvm2: bool,
     /// 壳运行时静态链入的 Xop 解释器支持的最高 PVM2 镜像格式版本。
     /// 旧资源包没有该字段时为 None；启用 PVM2 必须重建资源包。
@@ -134,6 +135,7 @@ impl RuntimeMetadata {
             memory_dex,
             byos_remote_key,
             byos_auth,
+            protected_resources_v1: parse_bool(json, "protected_resources_v1").unwrap_or(false),
             xop_pvm2,
             xop_pvm2_format: parse_u32(json, "xop_pvm2_format"),
             xop_vm_bridge,

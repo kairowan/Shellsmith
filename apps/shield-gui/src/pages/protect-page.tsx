@@ -268,6 +268,7 @@ export function ProtectPage({
                 xopPvm2PackerPath={workflow.xopPvm2PackerPath} xopTrueVmpPrefixesText={workflow.xopTrueVmpPrefixesText} xopTrueVmpPrefixes={workflow.xopTrueVmpPrefixes}
                 pvm2RequiredMethods={workflow.pvm2RequiredMethods} onPvm2RequiredMethodsChange={workflow.setPvm2RequiredMethods}
                 protectRouteAssets={workflow.protectRouteAssets} onProtectRouteAssetsChange={workflow.setProtectRouteAssets}
+                protectedResourceManifest={workflow.protectedResourceManifest} onProtectedResourceManifestChange={workflow.setProtectedResourceManifest}
                 nativeVmpEvidence={workflow.nativeVmpEvidence} onNativeVmpEvidenceChange={workflow.setNativeVmpEvidence}
                 xopPvm2BuiltInAvailable={hasBundledPvmPacker} xopPvm2JavaReady={pvmJavaReady} xopPvm2MinJavaMajor={buildInfo?.xop_pvm2_min_java_major ?? 17}
                 signAfterProtect={signAfterProtect} selectedCertificateId={selectedCertificateId} certificates={certificates}

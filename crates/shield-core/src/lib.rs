@@ -14,6 +14,7 @@ mod preflight;
 pub mod project_protection;
 mod protect;
 mod protect_api;
+pub mod protected_resources;
 pub mod protection_policy;
 pub mod protection_report;
 pub mod runtime_ui;

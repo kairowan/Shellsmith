@@ -257,13 +257,39 @@ pub(crate) fn register_ikm(
     ensure!(ikm.len() == 32, "BYOS IKM 必须为 32 字节");
     register(
         &format!("{}/v1/keys/register", endpoint.trim_end_matches('/')),
-        ikm,
+        serde_json::json!({"ikm": STANDARD.encode(ikm), "auth_mode": auth.as_str(), "fetch_protocol": 2}),
         api_key,
         auth,
     )
 }
 
-fn register(url: &str, ikm: &[u8], api_key: &str, auth: ByosAuth) -> Result<String> {
+pub(crate) fn register_resource_group(
+    endpoint: &str,
+    api_key: &str,
+    build_id: &str,
+    group: &str,
+    key: &[u8; 32],
+) -> Result<String> {
+    let auth = ByosAuth::DeviceApproval;
+    validate_options(Some(endpoint), Some(api_key), Some(auth))?;
+    let token = register(
+        &format!(
+            "{}/v1/resource-keys/register",
+            endpoint.trim_end_matches('/')
+        ),
+        serde_json::json!({"ikm": STANDARD.encode(key), "auth_mode": auth.as_str(), "fetch_protocol": 2,
+                          "build_id": build_id, "resource_group": group}),
+        api_key,
+        auth,
+    )?;
+    ensure!(
+        token.starts_with("r_") && token.len() == 66,
+        "BYOS 资源组 token 与协议不匹配"
+    );
+    Ok(token)
+}
+
+fn register(url: &str, body: serde_json::Value, api_key: &str, auth: ByosAuth) -> Result<String> {
     // 禁止重定向，避免构建凭据和 IKM 被转发给其他地址。
     let agent = ureq::AgentBuilder::new()
         .redirects(0)
@@ -272,7 +298,7 @@ fn register(url: &str, ikm: &[u8], api_key: &str, auth: ByosAuth) -> Result<Stri
     let response = agent
         .post(url)
         .set("Authorization", &format!("Bearer {api_key}"))
-        .send_json(serde_json::json!({"ikm": STANDARD.encode(ikm), "auth_mode": auth.as_str(), "fetch_protocol": 2}))
+        .send_json(body)
         .map_err(|_| anyhow::anyhow!("BYOS 注册失败：请检查 HTTPS 服务、网络和构建端认证"))?;
     ensure!(response.status() == 200, "BYOS 注册必须返回 HTTP 200");
     let mut body = Vec::new();
@@ -409,7 +435,7 @@ mod tests {
             });
             let result = register(
                 &format!("http://{address}/v1/keys/register"),
-                &[42; 32],
+                serde_json::json!({"ikm": STANDARD.encode([42; 32]), "auth_mode": "device_approval", "fetch_protocol": 2}),
                 "private-api-key",
                 ByosAuth::DeviceApproval,
             );

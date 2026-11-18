@@ -86,6 +86,7 @@ struct ProtectRequest {
     xop_true_vmp_prefixes: Vec<String>,
     pvm2_required_methods: Option<String>,
     native_vmp_evidence: Option<String>,
+    protected_resource_manifest: Option<String>,
     #[serde(default)]
     protect_route_assets: bool,
     certificate_id: Option<String>,
@@ -240,6 +241,7 @@ async fn protect_apk(
             xop_true_vmp_prefixes: request.xop_true_vmp_prefixes,
             pvm2_required_methods: request.pvm2_required_methods,
             native_vmp_evidence: request.native_vmp_evidence,
+            protected_resource_manifest: request.protected_resource_manifest,
             protect_route_assets: request.protect_route_assets,
             signing_certificate,
             signed_output: request.signed_output,

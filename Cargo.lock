@@ -3691,6 +3691,7 @@ dependencies = [
  "hkdf",
  "log",
  "rand 0.9.4",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

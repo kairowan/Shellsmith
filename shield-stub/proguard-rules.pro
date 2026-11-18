@@ -32,6 +32,7 @@
 # dynamic-feature refresh. Business code may call this class before protection,
 # so its package and public method names are a compatibility contract.
 -keep public class dev.mocika.shield.loader.MocikaPlayDelivery { public *; }
+-keep public class dev.mocika.shield.loader.MocikaProtectedResources { public *; }
 
 # StubApp：类名允许混淆（shield-cli 从 metadata.json 读取混淆后的类名）。
 # 框架入口方法（attachBaseContext/onCreate/getApplicationContext）覆盖 Application 父类，

@@ -104,6 +104,7 @@ pub(crate) struct ProtectExecution {
     pub(crate) xop_true_vmp_prefixes: Vec<String>,
     pub(crate) pvm2_required_methods: Option<String>,
     pub(crate) native_vmp_evidence: Option<String>,
+    pub(crate) protected_resource_manifest: Option<String>,
     pub(crate) protect_route_assets: bool,
     pub(crate) signing_certificate: Option<CertificateRecord>,
     pub(crate) signed_output: Option<String>,
@@ -204,6 +205,10 @@ pub(crate) async fn execute_protect_apk(
                 ExecutionFailure::diagnosed(err.to_string(), Diagnostic::from_error(&err))
             })?;
         let opts = ProtectOptions {
+            protected_resource_manifest: request
+                .protected_resource_manifest
+                .map(PathBuf::from)
+                .map(strip_unc_prefix),
             byos_endpoint: request.byos.as_ref().map(|v| v.profile.endpoint.clone()),
             byos_api_key: request.byos.as_ref().map(|v| v.api_key.clone()),
             byos_auth: request

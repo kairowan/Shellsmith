@@ -119,15 +119,18 @@ STUB_BUILD_DIR="shield-stub/build"
 RUNTIME_MIN_API=21
 DEX_MIN_API=19
 BYOS_CAPABILITY=false
+PROTECTED_RESOURCES_V1=false
 BYOS_AUTH=none
 BYOS_RESOURCE=resources-byos.zip
 if [ "${MOCIKA_BYOS_RUNTIME:-0}" = "1" ]; then
     STUB_BUILD_DIR="shield-stub/build-byos"
     BYOS_AUTH=device_approval
+    PROTECTED_RESOURCES_V1=true
     RUNTIME_MIN_API=24
     if [ "${MOCIKA_BYOS_PLAY_INTEGRITY:-0}" = "1" ]; then
         STUB_BUILD_DIR="shield-stub/build-byos-play"
         BYOS_AUTH=play_integrity
+        PROTECTED_RESOURCES_V1=false
         RUNTIME_MIN_API=29
         BYOS_RESOURCE=resources-byos-play.zip
     fi
@@ -177,6 +180,12 @@ MAPPING_FILE="$STUB_BUILD_DIR/outputs/mapping/release/mapping.txt"
 if [ ! -f "$MAPPING_FILE" ]; then
     echo -e "${RED}错误: 未找到 R8 mapping 文件: $MAPPING_FILE${NC}"
     echo -e "${YELLOW}  请确认 proguard-rules.pro 已启用混淆且 R8 正常运行${NC}"
+    exit 1
+fi
+if [ "$PROTECTED_RESOURCES_V1" = "true" ] && ! grep -Fq \
+    'dev.mocika.shield.loader.MocikaProtectedResources -> dev.mocika.shield.loader.MocikaProtectedResources:' \
+    "$MAPPING_FILE"; then
+    echo "设备批准运行时缺少业务资源读取入口" >&2
     exit 1
 fi
 
@@ -374,13 +383,14 @@ fi
 if [ -n "$ANDROID_JAR" ]; then
     echo -e "${YELLOW}使用 android.jar: $ANDROID_JAR${NC}"
     # 单独编译公开 API，而不是从 R8 实现类导出，避免把优化后内部成员暴露给业务。
-    API_SOURCE="$PROJECT_ROOT/shield-stub/runtime-api/dev/mocika/shield/loader/MocikaPlayDelivery.java"
+    API_SOURCE="$PROJECT_ROOT/shield-stub/runtime-api/dev/mocika/shield/loader"
     API_STAGE="$TEMP_DIR/runtime-api"
     API_JAR="$PROJECT_ROOT/$OUTPUT_DIR/mocika-play-delivery-api.jar"
     mkdir -p "$API_STAGE"
-    javac --release 8 -classpath "$ANDROID_JAR" -d "$API_STAGE" "$API_SOURCE"
+    javac --release 8 -classpath "$ANDROID_JAR" -d "$API_STAGE" \
+        "$API_SOURCE/MocikaPlayDelivery.java" "$API_SOURCE/MocikaProtectedResources.java"
     rm -f "$API_JAR"
-    jar cf "$API_JAR" -C "$API_STAGE" dev/mocika/shield/loader/MocikaPlayDelivery.class
+    jar cf "$API_JAR" -C "$API_STAGE" dev/mocika/shield/loader
     echo -e "${GREEN}✓ Play Delivery compileOnly API: $API_JAR${NC}"
     "$D8_CMD" --output "$OUTPUT_DIR" "$TEMP_DIR/classes.jar" --min-api "$DEX_MIN_API" --lib "$ANDROID_JAR"
 else
@@ -472,6 +482,7 @@ cat > "$OUTPUT_DIR/metadata.json" << EOF
   "byos_remote_key": $BYOS_CAPABILITY,
   "byos_auth": "$BYOS_AUTH",
   "byos_fetch_protocol": 2,
+  "protected_resources_v1": $PROTECTED_RESOURCES_V1,
   "target_android_api": 35,
   "native_library": "libmocikashield.so",
   "native_name_placeholder": "mocikanativeslot",
@@ -529,6 +540,7 @@ if [ "$BYOS_CAPABILITY" = "true" ]; then
     # 专用包可与标准资源并存；不覆盖默认离线入口和 API 19 资源。
     mkdir -p shield-stub/build/outputs/resources
     cp "$OUTPUT_DIR/$RESOURCES_ZIP" "shield-stub/build/outputs/resources/$BYOS_RESOURCE"
+    cp "$API_JAR" shield-stub/build/outputs/resources/mocika-play-delivery-api.jar
     echo "BYOS 资源：shield-stub/build/outputs/resources/$BYOS_RESOURCE"
     exit 0
 fi

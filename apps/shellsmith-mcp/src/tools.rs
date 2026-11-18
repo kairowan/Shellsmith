@@ -117,6 +117,7 @@ pub fn tool_definitions() -> Vec<Value> {
                     "xop_true_vmp_prefixes": array("DEX type prefixes for PVM2"),
                     "pvm2_required_methods": string("Optional required methods TSV"),
                     "native_vmp_evidence": string("Optional native VMP evidence TSV"),
+                    "protected_resource_manifest": string("Optional JSON manifest for BYOS resource groups"),
                     "protect_route_assets": boolean("Encrypt router index assets"),
                     "byos_endpoint": string("Optional BYOS endpoint"),
                     "byos_auth": string("device_approval or play_integrity"),
@@ -433,6 +434,7 @@ struct ProtectApkInput {
     native_vmp_evidence: Option<String>,
     #[serde(default)]
     protect_route_assets: bool,
+    protected_resource_manifest: Option<String>,
     byos_endpoint: Option<String>,
     byos_auth: Option<String>,
     byos_api_key_env: Option<String>,
@@ -870,6 +872,13 @@ fn protect_apk(
         "--native-vmp-evidence",
         input.native_vmp_evidence.as_deref(),
         "Native VMP 证据清单",
+    )?;
+    push_path_opt(
+        server,
+        &mut protect_args,
+        "--protected-resource-manifest",
+        input.protected_resource_manifest.as_deref(),
+        "必保业务资源清单",
     )?;
     if input.protect_route_assets {
         protect_args.push("--protect-route-assets".into());

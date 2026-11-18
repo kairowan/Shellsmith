@@ -41,6 +41,7 @@ pub(crate) fn run_protect(args: ResolvedProtectArgs) -> Result<()> {
     }
 
     let opts = ProtectOptions {
+        protected_resource_manifest: args.protected_resource_manifest,
         byos_endpoint: args.byos_endpoint,
         byos_api_key: args.byos_api_key,
         byos_auth: args.byos_auth,
@@ -412,6 +413,7 @@ pub fn run_protect_aab_with_control(
     match args.engine {
         ProtectionEngineArg::Mocika => {
             let protect_opts = ProtectOptions {
+                protected_resource_manifest: None,
                 byos_endpoint: None,
                 byos_api_key: None,
                 byos_auth: None,

@@ -21,6 +21,7 @@ pub(crate) struct CliConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ProtectConfig {
+    protected_resource_manifest: Option<PathBuf>,
     #[serde(default)]
     runtime_ui: shield_core::RuntimeUiProtection,
     ui_packer: Option<PathBuf>,
@@ -73,6 +74,9 @@ impl CliConfig {
 
     pub(crate) fn merge_protect(&self, args: ProtectArgs) -> Result<ResolvedProtectArgs> {
         Ok(ResolvedProtectArgs {
+            protected_resource_manifest: args
+                .protected_resource_manifest
+                .or_else(|| self.protect.protected_resource_manifest.clone()),
             byos_endpoint: args.byos_endpoint,
             byos_api_key: args.byos_api_key,
             byos_auth: args.byos_auth,
@@ -157,6 +161,7 @@ impl CliConfig {
             &mut self.protect.apksigner,
             &mut self.protect.pvm2_required_methods,
             &mut self.protect.native_vmp_evidence,
+            &mut self.protect.protected_resource_manifest,
             &mut self.sign.input,
             &mut self.sign.output,
             &mut self.sign.keystore,
@@ -170,6 +175,7 @@ impl CliConfig {
 }
 
 pub(crate) struct ResolvedProtectArgs {
+    pub protected_resource_manifest: Option<PathBuf>,
     pub byos_endpoint: Option<String>,
     pub byos_api_key: Option<String>,
     pub byos_auth: Option<shield_core::ByosAuth>,

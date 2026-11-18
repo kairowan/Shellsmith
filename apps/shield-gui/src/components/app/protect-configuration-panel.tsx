@@ -32,6 +32,7 @@ export function ProtectConfigurationPanel({
   pvm2RequiredMethods, onPvm2RequiredMethodsChange,
   protectRouteAssets, onProtectRouteAssetsChange,
   nativeVmpEvidence, onNativeVmpEvidenceChange,
+  protectedResourceManifest, onProtectedResourceManifestChange,
   xopTrueVmpPrefixesText,
   xopTrueVmpPrefixes,
   xopPvm2BuiltInAvailable,
@@ -76,6 +77,8 @@ export function ProtectConfigurationPanel({
   usingRecommendedProtection: boolean;
   xopPvm2PackerPath: string;
   nativeVmpEvidence: string;
+  protectedResourceManifest: string;
+  onProtectedResourceManifestChange: (path: string) => void;
   onNativeVmpEvidenceChange: (value: string) => void;
   pvm2RequiredMethods: string;
   onPvm2RequiredMethodsChange: (value: string) => void;
@@ -132,6 +135,14 @@ export function ProtectConfigurationPanel({
             </SheetHeader>
             <div className="mt-7 space-y-6">
               {byosSettings}
+              {(protectedResourceManifest || (runtimeMode === "standard" && byosProfile?.authMode === "device_approval")) && (
+                <div className="rounded-xl border p-4">
+                  <label className="field-label block" htmlFor="resource-manifest">{t(locale, "protectedResourceManifest")}</label>
+                  <TextInput id="resource-manifest" className="mt-2" value={protectedResourceManifest} disabled={disabled} onChange={(event) => onProtectedResourceManifestChange(event.target.value)} />
+                  <AppButton className="mt-2 w-full" variant="secondary" disabled={disabled} onClick={async () => { const path = await openFileDialog("JSON", ["json"]); if (path) onProtectedResourceManifestChange(path); }}><FolderOpen className="h-4 w-4" />{t(locale, "protectedResourceChooseManifest")}</AppButton>
+                  <p className="mt-2 text-xs leading-5 text-muted-foreground">{t(locale, "protectedResourceManifestHint")}</p>
+                </div>
+              )}
               <RuntimeUiSettings value={runtimeUi} onChange={onRuntimeUiChange} locale={locale} disabled={disabled} />
               <SettingSelect label={t(locale, "targetSystem")} value={runtimeMode} onChange={(value) => onRuntimeModeChange(value as RuntimeMode)} hint={runtimeMode === "android_api19" ? t(locale, "runtimeAndroid44Hint") : t(locale, "runtimeStandardHint")} guidance={runtimeModeGuidance}>
                 <option value="standard">{t(locale, "runtimeStandard")}</option>

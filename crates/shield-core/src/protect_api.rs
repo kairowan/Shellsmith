@@ -62,6 +62,7 @@ pub struct ProtectOptions {
     pub byos_endpoint: Option<String>,
     pub byos_api_key: Option<String>,
     pub byos_auth: Option<crate::ByosAuth>,
+    pub protected_resource_manifest: Option<PathBuf>,
     pub runtime_ui: crate::RuntimeUiProtection,
     pub ui_packer_path: Option<PathBuf>,
     /// 用户对本次任务明确确认排除的、不受支持的 Native ABI。
@@ -284,6 +285,15 @@ fn protect_apk_inner(
             "离线模式请使用标准 resources.zip，BYOS 资源只用于显式配置包外密钥的构建"
         )));
     }
+    if opts.protected_resource_manifest.is_some()
+        && (opts.byos_auth != Some(crate::ByosAuth::DeviceApproval)
+            || !runtime_selection.protected_resources_v1
+            || opts.external_pas2_assets_dir.is_some())
+    {
+        return Err(ShieldError::from(anyhow::anyhow!(
+            "业务资源动态授权需要支持 SSR1 的设备批准运行时和单 APK 加固"
+        )));
+    }
     if opts.runtime_ui.runtime_enabled() && !runtime_selection.runtime_ui {
         return Err(ShieldError::from(anyhow::anyhow!(
             "所选 Runtime 不支持运行时界面保护，请重新构建 resources.zip"
@@ -420,6 +430,9 @@ fn protect_apk_inner(
 
     let temp_dir = create_temp_dir("shield-").map_err(ShieldError::from)?;
     let apk_dir = temp_dir.path().join("apk");
+    let resource_stage = temp_dir
+        .path()
+        .join(crate::protected_resources::RESOURCE_DIRECTORY);
 
     emit_progress(&on_progress, &cancel, ProgressStep::Unpack, "解包APK")?;
     print_step("解包APK");
@@ -439,6 +452,31 @@ fn protect_apk_inner(
     )
     .map_err(ShieldError::from)?;
     print_success("解包完成");
+    let mut protected_resources =
+        if let Some(manifest) = opts.protected_resource_manifest.as_deref() {
+            let assets = apk_dir.join("assets");
+            if assets
+                .join(crate::protected_resources::RESOURCE_DIRECTORY)
+                .symlink_metadata()
+                .is_ok()
+            {
+                return Err(ShieldError::from(anyhow::anyhow!(
+                    "APK 占用了业务资源保留目录"
+                )));
+            }
+            let prepared = crate::protected_resources::PreparedResources::prepare(
+                manifest,
+                &assets,
+                &resource_stage,
+            )
+            .map_err(ShieldError::from)?;
+            prepared
+                .remove_originals(&assets)
+                .map_err(ShieldError::from)?;
+            Some(prepared)
+        } else {
+            None
+        };
     if normalize_empty_resource_metadata(&apk_dir).map_err(ShieldError::from)? {
         print_success("已修正无资源 APK 的资源编译元数据");
     }
@@ -898,6 +936,32 @@ fn protect_apk_inner(
         }
     }
 
+    if let Some(prepared) = protected_resources.as_mut() {
+        check_cancel(&cancel)?;
+        prepared
+            .register_android(
+                opts.byos_endpoint.as_deref().unwrap(),
+                opts.byos_api_key.as_deref().unwrap(),
+                &resource_stage,
+            )
+            .map_err(ShieldError::from)?;
+        fs::rename(
+            &resource_stage,
+            apk_dir
+                .join("assets")
+                .join(crate::protected_resources::RESOURCE_DIRECTORY),
+        )
+        .map_err(anyhow::Error::from)
+        .map_err(ShieldError::from)?;
+        method_report
+            .get_or_insert_with(crate::protection_report::MethodReport::native_only)
+            .build
+            .insert(
+                "protected_resources".into(),
+                serde_json::json!({"format": 1, "build_id": prepared.build_id(), "index_sha256": prepared.index_digest(),
+                "resources": prepared.evidence().collect::<Vec<_>>() }),
+            );
+    }
     emit_progress(&on_progress, &cancel, ProgressStep::Repack, "重打包APK")?;
     print_step("重打包APK");
     run_apktool_command(
@@ -1001,6 +1065,12 @@ fn protect_apk_inner(
         }
     }
     verify_in_apk(&opts.output, &injected_runtime).map_err(ShieldError::from)?;
+    if let Some(prepared) = protected_resources.as_ref() {
+        check_cancel(&cancel)?;
+        prepared
+            .verify_zip(&opts.output, "assets/")
+            .map_err(ShieldError::from)?;
+    }
     print_success("APK数据对齐完成");
     if let Some(report) = method_report.as_mut() {
         report

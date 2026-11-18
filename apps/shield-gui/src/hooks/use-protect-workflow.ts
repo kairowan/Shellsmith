@@ -69,6 +69,7 @@ export function useProtectWorkflow({
   const [xopPvm2PackerPath, setXopPvm2PackerPath] = useState(defaults.xop_pvm2_packer_path);
   const [pvm2RequiredMethods, setPvm2RequiredMethods] = useState("");
   const [nativeVmpEvidence, setNativeVmpEvidence] = useState("");
+  const [protectedResourceManifest, setProtectedResourceManifest] = useState("");
   const [protectRouteAssets, setProtectRouteAssets] = useState(false);
   const [xopTrueVmpPrefixesText, setXopTrueVmpPrefixesText] = useState(defaults.xop_true_vmp_prefixes.join(", "));
   const xopTrueVmpPrefixes = useMemo(
@@ -337,6 +338,7 @@ export function useProtectWorkflow({
         nativeVmpEvidence.trim() || null,
         byosProfile?.id ?? null,
         protectRouteAssets,
+        protectedResourceManifest.trim() || null,
       );
       setFinishedAt(Date.now());
       setState("done");
@@ -353,7 +355,7 @@ export function useProtectWorkflow({
         setState("idle");
       }
     }
-  }, [byosProfile, aiResistance, autoSignReady, buildInfo, certificate, environmentPolicy, fixedOutputDirectory, input, locale, output, outputDirectoryMode, outputFilenameError, precheck, preflight, protectionProfile, protectRouteAssets, runtimeMode, runtimeUi, sharing, xopPvm2PackerPath, xopTrueVmpPrefixes, pvm2RequiredMethods, nativeVmpEvidence]);
+  }, [byosProfile, aiResistance, autoSignReady, buildInfo, certificate, environmentPolicy, fixedOutputDirectory, input, locale, output, outputDirectoryMode, outputFilenameError, precheck, preflight, protectionProfile, protectRouteAssets, runtimeMode, runtimeUi, sharing, xopPvm2PackerPath, xopTrueVmpPrefixes, pvm2RequiredMethods, nativeVmpEvidence, protectedResourceManifest]);
 
   const cancel = useCallback(async () => {
     await api.cancelProtect().catch(() => undefined);
@@ -399,6 +401,7 @@ export function useProtectWorkflow({
     setXopTrueVmpPrefixesText,
     pvm2RequiredMethods, setPvm2RequiredMethods,
     nativeVmpEvidence, setNativeVmpEvidence,
+    protectedResourceManifest, setProtectedResourceManifest,
     protectRouteAssets, setProtectRouteAssets,
     xopTrueVmpPrefixes,
     currentStep,

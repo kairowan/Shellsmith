@@ -53,7 +53,7 @@ final class ByosKeyClient {
     }
 
     private static byte[] fetchWithContext(Context ctx, String endpoint, String token, String certificate) {
-        FutureTask<byte[]> request = new FutureTask<>(() -> fetchOnWorker(ctx, endpoint, token, certificate));
+        FutureTask<byte[]> request = new FutureTask<>(() -> fetchOnWorker(ctx, endpoint, token, certificate, null, null));
         Thread worker = new Thread(request, "byos-key");
         worker.setDaemon(true);
         worker.start();
@@ -106,7 +106,8 @@ final class ByosKeyClient {
         } finally { Arrays.fill(plaintext, (byte) 0); }
     }
 
-    private static byte[] fetchOnWorker(Context ctx, String endpoint, String token, String certificate) throws Exception {
+    static byte[] fetchOnWorker(Context ctx, String endpoint, String token, String certificate,
+            String build, String group) throws Exception {
         endpoint(endpoint);
         while (endpoint.endsWith("/")) endpoint = endpoint.substring(0, endpoint.length() - 1);
         if (token == null || !token.matches("[A-Za-z0-9_-]{1,256}") || certificate == null
@@ -120,10 +121,38 @@ final class ByosKeyClient {
         byte[] random = new byte[32]; new SecureRandom().nextBytes(random);
         String requestId = Base64.getUrlEncoder().withoutPadding().encodeToString(random);
         long timestamp = System.currentTimeMillis() / 1000;
-        byte[] digest = nonceDigest(endpoint, token, ctx.getPackageName(), certificate, timestamp, requestId,
-                ByosProof.MODE, publicKey, devicePublicKey);
+        JSONObject body;
+        byte[] digest;
+        String route;
+        if (build == null) {
+            route = "/v1/keys/fetch";
+            digest = nonceDigest(endpoint, token, ctx.getPackageName(), certificate, timestamp, requestId,
+                    ByosProof.MODE, publicKey, devicePublicKey);
+            body = new JSONObject();
+        } else {
+            route = "/v1/resource-keys/fetch";
+            if (device == null || !token.matches("r_[0-9a-f]{64}") || !build.matches("[0-9a-f]{32}")
+                    || !group.matches("[a-z0-9_-]{1,64}")) throw new SecurityException("K02");
+            JSONObject scope = new JSONObject().put("token_id", token).put("build_id", build).put("resource_group", group);
+            String challengeMessage = String.join("\n", "shellsmith-resource-challenge-v1", endpoint, token,
+                    build, group, Long.toString(timestamp), requestId, devicePublicKey);
+            byte[] challengeDigest = MessageDigest.getInstance("SHA-256").digest(challengeMessage.getBytes(StandardCharsets.UTF_8));
+            Signature challengeProof = Signature.getInstance("SHA256withECDSA");
+            challengeProof.initSign(device.getPrivate());
+            challengeProof.update(challengeDigest);
+            String challenge = post(endpoint, "/v1/resource-keys/challenge", scope
+                    .put("device_public_key", devicePublicKey).put("timestamp", timestamp).put("request_id", requestId)
+                    .put("device_signature", Base64.getEncoder().encodeToString(challengeProof.sign())))
+                    .getString("challenge");
+            if (!challenge.matches("[A-Za-z0-9_-]{43}")) throw new SecurityException("K04");
+            String message = String.join("\n", "shellsmith-resource-v1", endpoint, token, ctx.getPackageName(),
+                    certificate, Long.toString(timestamp), requestId, ByosProof.MODE, publicKey, devicePublicKey,
+                    build, group, challenge);
+            digest = MessageDigest.getInstance("SHA-256").digest(message.getBytes(StandardCharsets.UTF_8));
+            body = scope.put("challenge", challenge);
+        }
         String nonce = Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
-        JSONObject body = new JSONObject().put("fetch_protocol", 2).put("auth_mode", ByosProof.MODE)
+        body.put("fetch_protocol", 2).put("auth_mode", ByosProof.MODE)
                 .put("token_id", token).put("server_url", endpoint)
                 .put("package_name", ctx.getPackageName()).put("cert_fingerprint", certificate)
                 .put("timestamp", timestamp).put("request_id", requestId).put("nonce", nonce)
@@ -136,7 +165,20 @@ final class ByosKeyClient {
         } else {
             body.put("integrity_token", ByosProof.integrityToken(ctx, nonce));
         }
-        HttpsURLConnection connection = (HttpsURLConnection) new URI(endpoint + "/v1/keys/fetch").toURL().openConnection();
+        try {
+            JSONObject response = post(endpoint, route, body);
+            if (!token.equals(response.getString("token_id")) || !nonce.equals(response.getString("nonce"))) throw new SecurityException("K04");
+            if (response.has("ikm") || response.getInt("fetch_protocol") != 2
+                    || !ByosProof.MODE.equals(response.getString("auth_mode"))) throw new SecurityException("K04");
+            if (build != null && response.getInt("ttl_seconds") != 60) throw new SecurityException("K04");
+            return unwrap(response.getString("wrapped_ikm"), responseKey.getPrivate(), digest);
+        } catch (org.json.JSONException | IllegalArgumentException error) {
+            throw new SecurityException("K04");
+        }
+    }
+
+    private static JSONObject post(String endpoint, String route, JSONObject body) throws Exception {
+        HttpsURLConnection connection = (HttpsURLConnection) new URI(endpoint + route).toURL().openConnection();
         try {
             connection.setRequestMethod("POST");
             connection.setInstanceFollowRedirects(false);
@@ -156,15 +198,7 @@ final class ByosKeyClient {
                     bytes.write(buffer, 0, n);
                 }
             }
-            try {
-                JSONObject response = new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
-                if (!token.equals(response.getString("token_id")) || !nonce.equals(response.getString("nonce"))) throw new SecurityException("K04");
-                if (response.has("ikm") || response.getInt("fetch_protocol") != 2
-                        || !ByosProof.MODE.equals(response.getString("auth_mode"))) throw new SecurityException("K04");
-                return unwrap(response.getString("wrapped_ikm"), responseKey.getPrivate(), digest);
-            } catch (org.json.JSONException | IllegalArgumentException error) {
-                throw new SecurityException("K04");
-            }
+            return new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
         } finally {
             connection.disconnect();
         }
