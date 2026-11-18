@@ -63,7 +63,8 @@ iOS 使用 `/v1/ios-resource-keys/*` 和独立的 `i_` token。服务端验证 A
 | 旧、新服务共存 | 在独立 PostgreSQL 运行服务端既有 HTTP 冒烟和新旧接口的取钥回归，覆盖旧 IKM、挑战重放、错误资源组、跨接口取钥拒绝和撤销。 |
 | 旧保护路径 | Android API 35 的 4 KB 真机、API 37 的 16 KB 模拟器分别通过上一轮保留的严格模式 APK 原样安装、冷启动与缓存启动，覆盖 Application、Activity 与 secondary DEX。上一轮同时验证过未加固基线与同签覆盖安装。签名夹具、摘要和日志保存在本机 `target/resource-protection-device-evidence/`。历史正式签名 BYOS 客户端还需在测试服务验收。 |
 | Android 新链实际联调 | 需要隔离、证书受信任的 BYOS HTTPS 测试服务和专用测试应用身份。先部署服务端迭代代码，再用授权测试 APK 从原始版本覆盖升级，核验资源组注册、首次读取、到期、撤销和普通业务。 |
-| AAB 无资源新配置基线 | 回归夹具通过 `bundletool validate`，生成的 split 在 16 KB 模拟器冷启动，确认 Application、Provider、Activity 和 Native 探针。新 AAB 有跨模块残留和服务授权回归，Play 下发及取钥留待实际渠道验证。 |
+| AAB 旧配置 | 回归夹具通过 `bundletool validate`，生成的 split 在 16 KB 模拟器冷启动，确认 Application、Provider、Activity 和 Native 探针。 |
+| AAB 资源授权 | 临时 CLI 使用隔离的测试 CA，通过 HTTPS 在独立 PostgreSQL 登记 base DEX 和业务资源组，成功生成并检查签名 AAB、split APKS、SSR1 密文、明文残留和重绑定报告。测试 CA 只在该测试构建里。Play 下发和设备端读取留待实际渠道验证。 |
 | iOS 接线及授权 | 用 iPhoneOS SDK 对 App Attest、资源授权及读取源代码执行 arm64/iOS 14 类型检查。工程接线回归验证只删除主应用对应路径的复制项。服务用模拟 Apple 签名链覆盖审批、重放、签名请求、旧计数和撤销。真机证明和签名 IPA 覆盖升级留待实际环境。 |
 
 ### 正式验收前需要的输入
