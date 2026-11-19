@@ -17,18 +17,18 @@ const RESERVED_LIBRARY_NAMES: &[&str] = &[
     "libmocikashield.so",
 ];
 
-// 只使用审查过的中性组合。`module` 前缀位于当前 Stub DEX 占位符相邻
-// string_ids 的安全字典序区间；其他前缀即使等长也会使 ART 拒绝 DEX。
+// 只使用审查过的中性组合；设备批准运行时包含独立的 `module` 字符串，
+// 因此候选必须排在它之前。实际 string_ids 边界仍在替换前复验。
 // 所有主体均为 16 个小写 ASCII 字母。
 const ALIAS_BODIES: &[&str] = &[
-    "modulecorebridge",
-    "moduledatabridge",
-    "modulebasebridge",
-    "moduleutilbridge",
-    "moduleappsupport",
-    "modulejnisupport",
-    "moduleapisupport",
-    "moduleruntimejni",
+    "modularcorecache",
+    "modulardatacache",
+    "modularbasecache",
+    "modularutilcache",
+    "modularappcachex",
+    "modularjnicachex",
+    "modularapicachex",
+    "modularruntimeid",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,9 +251,72 @@ pub(crate) fn patch_stub_dex(
     }
 
     let start = matches[0];
+    validate_alias_order(&dex[..logical_size], start, alias.body().as_bytes())?;
     dex[start..start + placeholder.len()].copy_from_slice(alias.body().as_bytes());
     fs::write(dex_path, dex).context("写回 Stub DEX Native 别名失败")?;
     patch_dex_header(dex_path).context("修复 Stub DEX header 失败")
+}
+
+fn validate_alias_order(dex: &[u8], start: usize, alias: &[u8]) -> Result<()> {
+    anyhow::ensure!(dex.len() >= 112, "Stub DEX 缺少完整头部");
+    let count = u32::from_le_bytes(dex[56..60].try_into().unwrap()) as usize;
+    let offset = u32::from_le_bytes(dex[60..64].try_into().unwrap()) as usize;
+    let table = offset
+        .checked_add(count.checked_mul(4).context("Stub DEX 字符串表溢出")?)
+        .and_then(|end| dex.get(offset..end))
+        .context("Stub DEX 字符串表越界")?;
+    let string_start = |index: usize| -> Result<usize> {
+        let entry = table
+            .get(index * 4..index * 4 + 4)
+            .context("Stub DEX 字符串索引越界")?;
+        let offset = u32::from_le_bytes(entry.try_into().unwrap()) as usize;
+        let length_size = dex
+            .get(offset..)
+            .context("Stub DEX 字符串越界")?
+            .iter()
+            .take(5)
+            .position(|byte| byte & 0x80 == 0)
+            .context("Stub DEX 字符串长度无效")?
+            + 1;
+        Ok(offset + length_size)
+    };
+    let index = (0..count)
+        .find(|&index| string_start(index).ok() == Some(start))
+        .context("Native 占位符不是独立的 DEX 字符串")?;
+    anyhow::ensure!(
+        dex.get(start + alias.len()) == Some(&0),
+        "Native 占位符不是完整的 DEX 字符串"
+    );
+    for neighbor in [
+        index.checked_sub(1),
+        (index + 1 < count).then_some(index + 1),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let bytes = dex
+            .get(string_start(neighbor)?..)
+            .context("Stub DEX 字符串越界")?;
+        let value = bytes
+            .get(
+                ..bytes
+                    .iter()
+                    .position(|&byte| byte == 0)
+                    .context("Stub DEX 字符串未终止")?,
+            )
+            .context("Stub DEX 字符串越界")?;
+        // ponytail: 当前相邻字符串都是 ASCII；遇到新的 MUTF-8 边界时先拒绝，不能按 UTF-8 猜测 UTF-16 排序。
+        anyhow::ensure!(value.is_ascii(), "Native 别名遇到未支持的 DEX 排序边界");
+        anyhow::ensure!(
+            if neighbor < index {
+                value < alias
+            } else {
+                alias < value
+            },
+            "Native 别名超出 Stub DEX 字符串排序边界"
+        );
+    }
+    Ok(())
 }
 
 fn is_lower_ascii_name(value: &str) -> bool {
@@ -303,7 +366,7 @@ mod tests {
             assert_eq!(body.len(), 16, "非法候选: {body}");
             assert!(is_lower_ascii_name(body), "非法候选: {body}");
             assert!(
-                body.starts_with("module"),
+                body.starts_with("modular") && *body < "module",
                 "候选超出 DEX 字典序安全区间: {body}"
             );
             for forbidden in ["mocika", "shield", "protect", "packer", "shell", "bugly"] {
@@ -345,9 +408,9 @@ mod tests {
     #[test]
     fn selection_skips_case_insensitive_conflicts() {
         let mut existing = HashSet::new();
-        existing.insert("libmodulecorebridge.so".to_string());
+        existing.insert("libmodularcorecache.so".to_string());
         let alias = NativeAlias::select_from(0, &existing).unwrap();
-        assert_eq!(alias.body(), "moduledatabridge");
+        assert_eq!(alias.body(), "modulardatacache");
     }
 
     #[test]
@@ -363,16 +426,40 @@ mod tests {
     fn patch_replaces_exactly_one_placeholder() {
         let dir = tempfile::tempdir().unwrap();
         let dex_path = dir.path().join("classes.dex");
-        let mut dex = vec![0u8; 96];
+        let mut dex = vec![0u8; 124];
         dex[0..8].copy_from_slice(b"dex\n035\0");
-        dex[32..36].copy_from_slice(&(96u32).to_le_bytes());
-        dex[48..64].copy_from_slice(b"mocikanativeslot");
+        dex[56..60].copy_from_slice(&3u32.to_le_bytes());
+        dex[60..64].copy_from_slice(&112u32.to_le_bytes());
+        for (index, value) in ["mocika_runtime", "mocikanativeslot", "module"]
+            .iter()
+            .enumerate()
+        {
+            let offset = dex.len() as u32;
+            dex[112 + index * 4..116 + index * 4].copy_from_slice(&offset.to_le_bytes());
+            dex.push(value.len() as u8);
+            dex.extend_from_slice(value.as_bytes());
+            dex.push(0);
+        }
+        let size = dex.len() as u32;
+        dex[32..36].copy_from_slice(&size.to_le_bytes());
         fs::write(&dex_path, dex).unwrap();
 
+        let original = fs::read(&dex_path).unwrap();
+        let bad_alias = NativeAlias {
+            body: "modulecorebridge".into(),
+        };
+        assert!(patch_stub_dex(&dex_path, &protocol(), &bad_alias).is_err());
+        assert_eq!(
+            fs::read(&dex_path).unwrap(),
+            original,
+            "排序失败不能写坏原文件"
+        );
         let alias = NativeAlias::select_from(0, &HashSet::new()).unwrap();
         patch_stub_dex(&dex_path, &protocol(), &alias).unwrap();
         let patched = fs::read(&dex_path).unwrap();
-        assert_eq!(&patched[48..64], alias.body().as_bytes());
+        assert!(patched
+            .windows(16)
+            .any(|item| item == alias.body().as_bytes()));
         assert!(!patched.windows(16).any(|item| item == b"mocikanativeslot"));
     }
 

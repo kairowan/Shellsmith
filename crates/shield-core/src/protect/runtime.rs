@@ -539,10 +539,15 @@ mod tests {
             }"#;
             zip.start_file("metadata.json", options).unwrap();
             zip.write_all(metadata.as_bytes()).unwrap();
-            let mut dex = vec![0u8; 96];
+            let mut dex = vec![0u8; 116];
             dex[0..8].copy_from_slice(b"dex\n035\0");
-            dex[32..36].copy_from_slice(&(96u32).to_le_bytes());
-            dex[48..64].copy_from_slice(b"mocikanativeslot");
+            dex[56..60].copy_from_slice(&1u32.to_le_bytes());
+            dex[60..64].copy_from_slice(&112u32.to_le_bytes());
+            dex[112..116].copy_from_slice(&116u32.to_le_bytes());
+            dex.push(16);
+            dex.extend_from_slice(b"mocikanativeslot\0");
+            let size = dex.len() as u32;
+            dex[32..36].copy_from_slice(&size.to_le_bytes());
             zip.start_file("stub-classes.dex", options).unwrap();
             zip.write_all(&dex).unwrap();
             for abi in ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"] {
