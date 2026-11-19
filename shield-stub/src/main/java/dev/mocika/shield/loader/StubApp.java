@@ -81,7 +81,7 @@ public class StubApp extends Application {
             MocikaAssets.install(base);
             MocikaPlayDelivery.install(base);
             exemptHiddenApi();
-            RuntimeSecurity.checkEnvironment(base);
+            RuntimeSecurity.checkEnvironment(this);
             ClassLoader loader;
             if (android.os.Build.VERSION.SDK_INT >= 28
                     && base.getClassLoader() instanceof DeferredPayloadClassLoader) {

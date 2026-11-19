@@ -7,6 +7,22 @@ import android.util.Log;
 
 /** 负责在每次进程启动时执行环境安全检查，不参与 DEX 缓存与类加载。 */
 final class RuntimeSecurity {
+    interface RiskObserver { void detected(String code); }
+    private static volatile RiskObserver riskObserver;
+
+    static void subscribeRisk(RiskObserver observer) { riskObserver = observer; }
+
+    static void detected(String code) {
+        RiskObserver observer = riskObserver;
+        if (observer != null) try { observer.detected(code); } catch (RuntimeException ignored) { }
+    }
+
+    static void observedSignals(int signals) {
+        if ((signals & SIGNAL_ANTI_DEBUG) != 0) detected("debugger");
+        if ((signals & SIGNAL_ROOT) != 0) detected("root");
+        if ((signals & SIGNAL_SUSPECT) != 0) detected("runtimeSuspect");
+        if ((signals & 8) != 0) detected("runtimeManipulation");
+    }
 
     private static final String TAG = "RuntimeSecurity";
 
@@ -25,10 +41,12 @@ final class RuntimeSecurity {
     static void checkEnvironment(Context context) {
         try {
             NativeIntegrity.verify(context);
+            ByosRiskEvents.initialize(context);
             MocikaUi.initialize(context);
             boolean strict = isStrictPolicy(context);
             Ld.y(strict ? 2 : 1);
             int signals = Ld.r();
+            observedSignals(signals);
             reportSuspect(signals);
             enforceSafe(shouldReject(signals, strict));
         } catch (Exception error) {
@@ -41,9 +59,11 @@ final class RuntimeSecurity {
     static void block() { Ld.y(0); }
 
     static String observeResources() {
-        if (android.os.Debug.isDebuggerConnected()) return "debugger";
+        if (android.os.Debug.isDebuggerConnected()) { detected("debugger"); return "debugger"; }
         try {
-            return Ld.r() == 0 ? "clear" : "runtime_signal";
+            int signals = Ld.r();
+            observedSignals(signals);
+            return signals == 0 ? "clear" : "runtime_signal";
         } catch (RuntimeException | LinkageError unavailable) {
             return "unavailable";
         }

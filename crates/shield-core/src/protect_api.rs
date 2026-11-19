@@ -557,6 +557,12 @@ fn protect_apk_inner(
     if let Some(auth) = opts.byos_auth {
         crate::protect::manifest::configure_byos(&apk_dir, auth).map_err(ShieldError::from)?;
     }
+    crate::protect::manifest::configure_key_source(
+        &apk_dir,
+        opts.byos_auth,
+        runtime_selection.risk_events_v1,
+    )
+    .map_err(ShieldError::from)?;
     let (ikm, project_identity, project_build_salt) = crate::project_protection::build_material(
         &crate::project_protection::default_directory().map_err(ShieldError::from)?,
         &package,
@@ -976,6 +982,32 @@ fn protect_apk_inner(
                 serde_json::json!({"format": 1, "build_id": prepared.build_id(), "index_sha256": prepared.index_digest(),
                 "resources": prepared.evidence().collect::<Vec<_>>() }),
             );
+    }
+    if runtime_selection.risk_events_v1 {
+        let mut scopes =
+            vec![serde_json::json!({"token_id": byos_token, "build_id": "", "resource_group": ""})];
+        let index_path = apk_dir.join("assets/shellsmith-resources/index.json");
+        if index_path.is_file() {
+            let index: serde_json::Value = serde_json::from_slice(
+                &fs::read(index_path)
+                    .map_err(anyhow::Error::from)
+                    .map_err(ShieldError::from)?,
+            )
+            .map_err(anyhow::Error::from)
+            .map_err(ShieldError::from)?;
+            if let Some(groups) = index["groups"].as_object() {
+                for (group, token) in groups {
+                    scopes.push(serde_json::json!({"token_id": token, "build_id": index["build_id"], "resource_group": group}));
+                }
+            }
+        }
+        fs::create_dir_all(apk_dir.join("assets"))
+            .map_err(anyhow::Error::from)
+            .map_err(ShieldError::from)?;
+        fs::write(apk_dir.join("assets/shellsmith-risk-v1.json"), serde_json::to_vec(&serde_json::json!({
+            "key_source": "byos", "risk_protocol": 1, "server_url": opts.byos_endpoint, "scopes": scopes
+        })).map_err(anyhow::Error::from).map_err(ShieldError::from)?)
+            .map_err(anyhow::Error::from).map_err(ShieldError::from)?;
     }
     emit_progress(&on_progress, &cancel, ProgressStep::Repack, "重打包APK")?;
     print_step("重打包APK");

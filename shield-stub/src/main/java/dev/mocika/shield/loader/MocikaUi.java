@@ -118,7 +118,11 @@ public final class MocikaUi implements Application.ActivityLifecycleCallbacks {
         if (!force && now - lastCheck < CHECK_INTERVAL) return;
         lastCheck = now;
         boolean reject = checkAdb();
-        if (recheck) reject |= RuntimeSecurity.shouldReject(Ld.r(), strict);
+        if (recheck) {
+            int signals = Ld.r();
+            RuntimeSecurity.observedSignals(signals);
+            reject |= RuntimeSecurity.shouldReject(signals, strict);
+        }
         if (reject) {
             RuntimeSecurity.block();
             Log.w("RuntimeSecurity", "U02");

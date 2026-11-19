@@ -482,6 +482,7 @@ cat > "$OUTPUT_DIR/metadata.json" << EOF
   "byos_remote_key": $BYOS_CAPABILITY,
   "byos_auth": "$BYOS_AUTH",
   "byos_fetch_protocol": 2,
+  "risk_events_v1": $PROTECTED_RESOURCES_V1,
   "protected_resources_v1": $PROTECTED_RESOURCES_V1,
   "target_android_api": 35,
   "native_library": "libmocikashield.so",

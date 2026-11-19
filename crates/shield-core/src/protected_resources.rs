@@ -347,6 +347,8 @@ impl PreparedResources {
             })
             .collect();
         metadata["version"] = 1.into();
+        metadata["key_source"] = "byos".into();
+        metadata["risk_protocol"] = 1.into();
         metadata["build_id"] = self.build_id().into();
         metadata["resources"] = serde_json::to_value(resources)?;
         let index = serde_json::to_vec(&metadata)?;

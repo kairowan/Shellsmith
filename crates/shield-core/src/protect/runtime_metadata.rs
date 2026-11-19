@@ -17,6 +17,7 @@ pub(crate) struct RuntimeMetadata {
     pub(crate) memory_dex: bool,
     pub(crate) byos_remote_key: bool,
     pub(crate) byos_auth: Option<crate::ByosAuth>,
+    pub(crate) risk_events_v1: bool,
     pub(crate) protected_resources_v1: bool,
     pub(crate) xop_pvm2: bool,
     /// 壳运行时静态链入的 Xop 解释器支持的最高 PVM2 镜像格式版本。
@@ -55,6 +56,11 @@ impl RuntimeMetadata {
         } else {
             None
         };
+        let risk_events_v1 = parse_bool(json, "risk_events_v1").unwrap_or(false);
+        anyhow::ensure!(
+            !risk_events_v1 || byos_auth == Some(crate::ByosAuth::DeviceApproval),
+            "风险事件协议需要设备批准运行时"
+        );
         if let Some(auth) = byos_auth {
             anyhow::ensure!(
                 parse_u32(json, "min_android_api") == Some(auth.min_android_api()),
@@ -135,6 +141,7 @@ impl RuntimeMetadata {
             memory_dex,
             byos_remote_key,
             byos_auth,
+            risk_events_v1,
             protected_resources_v1: parse_bool(json, "protected_resources_v1").unwrap_or(false),
             xop_pvm2,
             xop_pvm2_format: parse_u32(json, "xop_pvm2_format"),
@@ -219,6 +226,15 @@ mod tests {
             let mode = auth.as_str();
             let min_api = auth.min_android_api();
             let json = METADATA.replace("\"memory_dex\":false", &format!("\"memory_dex\":false,\"byos_remote_key\":true,\"byos_auth\":\"{mode}\",\"byos_fetch_protocol\":2,\"min_android_api\":{min_api}"));
+            assert!(!RuntimeMetadata::parse(&json).unwrap().risk_events_v1);
+            let risk = json.replace(
+                "\"memory_dex\":false",
+                "\"memory_dex\":false,\"risk_events_v1\":true",
+            );
+            assert_eq!(
+                RuntimeMetadata::parse(&risk).is_ok(),
+                auth == crate::ByosAuth::DeviceApproval
+            );
             assert_eq!(
                 RuntimeMetadata::parse(&json)
                     .unwrap()

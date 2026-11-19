@@ -1,0 +1,21 @@
+{
+  "public_base_url": "https://keys.example.com/shellsmith",
+  "event": {
+    "protocol": 1,
+    "platform": "android",
+    "token_id": "b_test_vector",
+    "build_id": "",
+    "resource_group": "",
+    "installation_id": "0000000000000000000000000000000000000000000000000000000000000000",
+    "event_id": "11111111111111111111111111111111",
+    "detected_at": 1800000000,
+    "detection_code": "debugger",
+    "detector_version": "1.0"
+  },
+  "timestamp": 1800000001,
+  "request_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "challenge": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "event_digest": "01a87a7091039afd8f4fecbab483af853f83a2c63be34fdbb14390db20235cb7",
+  "challenge_digest": "8c0e4eff170d565b0417aa77f45d37b78ce8883d0289eac2efa501f92ec04faa",
+  "report_digest": "c498979d9696039e90533183ec8dd3fe0c63807cd1df63017b44fff5f7b7e95b"
+}

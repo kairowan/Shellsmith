@@ -81,6 +81,7 @@ android {
         }
         if (byosRuntime) getByName("test").java.srcDir("src/byosTest/java")
         if (byosRuntime && !byosPlay) getByName("androidTest") {
+            assets.srcDir("../tests/fixtures/risk-events")
             java.srcDir("src/byosDeviceTest/java")
             manifest.srcFile("src/byosDeviceTest/AndroidManifest.xml")
         }

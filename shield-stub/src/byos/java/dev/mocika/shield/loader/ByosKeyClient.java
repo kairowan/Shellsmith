@@ -117,6 +117,7 @@ final class ByosKeyClient {
         KeyPair responseKey = generator.generateKeyPair();
         String publicKey = Base64.getEncoder().encodeToString(responseKey.getPublic().getEncoded());
         KeyPair device = ByosProof.deviceKey(ctx, endpoint, certificate);
+        ByosRiskEvents.resume(ctx, endpoint, token, build, group, device);
         String devicePublicKey = device == null ? "" : Base64.getEncoder().encodeToString(device.getPublic().getEncoded());
         byte[] random = new byte[32]; new SecureRandom().nextBytes(random);
         String requestId = Base64.getUrlEncoder().withoutPadding().encodeToString(random);
@@ -171,13 +172,15 @@ final class ByosKeyClient {
             if (response.has("ikm") || response.getInt("fetch_protocol") != 2
                     || !ByosProof.MODE.equals(response.getString("auth_mode"))) throw new SecurityException("K04");
             if (build != null && response.getInt("ttl_seconds") != 60) throw new SecurityException("K04");
-            return unwrap(response.getString("wrapped_ikm"), responseKey.getPrivate(), digest);
+            byte[] ikm = unwrap(response.getString("wrapped_ikm"), responseKey.getPrivate(), digest);
+            ByosRiskEvents.authorized(ctx, endpoint, token, build, group, device);
+            return ikm;
         } catch (org.json.JSONException | IllegalArgumentException error) {
             throw new SecurityException("K04");
         }
     }
 
-    private static JSONObject post(String endpoint, String route, JSONObject body, String traceId) throws Exception {
+    static JSONObject post(String endpoint, String route, JSONObject body, String traceId) throws Exception {
         HttpsURLConnection connection = (HttpsURLConnection) new URI(endpoint + route).toURL().openConnection();
         try {
             connection.setRequestMethod("POST");
@@ -187,6 +190,7 @@ final class ByosKeyClient {
             connection.setRequestProperty("Content-Type", "application/json");
             if (traceId != null) connection.setRequestProperty("X-Shellsmith-Request-ID", traceId);
             byte[] json = body.toString().getBytes(StandardCharsets.UTF_8);
+            if (json.length > ("/v1/risk-events/report".equals(route) ? 32768 : 4096)) throw new SecurityException("K04");
             connection.setFixedLengthStreamingMode(json.length);
             try (OutputStream output = connection.getOutputStream()) { output.write(json); }
             int status = connection.getResponseCode();

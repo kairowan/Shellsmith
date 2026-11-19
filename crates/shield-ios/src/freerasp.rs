@@ -79,7 +79,7 @@ pub(crate) fn package_manifest(
 
 pub(crate) fn runtime_source(rasp: bool) -> String {
     if !rasp {
-        return "import Foundation\n\npublic enum ShellsmithRuntime {\n    static func resourceSignal() -> String { \"unavailable\" }\n}\n".to_string();
+        return "import Foundation\n\npublic enum ShellsmithRuntime {\n    static func resourceSignal() -> String { \"unavailable\" }\n    static func riskSignals() -> [String] { [] }\n}\n".to_string();
     }
     r#"import Dispatch
 import Foundation
@@ -188,6 +188,12 @@ public enum ShellsmithRuntime {
         return events.isEmpty ? "clear" : "runtime_signal"
     }
 
+    static func riskSignals() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events.keys.sorted()
+    }
+
     static func receive(_ threat: SecurityThreat) {
         let name = stableName(threat)
         lock.lock()
@@ -288,7 +294,7 @@ pub(crate) fn protection_source(config: &ShellsmithIosConfig) -> String {
         .map(|value| format!("\"{}\"", swift_escape(value)))
         .unwrap_or_else(|| "nil".to_string());
     let block_critical = rasp.map(|item| item.block_on_critical).unwrap_or(false);
-    let start_body = if config.protection.profile.uses_rasp() {
+    let mut start_body = if config.protection.profile.uses_rasp() {
         format!(
             "ShellsmithRuntime.start(\n            bundleIds: [{bundle_ids}],\n            teamId: \"{team}\",\n            watcherMail: {watcher},\n            isProd: {is_prod},\n            critical: [{critical}],\n            blockOnCritical: {block_critical},\n            onThreat: onThreat\n        )",
             team = swift_escape(&config.project.team_id),
@@ -297,6 +303,13 @@ pub(crate) fn protection_source(config: &ShellsmithIosConfig) -> String {
     } else {
         "_ = onThreat".to_string()
     };
+    if config.protected_resources.is_some() {
+        start_body.push_str(
+            "\nif #available(iOS 14.0, *) { ShellsmithProtectedResources.startRiskEvents() }",
+        );
+    } else {
+        start_body.push_str("\nif let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first { try? FileManager.default.removeItem(at: root.appendingPathComponent(\"shellsmith-risk-v1\", isDirectory: true)) }");
+    }
     format!(
         "import Foundation\n\n\
          public enum ShellsmithProtection {{\n\

@@ -81,6 +81,10 @@ pub(crate) fn integrate_runtime(
     }
     if resources {
         fs::write(
+            sources.join("RiskEvent.swift"),
+            include_str!("RiskEvent.swift"),
+        )?;
+        fs::write(
             sources.join("ProtectedResourceClock.swift"),
             include_str!("ProtectedResourceClock.swift"),
         )?;

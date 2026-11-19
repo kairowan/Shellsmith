@@ -218,6 +218,29 @@ pub(crate) fn configure_byos(apk_dir: &Path, auth: crate::ByosAuth) -> Result<()
     Ok(())
 }
 
+pub(crate) fn configure_key_source(
+    apk_dir: &Path,
+    auth: Option<crate::ByosAuth>,
+    risk_events: bool,
+) -> Result<()> {
+    let path = apk_dir.join("AndroidManifest.xml");
+    let mut content = fs::read_to_string(&path)?;
+    anyhow::ensure!(
+        !content.contains("dev.mocika.shield.KEY_SOURCE")
+            && !content.contains("dev.mocika.shield.RISK_PROTOCOL")
+            && !apk_dir.join("assets/shellsmith-risk-v1.json").exists(),
+        "原 APK 已占用 Shellsmith 密钥来源或风险协议配置"
+    );
+    let close = content
+        .rfind("</application>")
+        .context("Manifest 缺少 application")?;
+    let source = if auth.is_some() { "byos" } else { "local" };
+    let protocol = u8::from(risk_events && auth == Some(crate::ByosAuth::DeviceApproval));
+    content.insert_str(close, &format!("<meta-data android:name=\"dev.mocika.shield.KEY_SOURCE\" android:value=\"{source}\" />\n<meta-data android:name=\"dev.mocika.shield.RISK_PROTOCOL\" android:value=\"{protocol}\" />\n"));
+    fs::write(path, content)?;
+    Ok(())
+}
+
 pub(crate) fn add_memory_payload_metrics(apk_dir: &Path, identity: &CacheIdentity) -> Result<()> {
     let manifest_path = apk_dir.join("AndroidManifest.xml");
     let content = fs::read_to_string(&manifest_path).context("读取 AndroidManifest.xml 失败")?;
@@ -352,6 +375,25 @@ fn remove_xml_attr(tag: &str, attr: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 密钥来源和风险协议按实际模式与运行时能力写入() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AndroidManifest.xml");
+        for (auth, supported, source, protocol) in [
+            (None, false, "local", 0),
+            (Some(crate::ByosAuth::DeviceApproval), false, "byos", 0),
+            (Some(crate::ByosAuth::DeviceApproval), true, "byos", 1),
+            (Some(crate::ByosAuth::PlayIntegrity), false, "byos", 0),
+        ] {
+            fs::write(&path, "<manifest><application></application></manifest>").unwrap();
+            configure_key_source(dir.path(), auth, supported).unwrap();
+            let result = fs::read_to_string(&path).unwrap();
+            assert!(result.contains(&format!("KEY_SOURCE\" android:value=\"{source}\"")));
+            assert!(result.contains(&format!("RISK_PROTOCOL\" android:value=\"{protocol}\"")));
+            assert!(configure_key_source(dir.path(), auth, supported).is_err());
+        }
+    }
 
     #[test]
     fn byos_requires_supported_sdk_and_adds_permission_once() {

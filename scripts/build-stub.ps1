@@ -453,6 +453,7 @@ $buildDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   "byos_remote_key": $byosJson,
   "byos_auth": "$byosAuth",
   "byos_fetch_protocol": 2,
+  "risk_events_v1": $(if ($byosAuth -eq "device_approval") { "true" } else { "false" }),
   "target_android_api": 35,
   "native_library": "libmocikashield.so",
   "native_name_placeholder": "mocikanativeslot",
