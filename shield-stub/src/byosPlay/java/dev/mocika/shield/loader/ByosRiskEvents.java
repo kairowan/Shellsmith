@@ -12,5 +12,5 @@ final class ByosRiskEvents {
                 file.getName().substring(0, file.getName().length() - 4), Context.MODE_PRIVATE).edit().clear().apply();
     }
     static void resume(Context c, String e, String t, String b, String g, KeyPair k) { }
-    static void authorized(Context c, String e, String t, String b, String g, KeyPair k) { }
+    static void authorized(Context c, String e, String t, String b, String g, KeyPair k, org.json.JSONObject response) { }
 }

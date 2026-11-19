@@ -16,6 +16,7 @@ with tempfile.TemporaryDirectory(prefix="shellsmith-risk-check-") as temporary:
     authorization += '''\nextension ResourceAuthorization {
     func forceRiskRetry() async {
         riskRetry?.cancel(); riskRetry = nil
+        nextRiskChallenge = 0
         for id in Array(riskScopes.keys) { riskScopes[id]?.next = 0 }
         await flushRisk()
     }

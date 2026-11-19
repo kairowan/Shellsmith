@@ -43,15 +43,23 @@ pub fn check() -> bool {
     check_tracer_pid() || check_frida_maps() || check_frida_threads(FRIDA_THREAD_SIGS)
 }
 
-/// 低置信检测：命中表示可疑，但不作为拒绝启动的依据。
-///
-/// 端口监听、临时目录残留与 Hook 映射串在部分定制 ROM 与加固测试机上
-/// 可能出现假阳性，因此只上报给调用方记录，由策略层决定是否处置。
-pub fn check_suspect() -> bool {
-    check_frida_ports()
-        || check_frida_files()
-        || check_hook_frameworks()
-        || check_frida_threads(&["gmain", "gdbus"])
+/// 高位保留具体命中来源；低三位由调用方维持既有阻断协议。
+pub fn evidence_signals() -> i32 {
+    let mut result = 0;
+    for (matched, bit) in [
+        (check_tracer_pid(), 8),
+        (check_frida_maps(), 9),
+        (check_frida_threads(FRIDA_THREAD_SIGS), 10),
+        (check_frida_ports(), 11),
+        (check_frida_files(), 12),
+        (check_hook_frameworks(), 13),
+        (check_frida_threads(&["gmain", "gdbus"]), 14),
+    ] {
+        if matched {
+            result |= 1 << bit;
+        }
+    }
+    result
 }
 
 /// 检测 ptrace 类调试器（Android Studio / IDA / lldb 等）。

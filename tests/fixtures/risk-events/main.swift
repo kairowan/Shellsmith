@@ -9,14 +9,32 @@ struct Vector: Decodable {
     let event_digest: String; let challenge_digest: String; let report_digest: String
 }
 let vector = try JSONDecoder().decode(Vector.self, from: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))
-let digest = vector.event.digest(endpoint: vector.public_base_url)
+let digest = try vector.event.digest(endpoint: vector.public_base_url)
 precondition(RiskEvent.hex(digest) == vector.event_digest)
 precondition(RiskEvent.hex(RiskEvent.challengeDigest(digest, timestamp: vector.timestamp, requestID: vector.request_id)) == vector.challenge_digest)
 precondition(RiskEvent.hex(RiskEvent.reportDigest(digest, challenge: vector.challenge)) == vector.report_digest)
 
+let v2URL = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent().appendingPathComponent("risk-event-vector-v2.json")
+let v2 = try JSONDecoder().decode(Vector.self, from: Data(contentsOf: v2URL))
+let v2Digest = try v2.event.digest(endpoint: v2.public_base_url)
+precondition(RiskEvent.hex(v2Digest) == v2.event_digest)
+precondition(RiskEvent.hex(RiskEvent.challengeDigest(v2Digest, timestamp: v2.timestamp, requestID: v2.request_id)) == v2.challenge_digest)
+precondition(RiskEvent.hex(RiskEvent.reportDigest(v2Digest, challenge: v2.challenge)) == v2.report_digest)
+var tampered = v2.event
+tampered.evidence?["observed"] = "false"
+let changed = try tampered.digest(endpoint: v2.public_base_url)
+precondition(changed != v2Digest)
+for invalid in [["schema": "1", "bad-key": "value"], ["schema": "1", "observed": "a\nb"],
+                ["schema": "1", "observed": String(repeating: "中", count: 86)], ["schema": "2"]] {
+    do { _ = try RiskEvent.evidenceDigest(invalid); preconditionFailure("非法证据被放行") } catch {}
+}
+
 // 软件证明仅检验客户端调度、封装校验和确认流程，不代表 Apple 或 HTTPS 验收。
 enum ShellsmithRuntime {
-    static func resourceSignal() -> String { "clear" }
+    static var revoked = false
+    static func resourceSignal() -> String { revoked ? "authorization_revoked" : "clear" }
+    static func revokeProtectedAccess() { revoked = true }
+    static func riskEvidence(for code: String) -> [String: String] { ["signal": "ios.freerasp." + code, "source": "freeRASP.SecurityThreatHandler", "observed": "callback_received", "confidence": "unknown", "observation_type": "sdk_callback"] }
     static func riskSignals() -> [String] { [] }
 }
 extension Bundle { static var module: Bundle { .main } }
@@ -40,6 +58,9 @@ enum RiskHarness {
     static var reports = 0
     static var stored: RiskReport?
     static var lost = true
+    static var capabilityVersion: Int?
+    static var currentVersion = 6
+    static var currentStatus = "revoked"
     static func sessionConfiguration() -> URLSessionConfiguration {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [HarnessProtocol.self]; return config
     }
@@ -64,6 +85,8 @@ enum RiskHarness {
                 [kSecAttrKeyType: kSecAttrKeyTypeRSA, kSecAttrKeyClass: kSecAttrKeyClassPublic] as CFDictionary, nil)!
             let wrapped = SecKeyCreateEncryptedData(key, .rsaEncryptionOAEPSHA256, plain as CFData, nil)! as Data
             result = ["status": "granted", "ttl_seconds": 60, "wrapped_ikm": wrapped.base64EncodedString()]
+            if let capabilityVersion { result["risk_events_v2"] = ["authorization_version": capabilityVersion] }
+            if mode == "capability" { result["risk_events_v2"] = "invalid" }
         } else if route == "/prefix/v1/risk-events/challenge" {
             precondition(body["signature"] == nil)
             result = ["challenge": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8", "ttl_seconds": 60]
@@ -72,8 +95,9 @@ enum RiskHarness {
             let report = try JSONDecoder().decode(RiskReport.self, from: bytes)
             reports += 1
             if let stored {
-                precondition(stored.proof == report.proof && stored.challenge == report.challenge
-                    && stored.event.digest(endpoint: "https://test.invalid/prefix") == report.event.digest(endpoint: "https://test.invalid/prefix"))
+                let original = try stored.event.digest(endpoint: "https://test.invalid/prefix")
+                let retried = try report.event.digest(endpoint: "https://test.invalid/prefix")
+                precondition(stored.proof == report.proof && stored.challenge == report.challenge && original == retried)
             }
             else {
                 stored = report
@@ -81,6 +105,10 @@ enum RiskHarness {
             }
             if lost { lost = false; return (503, Data()) }
             result = ["status": "accepted", "event_id": report.event.event_id, "action": "revoke", "authorization_version": 3]
+            if report.event.protocol == 2 {
+                result["current_authorization_version"] = currentVersion
+                result["current_status"] = currentStatus
+            }
         }
         return (200, try JSONSerialization.data(withJSONObject: result))
     }
@@ -126,7 +154,7 @@ Task {
         await actor.activateRisk(index: legacy, token: token, group: "policy", keyID: ShellsmithAppAttest.identity, granted: true)
         let legacyObserver = await actor.riskObserver
         precondition(legacyObserver == nil && !FileManager.default.fileExists(atPath: directory.path))
-        for mode in ["denied", "digest"] {
+        for mode in ["denied", "digest", "capability"] {
             RiskHarness.mode = mode
             do { _ = try await actor.obtain(index: index, token: token, group: "policy"); preconditionFailure("无效取钥被放行") } catch {}
             let observer = await actor.riskObserver
@@ -155,7 +183,9 @@ Task {
         _ = try await next.value
         // 等待共用尾任务，随后强制到期重发原报告。
         await actor.previous?.value
+        await actor.activateRisk(index: index, token: token, group: "policy", keyID: ShellsmithAppAttest.identity, granted: true, protocolVersion: 2, authorizationVersion: 7)
         await actor.forceRiskRetry()
+        precondition(RiskHarness.stored?.event.protocol == 1)
         precondition(RiskHarness.reports == 2)
         precondition(RiskHarness.counters == RiskHarness.counters.sorted())
         precondition(Set(RiskHarness.counters).count == RiskHarness.counters.count)
@@ -170,7 +200,33 @@ Task {
         await restored.activateRisk(index: expanded, token: token, group: "policy", keyID: freshKey, granted: false)
         let freshObserver = await restored.riskObserver
         precondition(freshObserver == nil)
-        print("Swift 固定向量、取钥拒绝、OAEP 摘要校验、成功启用、原报告重试与共享计数串行通过")
+        // 服务端未发布能力时仍为 v1；发布后才产生有签名绑定证据的 v2。
+        precondition(!ShellsmithRuntime.revoked)
+        RiskHarness.capabilityVersion = 7
+        RiskHarness.stored = nil
+        RiskHarness.lost = true
+        let upgraded = ResourceAuthorization()
+        _ = try await upgraded.obtain(index: index, token: token, group: "policy")
+        let upgradedScopes = await upgraded.riskScopes
+        precondition(upgradedScopes.values.first?.protocolVersion == 2)
+        await upgraded.detectedRisk("debugger", at: Int64(Date().timeIntervalSince1970))
+        await upgraded.forceRiskRetry()
+        precondition(RiskHarness.stored?.event.protocol == 2)
+        precondition(RiskHarness.stored?.event.evidence?["observed"] == "callback_received")
+        await upgraded.forceRiskRetry()
+        // 历史撤销收据版本 6 低于新授权版本 7，不能误封恢复后的进程。
+        precondition(!ShellsmithRuntime.revoked)
+        RiskHarness.stored = nil
+        RiskHarness.currentVersion = 9
+        await upgraded.detectedRisk("runtimeManipulation", at: Int64(Date().timeIntervalSince1970))
+        await upgraded.forceRiskRetry()
+        precondition(ShellsmithRuntime.revoked)
+        let remaining = await upgraded.cached
+        precondition(remaining.isEmpty)
+        do { _ = try await upgraded.obtain(index: index, token: token, group: "policy"); preconditionFailure("撤销后缓存仍可用") } catch {}
+        RiskHarness.currentStatus = "approved"
+        do { _ = try await upgraded.obtain(index: index, token: token, group: "policy"); preconditionFailure("旧进程被自动解锁") } catch {}
+        print("Swift v1/v2 向量、证据防篡改、协商、旧收据防误封、撤销缓存、取钥拒绝、OAEP 摘要校验、成功启用、原报告重试与共享计数串行通过")
     } catch { fatalError("回归失败：\(error)") }
 }
 while semaphore.wait(timeout: .now()) == .timedOut { RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01)) }

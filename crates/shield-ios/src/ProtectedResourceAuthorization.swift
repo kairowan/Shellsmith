@@ -96,6 +96,7 @@ public enum ShellsmithProtectedResources {
                 resource: id, version: row.version, key: lease.key, range: range,
                 authorized: {
                     ProtectedResourceClock.now < lease.until && !Task.isCancelled
+                        && ShellsmithRuntime.resourceSignal() != "authorization_revoked"
                         && (!block || allowsRead(ShellsmithRuntime.resourceSignal()))
                 }) { content.append($0) }
             report("read", "verified", lease.traceId)
@@ -184,7 +185,8 @@ private actor ResourceAuthorization {
             .appendingPathComponent("shellsmith-risk-v1", isDirectory: true)
     }
 
-    private func activateRisk(index: ResourceIndex, token: String, group: String, keyID: String, granted: Bool) {
+    private func activateRisk(index: ResourceIndex, token: String, group: String, keyID: String, granted: Bool,
+                              protocolVersion: Int = 1, authorizationVersion: Int? = nil) {
         guard index.key_source == "byos", index.risk_protocol == 1,
               let identity = Data(base64Encoded: keyID), identity.count == 32 else { return }
         var scope = RiskScope(endpoint: index.server_url, token: token, build: index.build_id,
@@ -199,13 +201,26 @@ private actor ResourceAuthorization {
         let obsolete = Set(riskScopes.values.filter { $0.installation != scope.installation }.map(\.keyID))
         for oldKey in obsolete { invalidateRisk(oldKey) }
         let binding = scope.binding
-        guard riskScopes[binding] == nil, riskScopes.count < 64 else { return }
+        if var existing = riskScopes[binding] {
+            if granted {
+                existing.protocolVersion = protocolVersion
+                existing.authorizationVersion = max(existing.authorizationVersion ?? -1, authorizationVersion ?? -1)
+                riskScopes[binding] = existing
+                _ = persistRisk(binding)
+            }
+            return
+        }
+        guard riskScopes.count < 64 else { return }
         let path = Self.riskDirectory.appendingPathComponent(binding + ".json")
         if let bytes = try? Data(contentsOf: path), bytes.count <= 128 * 1024,
            let saved = try? JSONDecoder().decode(RiskScope.self, from: bytes),
            saved.binding == binding, saved.keyID == keyID, saved.queue.count <= 16 {
             scope = saved
         } else if !granted { return }
+        if granted {
+            scope.protocolVersion = protocolVersion
+            scope.authorizationVersion = max(scope.authorizationVersion ?? -1, authorizationVersion ?? -1)
+        }
         riskScopes[binding] = scope
         guard persistRisk(binding) else { riskScopes[binding] = nil; return }
         if riskObserver == nil {
@@ -252,12 +267,15 @@ private actor ResourceAuthorization {
         guard code.range(of: #"\A[A-Za-z][A-Za-z0-9_]{0,63}\z"#, options: .regularExpression) != nil else { return }
         for binding in Array(riskScopes.keys) {
             guard var scope = riskScopes[binding] else { continue }
-            if scope.queue.contains(where: { $0.event.detection_code == code }) { continue }
+            let protocolVersion = scope.protocolVersion ?? 1
+            let evidence = protocolVersion == 2 ? RiskEvent.iosEvidence(code) : nil
+            if scope.queue.contains(where: { $0.event.detection_code == code
+                && (protocolVersion == 1 || $0.event.evidence?["signal"] == evidence?["signal"]) }) { continue }
             guard scope.queue.count < 16 else { NSLog("R_QUEUE_FULL"); continue }
-            let event = RiskEvent(protocol: 1, platform: "ios", token_id: scope.token, build_id: scope.build,
+            let event = RiskEvent(protocol: protocolVersion, platform: "ios", token_id: scope.token, build_id: scope.build,
                 resource_group: scope.group, installation_id: scope.installation,
                 event_id: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased(),
-                detected_at: timestamp, detection_code: code, detector_version: "1")
+                detected_at: timestamp, detection_code: code, detector_version: protocolVersion == 2 ? "2" : "1", evidence: evidence)
             scope.queue.append(RiskItem(event: event))
             riskScopes[binding] = scope
             guard persistRisk(binding) else { scheduleRisk(after: 60); continue }
@@ -312,7 +330,7 @@ private actor ResourceAuthorization {
                           challenge.challenge.range(of: #"\A[A-Za-z0-9_-]{43}\z"#, options: .regularExpression) != nil else {
                         throw ShellsmithResourceError.invalidResponse
                     }
-                    let digest = RiskEvent.reportDigest(item.event.digest(endpoint: scope.endpoint), challenge: challenge.challenge)
+                    let digest = RiskEvent.reportDigest(try item.event.digest(endpoint: scope.endpoint), challenge: challenge.challenge)
                     let proof = try await ShellsmithAppAttest.generateAssertion(scope.keyID, clientDataHash: digest)
                     report = RiskReport(event: item.event, challenge: challenge.challenge, proof: proof.base64EncodedString())
                     guard let position = riskScopes[binding]?.queue.firstIndex(where: { $0.event.event_id == id }) else { continue }
@@ -320,15 +338,36 @@ private actor ResourceAuthorization {
                     riskScopes[binding]?.queue[position].challengeAt = now
                     guard persistRisk(binding) else { throw ShellsmithResourceError.unavailable }
                 }
-                struct Receipt: Decodable { let status: String; let event_id: String; let action: String; let authorization_version: Int }
+                struct Receipt: Decodable {
+                    let status: String; let event_id: String; let action: String; let authorization_version: Int
+                    let current_authorization_version: Int?; let current_status: String?
+                }
                 let receipt: Receipt = try await Self.riskPost(scope.endpoint, "report", report!)
                 guard receipt.status == "accepted", receipt.event_id == id,
                       ["record", "revoke"].contains(receipt.action), receipt.authorization_version >= 0 else {
                     throw ShellsmithResourceError.invalidResponse
                 }
+                var revoke = false
+                if item.event.protocol == 2 {
+                    guard let currentVersion = receipt.current_authorization_version,
+                          currentVersion >= receipt.authorization_version,
+                          let currentStatus = receipt.current_status, ["approved", "revoked"].contains(currentStatus) else {
+                        throw ShellsmithResourceError.invalidResponse
+                    }
+                    if let active = riskScopes[binding], active.keyID == scope.keyID,
+                       currentVersion >= (active.authorizationVersion ?? -1) {
+                        riskScopes[binding]?.authorizationVersion = currentVersion
+                        revoke = currentStatus == "revoked"
+                    }
+                }
                 riskScopes[binding]?.queue.removeAll { $0.event.event_id == id }
                 riskScopes[binding]?.failures = 0
                 riskScopes[binding]?.next = now + 10
+                if revoke {
+                    cached.removeAll()
+                    ShellsmithRuntime.revokeProtectedAccess()
+                    NSLog("R_REVOKED")
+                }
             } catch {
                 if let invalid = error as? DCError, invalid.code == .invalidKey {
                     invalidateRisk(scope.keyID); NSLog("R_KEY_RESET"); continue
@@ -383,9 +422,14 @@ private actor ResourceAuthorization {
 
     func obtain(index: ResourceIndex, token: String, group: String) async throws -> (ResourceLease, String) {
         try Task.checkCancellation()
+        guard ShellsmithRuntime.resourceSignal() != "authorization_revoked" else { throw ShellsmithResourceError.denied }
         if let lease = cached[token], lease.until > ProtectedResourceClock.now { return (lease, "cached") }
         cached[token] = nil
-        if let existing = pending[token] { return (try await existing.value, "coalesced") }
+        if let existing = pending[token] {
+            let lease = try await existing.value
+            guard ShellsmithRuntime.resourceSignal() != "authorization_revoked" else { throw ShellsmithResourceError.denied }
+            return (lease, "coalesced")
+        }
         // 同一设备的所有断言按生成顺序提交，防止跨组并发把旧计数送到服务端。
         let preceding = previous
         let traceId = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -398,6 +442,7 @@ private actor ResourceAuthorization {
         pending[token] = task
         defer { pending[token] = nil }
         let lease = try await task.value
+        guard ShellsmithRuntime.resourceSignal() != "authorization_revoked" else { throw ShellsmithResourceError.denied }
         cached[token] = lease
         let delay = max(0, lease.until - ProtectedResourceClock.now)
         Task {
@@ -461,12 +506,27 @@ private actor ResourceAuthorization {
         }
         let expires = started + Double(ttl)
         guard expires > ProtectedResourceClock.now else { throw ShellsmithResourceError.denied }
-        activateRisk(index: index, token: token, group: group, keyID: keyID, granted: true)
+        guard ShellsmithRuntime.resourceSignal() != "authorization_revoked" else { throw ShellsmithResourceError.denied }
+        if let capability = response.risk_events_v2 {
+            guard capability.authorization_version >= 0 else { throw ShellsmithResourceError.invalidResponse }
+            let binding = RiskScope(endpoint: index.server_url, token: token, build: index.build_id, group: group,
+                                    keyID: keyID, installation: RiskEvent.hex(keyIDBytes)).binding
+            guard capability.authorization_version >= (riskScopes[binding]?.authorizationVersion ?? -1) else {
+                throw ShellsmithResourceError.invalidResponse
+            }
+        }
+        activateRisk(index: index, token: token, group: group, keyID: keyID, granted: true,
+                     protocolVersion: response.risk_events_v2 == nil ? 1 : 2,
+                     authorizationVersion: response.risk_events_v2?.authorization_version)
         return ResourceLease(key: Data(decrypted.suffix(32)), until: expires, traceId: traceId)
     }
 
     private struct Challenge: Decodable { let action: String; let challenge: String }
-    private struct LeaseResponse: Decodable { let status: String; let wrapped_ikm: String?; let ttl_seconds: Int? }
+    private struct RiskCapability: Decodable { let authorization_version: Int }
+    private struct LeaseResponse: Decodable {
+        let status: String; let wrapped_ikm: String?; let ttl_seconds: Int?
+        let risk_events_v2: RiskCapability?
+    }
 
     private static func der(_ tag: UInt8, _ body: Data) -> Data {
         let count = body.count

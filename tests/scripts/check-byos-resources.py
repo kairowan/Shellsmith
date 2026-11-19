@@ -19,7 +19,8 @@ for filename, mode, play in [('resources.zip', None, False), ('resources-byos.zi
             assert metadata['min_android_api'] == (29 if play else 24), filename
         assert (b'com.google.android.play.core.integrityservice.BIND_INTEGRITY_SERVICE' in dex) == play, filename
         assert b'Lcom/google/android/' not in dex, filename
-        for marker in (b'shellsmith-risk-event-v1', b'/v1/risk-events/challenge', b'/v1/risk-events/report'):
+        for marker in (b'shellsmith-risk-event-v1', b'shellsmith-risk-event-v2', b'risk_events_v2',
+                       b'/v1/risk-events/challenge', b'/v1/risk-events/report'):
             assert (marker in dex) == (mode == 'device_approval'), (filename, marker)
         for abi in ('arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'):
             assert archive.read(f'lib/{abi}/libmocikashield.so').startswith(b'\x7fELF'), filename

@@ -80,6 +80,7 @@ Shellsmith 是 Android 与 iOS 双平台应用加固工具。Android 流程加�
 - 文档中描述路线图功能时直接写功能名称，不使用内部追踪编号。
 
 - [BYOS HTTPS 密钥服务](design/byos-key-server.md)：用户自建服务所需信息、接口与联调要求。
+- [BYOS 风险证据与撤销回执](design/byos-risk-events-v2.md)：详细事件、v1 兼容、签名向量、服务端规则和界面改造。
 - [BYOS 密钥服务端参考实现](design/byos-key-server-reference.md)：Go/PostgreSQL 参考实现、KMS/HSM 后端、部署和运维手册。
 - [证据目录](evidence/README.md)：威胁模型、攻击树、实验矩阵、Chain A/B 报告和发布前证据门禁。
 - [1.10.0-rc 验收与稳定版门槛](process/1.10.0-rc-acceptance.md)：真机矩阵、BYOS、AAB 本地链和稳定版条件。

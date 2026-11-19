@@ -249,14 +249,14 @@ extern "C" fn f3(_env: JNIEnv, _class: JClass) -> jint {
 }
 
 fn environment_signals() -> jint {
-    let mut signals = 0;
-    if anti_debug::check() {
+    let mut signals = anti_debug::evidence_signals() | root_environment::evidence_signals();
+    if signals & (0b111 << 8) != 0 {
         signals |= 1;
     }
-    if root_environment::check() {
+    if signals & (0b1111 << 15) != 0 {
         signals |= 2;
     }
-    if anti_debug::check_suspect() {
+    if signals & (0b1111 << 11) != 0 {
         signals |= 4;
     }
     signals

@@ -104,8 +104,29 @@ final class ByosRiskEvents {
         activate(c, e, t, b, g, k, false);
     }
 
-    static void authorized(Context c, String e, String t, String b, String g, KeyPair k) {
+    static synchronized void authorized(Context c, String e, String t, String b, String g, KeyPair k, JSONObject response) throws Exception {
+        if (!enabled(c) || k == null) return;
+        JSONObject capability = response.optJSONObject("risk_events_v2");
+        if (response.has("risk_events_v2") && !response.isNull("risk_events_v2") && capability == null) throw new SecurityException("K04");
+        long version = capability == null ? -1 : version(capability, "authorization_version");
+        if (RuntimeSecurity.remoteAccessRevoked()) throw new SecurityException("K17");
+        String binding = String.join("\n", e, t, b == null ? "" : b, g == null ? "" : g,
+                hex(hash(k.getPublic().getEncoded())));
+        Session existing = sessions.get(hex(hash(binding.getBytes(StandardCharsets.UTF_8))));
+        if (capability != null && existing != null && version < existing.authorizationVersion) throw new SecurityException("K04");
         activate(c, e, t, b, g, k, true);
+        Session current = sessions.get(hex(hash(binding.getBytes(StandardCharsets.UTF_8))));
+        if (current != null) {
+            current.protocol = capability == null ? 1 : 2;
+            current.authorizationVersion = Math.max(current.authorizationVersion, version);
+            worker.execute(current::save);
+        }
+    }
+
+    private static long version(JSONObject object, String key) throws Exception {
+        Object value = object.opt(key);
+        if (!(value instanceof Integer || value instanceof Long) || ((Number) value).longValue() < 0) throw new SecurityException("K04");
+        return ((Number) value).longValue();
     }
 
     private static synchronized void activate(Context c, String endpoint, String token, String build,
@@ -134,15 +155,15 @@ final class ByosRiskEvents {
                 if (prefs.getAll().size() >= 64) { diagnostic("R_QUEUE_FULL"); return; }
                 if (!prefs.edit().putString(id, state.toString()).commit()) { diagnostic("R_STORAGE"); return; }
             }
-            Session session = new Session(endpoint, token, build, group, installation, key, prefs, id, state);
+            Session session = new Session(c, endpoint, token, build, group, installation, key, prefs, id, state);
             sessions.put(id, session);
             if (worker == null) {
                 worker = Executors.newSingleThreadScheduledExecutor(task -> {
                     Thread thread = new Thread(task, "shellsmith-risk"); thread.setDaemon(true); return thread;
                 });
-                RuntimeSecurity.subscribeRisk(code -> {
+                RuntimeSecurity.subscribeRisk(detection -> {
                     synchronized (ByosRiskEvents.class) {
-                        if (worker != null) worker.execute(() -> detected(code));
+                        if (worker != null) worker.execute(() -> detected(detection));
                     }
                 });
                 // 进程存活期间复查；不注册常驻服务、不唤醒已退出应用。
@@ -154,11 +175,11 @@ final class ByosRiskEvents {
         } catch (Exception ignored) { diagnostic("R_STATE"); }
     }
 
-    private static void detected(String code) {
-        if (!code.matches("[A-Za-z][A-Za-z0-9_]{0,63}")) return;
+    private static void detected(RuntimeSecurity.Detection detection) {
+        if (!detection.code.matches("[A-Za-z][A-Za-z0-9_]{0,63}")) return;
         java.util.List<Session> active;
         synchronized (ByosRiskEvents.class) { active = new java.util.ArrayList<>(sessions.values()); }
-        for (Session session : active) session.enqueue(code);
+        for (Session session : active) session.enqueue(detection);
     }
 
     static byte[] hash(byte[] value) throws Exception { return MessageDigest.getInstance("SHA-256").digest(value); }
@@ -168,11 +189,15 @@ final class ByosRiskEvents {
         return result.toString();
     }
     static byte[] eventDigest(String endpoint, JSONObject event) throws Exception {
-        return hash(String.join("\n", "shellsmith-risk-event-v1", endpoint, "1", event.getString("platform"),
+        int protocol = event.getInt("protocol");
+        if ((protocol != 1 && protocol != 2) || (protocol == 1 && event.has("evidence"))) throw new SecurityException("K04");
+        String canonical = String.join("\n", protocol == 1 ? "shellsmith-risk-event-v1" : "shellsmith-risk-event-v2", endpoint, Integer.toString(protocol), event.getString("platform"),
                 event.getString("token_id"), event.getString("build_id"), event.getString("resource_group"),
                 event.getString("installation_id"), event.getString("event_id"),
                 Long.toString(event.getLong("detected_at")), event.getString("detection_code"),
-                event.getString("detector_version")).getBytes(StandardCharsets.UTF_8));
+                event.getString("detector_version"));
+        if (protocol == 2) canonical += "\n" + hex(ByosRiskEvidence.digest(event.getJSONObject("evidence")));
+        return hash(canonical.getBytes(StandardCharsets.UTF_8));
     }
     static byte[] challengeDigest(byte[] event, long timestamp, String requestId) throws Exception {
         return hash(String.join("\n", "shellsmith-risk-challenge-v1", hex(event),
@@ -186,6 +211,7 @@ final class ByosRiskEvents {
     private static void diagnostic(String code) { Log.w("RuntimeSecurity", code); }
 
     private static final class Session {
+        final Context context;
         final String endpoint, token, build, group, installation, id;
         final KeyPair key;
         final SharedPreferences prefs;
@@ -194,28 +220,40 @@ final class ByosRiskEvents {
         long next;
         int failures;
         boolean scheduled;
-        Session(String e, String t, String b, String g, String i, KeyPair k, SharedPreferences p, String id,
+        volatile int protocol;
+        volatile long authorizationVersion;
+        Session(Context c, String e, String t, String b, String g, String i, KeyPair k, SharedPreferences p, String id,
                 JSONObject state) throws Exception {
+            context = c.getApplicationContext() == null ? c : c.getApplicationContext();
             endpoint = e; token = t; build = b == null ? "" : b; group = g == null ? "" : g;
             installation = i; key = k; prefs = p; this.id = id; this.state = state;
             queue = state.getJSONArray("queue");
+            protocol = state.optInt("protocol", 1);
+            authorizationVersion = state.optLong("authorization_version", -1);
+            if (protocol != 1 && protocol != 2) throw new SecurityException("K04");
             if (queue.length() > 16) throw new SecurityException();
         }
-        boolean save() { boolean saved = prefs.edit().putString(id, state.toString()).commit();
+        boolean save() {
+            try { state.put("protocol", protocol).put("authorization_version", authorizationVersion); }
+            catch (Exception error) { diagnostic("R_STORAGE"); return false; }
+            boolean saved = prefs.edit().putString(id, state.toString()).commit();
             if (!saved) diagnostic("R_STORAGE"); return saved; }
-        void enqueue(String code) {
+        void enqueue(RuntimeSecurity.Detection detection) {
             try {
                 long now = System.currentTimeMillis() / 1000;
                 for (int n = 0; n < queue.length(); n++) {
                     JSONObject event = queue.getJSONObject(n).getJSONObject("event");
-                    if (code.equals(event.getString("detection_code"))) return;
+                    if (detection.code.equals(event.getString("detection_code"))
+                            && (protocol == 1 || detection.signal.equals(event.optJSONObject("evidence") == null ? "" : event.getJSONObject("evidence").optString("signal")))) return;
                 }
                 if (queue.length() >= 16) { diagnostic("R_QUEUE_FULL"); return; }
                 byte[] eventId = new byte[16]; random.nextBytes(eventId);
-                JSONObject event = new JSONObject().put("protocol", 1).put("platform", "android")
+                int wireProtocol = protocol;
+                JSONObject event = new JSONObject().put("protocol", wireProtocol).put("platform", "android")
                         .put("token_id", token).put("build_id", build).put("resource_group", group)
-                        .put("installation_id", installation).put("event_id", hex(eventId)).put("detected_at", now)
-                        .put("detection_code", code).put("detector_version", "1");
+                        .put("installation_id", installation).put("event_id", hex(eventId)).put("detected_at", wireProtocol == 1 ? now : detection.at)
+                        .put("detection_code", detection.code).put("detector_version", wireProtocol == 1 ? "1" : "2");
+                if (wireProtocol == 2) event.put("evidence", ByosRiskEvidence.capture(context, detection, !group.isEmpty()));
                 queue.put(new JSONObject().put("event", event));
                 if (!save()) schedule(60);
                 else if (!scheduled) flush();
@@ -266,7 +304,30 @@ final class ByosRiskEvents {
                         || !("record".equals(receipt.optString("action")) || "revoke".equals(receipt.optString("action")))
                         || !(receipt.opt("authorization_version") instanceof Integer || receipt.opt("authorization_version") instanceof Long)
                         || receipt.getLong("authorization_version") < 0) throw new SecurityException("K04");
+                long revokeVersion = -1;
+                if (event.getInt("protocol") == 2) {
+                    long currentVersion = version(receipt, "current_authorization_version");
+                    String status = receipt.getString("current_status");
+                    if (currentVersion < version(receipt, "authorization_version")
+                            || !("approved".equals(status) || "revoked".equals(status))) throw new SecurityException("K04");
+                    synchronized (ByosRiskEvents.class) {
+                        if (sessions.get(id) == this && currentVersion >= authorizationVersion) {
+                            authorizationVersion = currentVersion;
+                            if ("revoked".equals(status)) revokeVersion = currentVersion;
+                        }
+                    }
+                }
                 queue.remove(position); save(); failures = 0; next = now + 10; schedule(10);
+                boolean revoked = false;
+                synchronized (ByosRiskEvents.class) {
+                    if (sessions.get(id) == this && revokeVersion >= 0 && revokeVersion >= authorizationVersion) {
+                        RuntimeSecurity.revokeRemoteAccess(); revoked = true;
+                    }
+                }
+                if (revoked) {
+                    MocikaProtectedResources.revokeRemoteAccess();
+                    diagnostic("R_REVOKED");
+                }
             } catch (Exception error) {
                 String code = ByosKeyClient.failure(error).getMessage();
                 try {

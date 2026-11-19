@@ -81,6 +81,10 @@ public final class MocikaProtectedResources {
         String resourceGroup = null;
         String phase = "index";
         try {
+            if (RuntimeSecurity.remoteAccessRevoked()) {
+                phase = "authorization";
+                throw new SecurityException("K17");
+            }
             JSONObject index = readIndex(context);
             JSONObject resource = index.getJSONObject("resources").getJSONObject(id);
             String group = resource.getString("group");
@@ -149,13 +153,14 @@ public final class MocikaProtectedResources {
             if (error instanceof InterruptedException) Thread.currentThread().interrupt();
             SecurityException failure = ByosKeyClient.failure(error);
             String code = failure.getMessage();
-            String outcome = "K03_403".equals(code) ? "denied"
+            String outcome = "K17".equals(code) ? "revoked" : "K03_403".equals(code) ? "denied"
                     : "K03_429".equals(code) ? "rate_limited"
                     : code.matches("K03_5[0-9]{2}") ? "server_unavailable"
                     : code.matches("K1[02345]") && "authorization".equals(phase) ? "transport_error"
                     : "unavailable";
             report(observer, phase, resourceGroup, readId, authorizationId, outcome);
-            if ("K03_403".equals(failure.getMessage())) event.accept("authorization_denied");
+            if ("K17".equals(code)) event.accept("authorization_revoked");
+            else if ("K03_403".equals(failure.getMessage())) event.accept("authorization_denied");
             else event.accept("resource_unavailable");
             throw new IOException("业务资源暂不可用", failure);
         }
@@ -209,6 +214,13 @@ public final class MocikaProtectedResources {
         }
     }
 
+    static void revokeRemoteAccess() {
+        for (Group state : GROUPS.values()) synchronized (state) {
+            if (state.lease != null) Arrays.fill(state.lease.key, (byte) 0);
+            state.lease = null;
+        }
+    }
+
     private static final class Group {
         Lease lease;
     }
@@ -225,7 +237,7 @@ public final class MocikaProtectedResources {
         }
 
         boolean active() {
-            return SystemClock.elapsedRealtime() < until;
+            return !RuntimeSecurity.remoteAccessRevoked() && SystemClock.elapsedRealtime() < until;
         }
     }
 }

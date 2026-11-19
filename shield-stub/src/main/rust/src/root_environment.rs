@@ -24,8 +24,20 @@ const SU_PATHS: &[&str] = &[
 
 const INJECTION_SIGNATURES: &[&str] = &["magisk", "zygisk", "kernelsu", "apatch"];
 
-pub fn check() -> bool {
-    has_executable_su() || has_privileged_uid() || has_root_adb() || has_root_injection_trace()
+/// 只返回命中类型，不返回整机进程、完整映射或文件内容。
+pub fn evidence_signals() -> i32 {
+    let mut result = 0;
+    for (matched, bit) in [
+        (has_executable_su(), 15),
+        (has_privileged_uid(), 16),
+        (has_root_adb(), 17),
+        (has_root_injection_trace(), 18),
+    ] {
+        if matched {
+            result |= 1 << bit;
+        }
+    }
+    result
 }
 
 #[cfg(target_os = "android")]

@@ -40,7 +40,7 @@ final class ByosKeyClient {
         if (error instanceof java.util.concurrent.ExecutionException) error = error.getCause();
         String code = "K01";
         if (error instanceof SecurityException && error.getMessage() != null
-                && error.getMessage().matches("K(?:0[0-5]|1[0-6]|03_[1-5][0-9]{2})")) code = error.getMessage();
+                && error.getMessage().matches("K(?:0[0-5]|1[0-7]|03_[1-5][0-9]{2})")) code = error.getMessage();
         else if (error instanceof java.util.concurrent.TimeoutException || error instanceof java.net.SocketTimeoutException) code = "K10";
         else if (error instanceof InterruptedException) code = "K11";
         else if (error instanceof java.net.UnknownHostException) code = "K12";
@@ -173,8 +173,10 @@ final class ByosKeyClient {
                     || !ByosProof.MODE.equals(response.getString("auth_mode"))) throw new SecurityException("K04");
             if (build != null && response.getInt("ttl_seconds") != 60) throw new SecurityException("K04");
             byte[] ikm = unwrap(response.getString("wrapped_ikm"), responseKey.getPrivate(), digest);
-            ByosRiskEvents.authorized(ctx, endpoint, token, build, group, device);
-            return ikm;
+            try {
+                ByosRiskEvents.authorized(ctx, endpoint, token, build, group, device, response);
+                return ikm;
+            } catch (Exception | LinkageError error) { Arrays.fill(ikm, (byte) 0); throw error; }
         } catch (org.json.JSONException | IllegalArgumentException error) {
             throw new SecurityException("K04");
         }

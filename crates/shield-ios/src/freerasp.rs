@@ -79,7 +79,28 @@ pub(crate) fn package_manifest(
 
 pub(crate) fn runtime_source(rasp: bool) -> String {
     if !rasp {
-        return "import Foundation\n\npublic enum ShellsmithRuntime {\n    static func resourceSignal() -> String { \"unavailable\" }\n    static func riskSignals() -> [String] { [] }\n}\n".to_string();
+        return r#"import Foundation
+
+public enum ShellsmithRuntime {
+    private static let lock = NSLock()
+    private static var remoteRevoked = false
+    static func resourceSignal() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return remoteRevoked ? "authorization_revoked" : "unavailable"
+    }
+    static func revokeProtectedAccess() {
+        lock.lock()
+        remoteRevoked = true
+        lock.unlock()
+    }
+    static func riskSignals() -> [String] { [] }
+    static func riskEvidence(for code: String) -> [String: String] {
+        ["signal": "ios.runtime_unavailable", "source": "runtime_detector", "observed": "unavailable",
+         "confidence": "unknown", "observation_type": "state_sample"]
+    }
+}
+"#.to_string();
     }
     r#"import Dispatch
 import Foundation
@@ -113,6 +134,7 @@ public enum ShellsmithRuntime {
     private static var blockOnCritical = false
     private static var handler: ((ShellsmithThreatEvent) -> Void)?
     private static var events: [String: ShellsmithThreatEvent] = [:]
+    private static var remoteRevoked = false
 
     public static func start(
         bundleIds: [String],
@@ -174,7 +196,7 @@ public enum ShellsmithRuntime {
     public static func shouldRestrictSensitiveOperations() -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return events.values.contains { event in
+        return remoteRevoked || events.values.contains { event in
             event.severity == .restrict || event.severity == .critical
         }
     }
@@ -182,6 +204,7 @@ public enum ShellsmithRuntime {
     static func resourceSignal() -> String {
         lock.lock()
         defer { lock.unlock() }
+        if remoteRevoked { return "authorization_revoked" }
         guard state == .started else { return "unavailable" }
         if events["debugger"] != nil { return "debugger" }
         if events["signature"] != nil || events["runtimeManipulation"] != nil { return "runtime_integrity" }
@@ -192,6 +215,22 @@ public enum ShellsmithRuntime {
         lock.lock()
         defer { lock.unlock() }
         return events.keys.sorted()
+    }
+
+    static func revokeProtectedAccess() {
+        lock.lock()
+        remoteRevoked = true
+        lock.unlock()
+    }
+
+    static func riskEvidence(for code: String) -> [String: String] {
+        lock.lock()
+        defer { lock.unlock() }
+        // 上游只提供威胁回调，不把未采集的工具名称或命令写成检测事实。
+        var result = ["signal": "ios.freerasp." + code, "source": "freeRASP.SecurityThreatHandler",
+                      "observed": "callback_received", "confidence": "unknown", "observation_type": "sdk_callback"]
+        if let event = events[code] { result["policy_severity"] = event.severity.rawValue }
+        return result
     }
 
     static func receive(_ threat: SecurityThreat) {
@@ -679,6 +718,67 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+
+    #[test]
+    fn 未开启_rasp_的资源工程仍可编译风险与撤销入口() {
+        if !cfg!(target_os = "macos") {
+            return;
+        }
+        let sdk = Command::new("xcrun")
+            .args(["--sdk", "iphoneos", "--show-sdk-path"])
+            .output()
+            .unwrap();
+        if !sdk.status.success() {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let mut files = Vec::new();
+        for (name, source) in [
+            ("Runtime.swift", runtime_source(false)),
+            ("Attest.swift", app_attest_source(true)),
+            ("Risk.swift", include_str!("RiskEvent.swift").to_string()),
+            (
+                "Authorization.swift",
+                include_str!("ProtectedResourceAuthorization.swift").to_string(),
+            ),
+            (
+                "Reader.swift",
+                include_str!("ProtectedResourceReader.swift").to_string(),
+            ),
+            (
+                "Clock.swift",
+                include_str!("ProtectedResourceClock.swift").to_string(),
+            ),
+            (
+                "Bundle.swift",
+                "import Foundation\nextension Bundle { static var module: Bundle { .main } }"
+                    .to_string(),
+            ),
+        ] {
+            let path = temp.path().join(name);
+            fs::write(&path, source).unwrap();
+            files.push(path);
+        }
+        let output = Command::new("xcrun")
+            .args([
+                "swiftc",
+                "-typecheck",
+                "-swift-version",
+                "5",
+                "-target",
+                "arm64-apple-ios14.0",
+                "-sdk",
+            ])
+            .arg(String::from_utf8_lossy(&sdk.stdout).trim())
+            .args(files)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

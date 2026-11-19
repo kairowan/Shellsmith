@@ -1,0 +1,33 @@
+{
+  "public_base_url": "https://keys.example.com/shellsmith",
+  "event": {
+    "protocol": 2,
+    "platform": "android",
+    "token_id": "b_test_vector",
+    "build_id": "",
+    "resource_group": "",
+    "installation_id": "0000000000000000000000000000000000000000000000000000000000000000",
+    "event_id": "11111111111111111111111111111111",
+    "detected_at": 1800000000,
+    "detection_code": "debugger",
+    "detector_version": "2",
+    "evidence": {
+      "schema": "1",
+      "signal": "android.java_debugger_connected",
+      "source": "android.os.Debug.isDebuggerConnected",
+      "observed": "true",
+      "confidence": "high",
+      "observation_type": "state_sample",
+      "app_id": "com.palmzem.voicerecorder",
+      "payload": "dex",
+      "dexb_version": "7"
+    }
+  },
+  "timestamp": 1800000001,
+  "request_id": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "challenge": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "event_digest": "d4b6aa12fa63e5a00a8bee576b9cc54f9b6cfd0732283753a26a9ef8618cc4de",
+  "challenge_digest": "32dc20ef23fa38a711bdc6fd1f83044267c3250504a5c24f1e431799e72d97a9",
+  "report_digest": "946d3114b936a4164c508462b4ae4eacec7b33f45a2ce6ef4ee4df66f09ca451",
+  "evidence_digest": "ed6058ba42f4ad544ddeccb9a842ec5e7da6e931d49d56203d65636492bce97f"
+}

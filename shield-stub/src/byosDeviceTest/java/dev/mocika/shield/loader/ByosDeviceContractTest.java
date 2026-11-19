@@ -77,10 +77,12 @@ public class ByosDeviceContractTest extends Instrumentation {
     private JSONObject riskReport;
     private int riskChallenges, riskReports;
     private boolean loseReceipt = true;
+    private long capabilityVersion = -1, currentVersion = 6;
 
     @Test public void 风险协议固定互操作向量() throws Exception {
+        for (String file : new String[]{"risk-event-vector.json", "risk-event-vector-v2.json"}) {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        try (InputStream input = testContext.getAssets().open("risk-event-vector.json")) {
+        try (InputStream input = testContext.getAssets().open(file)) {
             byte[] buffer = new byte[1024]; int count;
             while ((count = input.read(buffer)) != -1) bytes.write(buffer, 0, count);
         }
@@ -90,6 +92,18 @@ public class ByosDeviceContractTest extends Instrumentation {
         assertEquals(vector.getString("challenge_digest"), ByosRiskEvents.hex(ByosRiskEvents.challengeDigest(
                 digest, vector.getLong("timestamp"), vector.getString("request_id"))));
         assertEquals(vector.getString("report_digest"), ByosRiskEvents.hex(ByosRiskEvents.reportDigest(digest, vector.getString("challenge"))));
+
+        if (file.contains("v2")) {
+            JSONObject event = vector.getJSONObject("event");
+            assertEquals(vector.getString("evidence_digest"), ByosRiskEvents.hex(ByosRiskEvidence.digest(event.getJSONObject("evidence"))));
+            event.getJSONObject("evidence").put("observed", "false");
+            assertFalse(Arrays.equals(digest, ByosRiskEvents.eventDigest(vector.getString("public_base_url"), event)));
+            for (Object invalid : new Object[]{"a\nb", repeat('a', 257), 3, "\ud800"}) {
+                try { ByosRiskEvidence.digest(new JSONObject().put("schema", "1").put("observed", invalid)); fail("非法证据被放行"); }
+                catch (SecurityException expected) { assertEquals("K04", expected.getMessage()); }
+            }
+        }
+        }
     }
 
     @Test public void 设备批准撤销与加密取钥拒绝路径() throws Exception {
@@ -152,7 +166,7 @@ public class ByosDeviceContractTest extends Instrumentation {
         denied(context); // 未批准的新设备不能获取密钥。
         assertRiskInactive();
         approvedKey = encode(device.getPublic().getEncoded());
-        for (String bad : new String[]{"mode", "nonce", "raw", "cipher"}) {
+        for (String bad : new String[]{"mode", "nonce", "raw", "cipher", "capability", "capability_negative"}) {
             failure = bad; denied(context); assertRiskInactive();
         }
         failure = "";
@@ -178,7 +192,11 @@ public class ByosDeviceContractTest extends Instrumentation {
         assertEquals(1, riskChallenges);
         String persisted = context.getSharedPreferences("shellsmith_risk_v1", Context.MODE_PRIVATE).getAll().toString();
         assertFalse(persisted.contains("\"ikm\"")); assertFalse(persisted.contains("api_key"));
+        // 协商升级不重写已经持久化的 v1 事件和原签名。
+        capabilityVersion = 7;
+        assertArrayEquals(ikm, ByosKeyClient.fetch(context, ENDPOINT, "test-token", CERT));
         flushRiskWorker(true);
+        assertEquals(1, riskReport.getJSONObject("event").getInt("protocol"));
         assertEquals(2, riskReports); assertEquals(1, riskChallenges);
         // 清空风险模块内存和队列，单独验证纯资源入口也会在成功解包后启用。
         java.lang.reflect.Field executor = ByosRiskEvents.class.getDeclaredField("worker"); executor.setAccessible(true);
@@ -186,12 +204,43 @@ public class ByosDeviceContractTest extends Instrumentation {
         java.lang.reflect.Field sessions = ByosRiskEvents.class.getDeclaredField("sessions"); sessions.setAccessible(true);
         ((java.util.Map<?, ?>) sessions.get(null)).clear(); RuntimeSecurity.subscribeRisk(null);
         context.getSharedPreferences("shellsmith_risk_v1", Context.MODE_PRIVATE).edit().clear().commit();
+        capabilityVersion = -1;
         try (AutoCloseable startup = ByosProof.startupContext(context)) {
             assertArrayEquals(ikm, ByosKeyClient.fetchOnWorker(context, ENDPOINT, "r_" + repeat('b', 64), CERT,
                     repeat('a', 32), "media", null));
         }
         assertNotNull(executor.get(null));
         assertTrue(context.getSharedPreferences("shellsmith_risk_v1", Context.MODE_PRIVATE).getAll().toString().contains("media"));
+
+        // 新协议仍复用同一不可导出安装密钥，旧协议的 revoke 回执不改变旧行为。
+        assertFalse(RuntimeSecurity.remoteAccessRevoked());
+        ((java.util.concurrent.ExecutorService) executor.get(null)).shutdownNow(); executor.set(null, null);
+        ((java.util.Map<?, ?>) sessions.get(null)).clear(); RuntimeSecurity.subscribeRisk(null);
+        context.getSharedPreferences("shellsmith_risk_v1", Context.MODE_PRIVATE).edit().clear().commit();
+        capabilityVersion = 7;
+        assertArrayEquals(ikm, ByosKeyClient.fetch(context, ENDPOINT, "test-token", CERT));
+        riskReport = null; loseReceipt = true;
+        RuntimeSecurity.observedSignals(1 | (1 << 8));
+        flushRiskWorker(true);
+        assertEquals(2, riskReport.getJSONObject("event").getInt("protocol"));
+        assertEquals("android.native_tracer", riskReport.getJSONObject("event").getJSONObject("evidence").getString("signal"));
+        flushRiskWorker(true);
+        assertFalse(RuntimeSecurity.remoteAccessRevoked()); // 历史版本 6 不得覆盖已成功取钥的版本 7。
+        riskReport = null; currentVersion = 9;
+        RuntimeSecurity.observedSignals(4 | (1 << 11));
+        flushRiskWorker(true);
+        assertTrue(RuntimeSecurity.remoteAccessRevoked());
+        assertFalse(RuntimeSecurity.shouldReject(8, true));
+        assertEquals("authorization_revoked", RuntimeSecurity.observeResources());
+        try { ByosKeyClient.fetch(context, ENDPOINT, "test-token", CERT); fail("撤销进程不得重新取钥解锁"); }
+        catch (SecurityException expected) { assertEquals("K17", expected.getMessage()); }
+        java.util.concurrent.FutureTask<Void> read = new java.util.concurrent.FutureTask<>(() -> {
+            try { MocikaProtectedResources.open(context, "fixture"); fail("撤销后不得打开资源"); }
+            catch (java.io.IOException expected) { assertEquals("K17", expected.getCause().getMessage()); }
+            return null;
+        });
+        new Thread(read).start(); read.get(2, java.util.concurrent.TimeUnit.SECONDS);
+
     }
 
     private static void assertRiskInactive() throws Exception {
@@ -207,6 +256,7 @@ public class ByosDeviceContractTest extends Instrumentation {
                 java.lang.reflect.Field sessions = ByosRiskEvents.class.getDeclaredField("sessions"); sessions.setAccessible(true);
                 for (Object session : ((java.util.Map<?, ?>) sessions.get(null)).values()) {
                     java.lang.reflect.Field next = session.getClass().getDeclaredField("next"); next.setAccessible(true); next.setLong(session, 0);
+                    java.lang.reflect.Field challenge = ByosRiskEvents.class.getDeclaredField("nextChallengeAt"); challenge.setAccessible(true); challenge.setLong(null, 0);
                     java.lang.reflect.Method flush = session.getClass().getDeclaredMethod("flush"); flush.setAccessible(true); flush.invoke(session);
                 }
             } catch (Exception error) { throw new AssertionError(error); }
@@ -230,8 +280,10 @@ public class ByosDeviceContractTest extends Instrumentation {
         riskReports++;
         if (riskReport == null) riskReport = request;
         else assertEquals(riskReport.toString(), request.toString());
-        return new JSONObject().put("status", "accepted").put("event_id", event.getString("event_id"))
+        JSONObject receipt = new JSONObject().put("status", "accepted").put("event_id", event.getString("event_id"))
                 .put("action", "revoke").put("authorization_version", 3);
+        if (event.getInt("protocol") == 2) receipt.put("current_authorization_version", currentVersion).put("current_status", "revoked");
+        return receipt;
     }
 
     private void denied(Context context) {
@@ -305,6 +357,9 @@ public class ByosDeviceContractTest extends Instrumentation {
                 .put("token_id", token).put("nonce", "nonce".equals(failure) ? "wrong" : request.getString("nonce"))
                 .put("wrapped_ikm", encode(ciphertext));
         if (request.has("build_id")) response.put("ttl_seconds", 60);
+        if (capabilityVersion >= 0) response.put("risk_events_v2", new JSONObject().put("authorization_version", capabilityVersion));
+        if ("capability".equals(failure)) response.put("risk_events_v2", "invalid");
+        if ("capability_negative".equals(failure)) response.put("risk_events_v2", new JSONObject().put("authorization_version", -1));
         if ("raw".equals(failure)) response.put("ikm", encode(ikm));
         return response;
     }
