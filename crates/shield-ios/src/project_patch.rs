@@ -126,6 +126,9 @@ pub(crate) fn integrate_runtime(
         .context("无法确定 Xcode project 目录")?;
     let relative_package = relative_path(project_directory, &runtime_root)?;
     patch_pbxproj(&pbxproj, &target.name, &relative_package)?;
+    if uses_rasp {
+        ensure_framework_runpath(&pbxproj, &target.name)?;
+    }
     Ok(())
 }
 
@@ -1466,6 +1469,83 @@ fn patch_pbxproj(path: &Path, target_name: &str, package_path: &Path) -> Result<
     patch_package_product(path, target_name, package_path, "ShellsmithRuntime")
 }
 
+fn ensure_framework_runpath(path: &Path, target: &str) -> Result<()> {
+    let mut content = fs::read_to_string(path)?;
+    let id = find_native_target_id(&content, target).context("缺少主应用 target")?;
+    let (start, end) = object_block(&content, &id).context("主应用 target 结构无效")?;
+    let list = field_value(&content[start..end], "buildConfigurationList")
+        .context("主应用缺少构建配置列表")?;
+    let (start, end) = object_block(&content, list).context("构建配置列表无效")?;
+    let mut configurations = list_ids(&content[start..end], "buildConfigurations");
+    configurations.sort();
+    configurations.dedup();
+    anyhow::ensure!(!configurations.is_empty(), "主应用没有构建配置");
+    let mut edits = Vec::new();
+    for configuration in configurations {
+        let (start, end) = object_block(&content, &configuration).context("构建配置无效")?;
+        let open = content[start..end]
+            .find("buildSettings = {")
+            .map(|offset| start + offset + "buildSettings = ".len())
+            .context("构建配置缺少 buildSettings")?;
+        let close = matching_brace(&content, open).context("buildSettings 结构无效")?;
+        let settings = &content[open + 1..close];
+        let mask = swift_code_mask(settings);
+        let mut cursor = 0;
+        let mut base = false;
+        for (semicolon, byte) in settings.bytes().enumerate() {
+            if byte != b';' || !mask[semicolon] {
+                continue;
+            }
+            let equals = (cursor..semicolon)
+                .find(|&index| mask[index] && settings.as_bytes()[index] == b'=');
+            if let Some(equals) = equals {
+                let prefix = settings[cursor..equals].trim_end();
+                let key = if let Some(quoted) = prefix.strip_suffix('"') {
+                    quoted.rsplit('"').next().unwrap_or("")
+                } else {
+                    prefix.split_whitespace().last().unwrap_or("")
+                };
+                if key == "LD_RUNPATH_SEARCH_PATHS" || key.starts_with("LD_RUNPATH_SEARCH_PATHS[") {
+                    base |= key == "LD_RUNPATH_SEARCH_PATHS";
+                    let first = (equals + 1..semicolon).find(|&index| {
+                        mask[index] && !settings.as_bytes()[index].is_ascii_whitespace()
+                    });
+                    // ponytail: 保留用户原值，最多保留一个已有的重复路径；完整去重需 OpenStep 解析器。
+                    if let Some(array) = first.filter(|&index| settings.as_bytes()[index] == b'(') {
+                        if !settings[array + 1..semicolon]
+                            .trim_start()
+                            .starts_with("\"@executable_path/Frameworks\",")
+                        {
+                            edits.push((
+                                open + 1 + array + 1,
+                                open + 1 + array + 1,
+                                "\"@executable_path/Frameworks\",".into(),
+                            ));
+                        }
+                    } else {
+                        let value = &settings[equals + 1..semicolon];
+                        edits.push((
+                            open + 1 + equals + 1,
+                            open + 1 + semicolon,
+                            format!(" (\"@executable_path/Frameworks\",\n{value}\n, )"),
+                        ));
+                    }
+                }
+            }
+            cursor = semicolon + 1;
+        }
+        if !base {
+            edits.push((open + 1, open + 1, "\nLD_RUNPATH_SEARCH_PATHS = (\"@executable_path/Frameworks\", \"$(inherited)\", );\n".into()));
+        }
+    }
+    edits.sort_by_key(|(start, _, _)| *start);
+    for (start, end, replacement) in edits.into_iter().rev() {
+        content.replace_range(start..end, &replacement);
+    }
+    fs::write(path, content)?;
+    Ok(())
+}
+
 fn patch_package_product(
     path: &Path,
     target_name: &str,
@@ -1610,9 +1690,7 @@ fn list_ids(block: &str, field: &str) -> Vec<String> {
         return Vec::new();
     };
     block[start..end]
-        .lines()
-        .filter_map(|line| line.split_whitespace().next())
-        .map(|value| value.trim_end_matches(','))
+        .split(|character: char| character.is_whitespace() || character == ',')
         .filter(|value| value.len() == 24 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
         .map(str::to_string)
         .collect()
@@ -2116,7 +2194,7 @@ mod tests {
 
     #[test]
     fn patches_local_package_into_application_target() {
-        let temp = tempfile::tempdir().unwrap();
+        let mut temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("Demo.xcodeproj");
         fs::create_dir(&project).unwrap();
         let path = project.join("project.pbxproj");
@@ -2220,7 +2298,7 @@ mod tests {
 /* End PBXTargetDependency section */
 /* Begin XCBuildConfiguration section */
 		000000000000000000000021 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 15.0; SWIFT_VERSION = 5.0; CODE_SIGNING_ALLOWED = NO; }; name = Release; };
-		000000000000000000000023 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; PRODUCT_NAME = Demo; PRODUCT_BUNDLE_IDENTIFIER = com.example.demo; MARKETING_VERSION = 1.0; CURRENT_PROJECT_VERSION = 1; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		000000000000000000000023 = {isa = XCBuildConfiguration; buildSettings = {GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; PRODUCT_NAME = Demo; PRODUCT_BUNDLE_IDENTIFIER = com.example.demo; MARKETING_VERSION = 1.0; CURRENT_PROJECT_VERSION = 1; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
 		000000000000000000000025 = {isa = XCBuildConfiguration; buildSettings = {INFOPLIST_FILE = "Share-Info.plist"; PRODUCT_NAME = Share; PRODUCT_BUNDLE_IDENTIFIER = com.example.demo.share; SKIP_INSTALL = YES; APPLICATION_EXTENSION_API_ONLY = YES; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
 /* End XCBuildConfiguration section */
 /* Begin XCConfigurationList section */
@@ -2249,6 +2327,51 @@ mod tests {
         assert!(content[project_section.0..project_section.1].contains("packageReferences = ("));
         let frameworks_section = section_range(&content, "PBXFrameworksBuildPhase").unwrap();
         assert!(!content[frameworks_section.0..frameworks_section.1].contains("packageReferences"));
+        let runpaths = temp.path().join("runpaths.pbxproj");
+        for setting in [
+            "",
+            "LD_RUNPATH_SEARCH_PATHS = \"$(inherited) @loader_path/Custom\";",
+            "LD_RUNPATH_SEARCH_PATHS = (\"$(inherited)\", \"@loader_path/Custom\", );",
+            "\"LD_RUNPATH_SEARCH_PATHS[sdk=iphoneos*]\" = \"@loader_path/Custom\";",
+            "LD_RUNPATH_SEARCH_PATHS = /* 保留说明 */ (\"@loader_path/Custom\", );",
+            "LD_RUNPATH_SEARCH_PATHS = \"@loader_path/Custom\" // 保留说明\n;",
+        ] {
+            let mut fixture = content.replace(
+                "GENERATE_INFOPLIST_FILE = YES;",
+                &format!("{setting} GENERATE_INFOPLIST_FILE = YES;"),
+            );
+            fixture = fixture.replace(
+                "buildConfigurations = (000000000000000000000023, );",
+                "buildConfigurations = (000000000000000000000026, 000000000000000000000023, );",
+            );
+            insert_section_entry(&mut fixture, "XCBuildConfiguration", "000000000000000000000026 = {isa = XCBuildConfiguration; buildSettings = {}; name = Debug; };\n").unwrap();
+            fs::write(&runpaths, fixture).unwrap();
+            ensure_framework_runpath(&runpaths, "Demo").unwrap();
+            let first = fs::read_to_string(&runpaths).unwrap();
+            ensure_framework_runpath(&runpaths, "Demo").unwrap();
+            assert_eq!(fs::read_to_string(&runpaths).unwrap(), first);
+            for id in ["000000000000000000000023", "000000000000000000000026"] {
+                let (start, end) = object_block(&first, id).unwrap();
+                assert!(first[start..end].contains("@executable_path/Frameworks"));
+            }
+            if !setting.is_empty() {
+                assert!(first.contains("@loader_path/Custom"));
+            }
+            let (start, end) = object_block(&first, "000000000000000000000025").unwrap();
+            assert!(!first[start..end].contains("LD_RUNPATH_SEARCH_PATHS"));
+            if cfg!(target_os = "macos") {
+                let result = std::process::Command::new("plutil")
+                    .arg("-lint")
+                    .arg(&runpaths)
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stdout)
+                );
+            }
+        }
         let shared = temp.path().join("shared.pbxproj");
         fs::copy(&path, &shared).unwrap();
         for _ in 0..2 {
@@ -2290,9 +2413,42 @@ mod tests {
         if std::env::var_os("SHELLSMITH_TEST_XCODE_ARCHIVE").is_none() {
             return;
         }
+        // 保留显式启用的归档夹具，便于在 Xcode 打开工程、检查日志和复测。
+        temp.disable_cleanup(true);
+        println!("Xcode 归档夹具：{}", temp.path().display());
         fs::write(
             temp.path().join("main.m"),
-            "#import <UIKit/UIKit.h>\n@interface AppDelegate : UIResponder <UIApplicationDelegate>\n@property(strong, nonatomic) UIWindow *window;\n@end\n@implementation AppDelegate\n- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options { return YES; }\n@end\nint main(int argc, char **argv) { @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class])); } }\n",
+            r#"#import <UIKit/UIKit.h>
+@interface SceneDelegate : UIResponder <UIWindowSceneDelegate>
+@property(strong, nonatomic) UIWindow *window;
+@end
+@interface AppDelegate : UIResponder <UIApplicationDelegate>
+@end
+@implementation AppDelegate
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options { return YES; }
+- (UISceneConfiguration *)application:(UIApplication *)application configurationForConnectingSceneSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
+    UISceneConfiguration *configuration = [[UISceneConfiguration alloc] initWithName:@"Default" sessionRole:session.role];
+    configuration.delegateClass = [SceneDelegate class];
+    return configuration;
+}
+@end
+@implementation SceneDelegate
+- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
+    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+    UIViewController *controller = [UIViewController new];
+    controller.view.backgroundColor = UIColor.systemBackgroundColor;
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectInset(self.window.bounds, 24, 80)];
+    label.numberOfLines = 0;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.text = @"Shellsmith iOS Runtime Ready";
+    [controller.view addSubview:label];
+    self.window.rootViewController = controller;
+    [self.window makeKeyAndVisible];
+    NSLog(@"SHELLSMITH_IOS_RUNTIME_READY");
+}
+@end
+int main(int argc, char **argv) { @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass([AppDelegate class])); } }
+"#,
         )
         .unwrap();
         fs::write(
@@ -2305,6 +2461,9 @@ mod tests {
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+<key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+<key>CFBundleDisplayName</key><string>$(PRODUCT_NAME)</string>
+<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
 <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 <key>CFBundlePackageType</key><string>XPC!</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -2337,7 +2496,14 @@ mod tests {
         )
         .unwrap();
         let config = ShellsmithIosConfig {
-            protected_resources: None,
+            protected_resources: Some(IosResourceConfig {
+                manifest: PathBuf::from("resources.json"),
+                source_root: PathBuf::from("resources"),
+                byos_endpoint: "https://keys.example.invalid".into(),
+                environment: crate::IosAttestEnvironment::Development,
+                app_id_prefix: None,
+                app_group: None,
+            }),
             project: IosProjectConfig {
                 path: project.clone(),
                 scheme: "Demo".into(),
@@ -2363,6 +2529,17 @@ mod tests {
             build_library_for_distribution: false,
         };
         integrate_runtime(temp.path(), &project, &target, &config, None).unwrap();
+        // 只构建公开测试索引，不注册真实 BYOS 产物、不请求服务或写入授权标记。
+        let resources = temp
+            .path()
+            .join(".shellsmith/ShellsmithRuntime/Sources/ShellsmithRuntime/shellsmith-resources");
+        fs::create_dir_all(&resources).unwrap();
+        fs::write(resources.join("index.json"), serde_json::to_vec(&serde_json::json!({
+            "version": 1, "key_source": "byos", "risk_protocol": 1,
+            "build_id": "00000000000000000000000000000000", "app_id": "ABCDE12345.com.example.demo",
+            "environment": "development", "server_url": "https://keys.example.invalid",
+            "groups": {}, "resources": {}
+        })).unwrap()).unwrap();
         let cancel = Arc::new(AtomicBool::new(false));
         let import = std::env::var_os("SHELLSMITH_TEST_FREERASP_ZIP").map(PathBuf::from);
         let sdk =
@@ -2380,6 +2557,14 @@ mod tests {
                 .unwrap();
             let app = archive.join("Products/Applications/Demo.app");
             assert!(app.join("Demo").is_file());
+            let load_commands = std::process::Command::new("otool")
+                .arg("-l")
+                .arg(app.join("Demo"))
+                .output()
+                .unwrap();
+            assert!(load_commands.status.success());
+            assert!(String::from_utf8_lossy(&load_commands.stdout)
+                .contains("@executable_path/Frameworks"));
             assert!(app.join("PlugIns/Share.appex/Share").is_file());
             assert!(app
                 .join("Frameworks/TalsecRuntime.framework/TalsecRuntime")

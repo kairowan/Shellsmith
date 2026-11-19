@@ -50,6 +50,10 @@ freeRASP 首次从固定官方提交下载并校验，或由用户导入官方 v
 
 包含 Share Extension 等依赖 target 的工程中，对象 ID 会先出现在 `containerPortal` 等引用字段里。工程接入必须定位实际对象声明，将 `packageReferences` 写入 `PBXProject`，不能写入 Frameworks 构建阶段。启用 Swift Confidential 后，依赖解析只检查本次选中的工程或工作区内的锁文件，缺失或版本不符时在 Archive 前停止。CI 用真实官方 SDK 验证导入、缓存复用和禁止网络条件下的 SwiftPM 解析，再用带分享扩展的纯 OC 样例，通过 `.xcodeproj` 和 `.xcworkspace` 分别执行无签名 Archive；该检查不替代开发者签名和真机运行验证。
 
+接入 freeRASP 时，选中的主应用 target 各构建配置会补入 `@executable_path/Frameworks`，同时保留原有字符串、数组、继承值及 SDK 条件配置。缺少该路径的旧式 OC 工程即使已经嵌入框架且 Archive 成功，启动仍可能因找不到 `TalsecRuntime.framework` 而退出。归档回归同时检查主二进制实际的加载路径，重复接入保持稳定，不修改其他 target 的路径。
+
+本地归档夹具采用 Scene 生命周期，并提供完整分享扩展元数据。2026-11-19 已在 Xcode 27.2 完成含资源与风险模块的工程/工作区归档、iPhone 15（iOS 27.2.1）开发签名与启动、iOS 26.2 模拟器启动及前后台恢复。普通开发签名使用免费的 Personal Team，描述文件有效期为 7 天；App Attest 与 TestFlight 的真实验收仍需具备对应权限的付费开发者团队。具体记录见 [BYOS 风险事件客户端](byos-risk-events.md)。
+
 ### CocoaPods 工程与构建失败排查
 
 使用 CocoaPods 的工程必须选择 `pod install` 生成的顶层 `.xcworkspace`，不能选择 `.xcodeproj` 或其中的 `project.xcworkspace`。标准同级目录布局会预检 `Pods/Pods.xcodeproj/project.pbxproj`、`Podfile.lock` 和 `Pods/Manifest.lock`，缺失或锁文件不一致时提前阻断。请先在源码目录执行 `pod install`（使用 Gemfile 的工程执行 `bundle exec pod install`），不要用 `pod update` 随意升级业务依赖。Shellsmith 保留工作副本中的 Pods，不自动执行 CocoaPods 安装脚本，也不改动业务头文件或关闭编译诊断。
