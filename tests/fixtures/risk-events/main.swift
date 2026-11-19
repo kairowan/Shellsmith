@@ -29,6 +29,20 @@ for invalid in [["schema": "1", "bad-key": "value"], ["schema": "1", "observed":
     do { _ = try RiskEvent.evidenceDigest(invalid); preconditionFailure("非法证据被放行") } catch {}
 }
 
+// Foundation 的 Int 解码会接受 7.0；必须先按 JSON 数字类型校验协议版本。
+struct VersionResponse: Decodable { let authorization_version: Int? }
+for raw in ["7.0", "7e0", "true", "\"7\"", "-1", "9223372036854775808"] {
+    for body in ["{\"authorization_version\":" + raw + "}",
+                 "{\"current_authorization_version\":" + raw + "}",
+                 "{\"risk_events_v2\":{\"authorization_version\":" + raw + "}}"] {
+        do { _ = try RiskEvent.decodeResponse(VersionResponse.self, from: Data(body.utf8)); preconditionFailure("非法授权版本被接受：" + raw) } catch {}
+    }
+}
+for raw in ["0", "7", "9223372036854775807"] {
+    let value = try RiskEvent.decodeResponse(VersionResponse.self, from: Data(("{\"authorization_version\":" + raw + "}").utf8))
+    precondition(value.authorization_version == Int(raw))
+}
+
 // 软件证明仅检验客户端调度、封装校验和确认流程，不代表 Apple 或 HTTPS 验收。
 enum ShellsmithRuntime {
     static var revoked = false
@@ -200,6 +214,19 @@ Task {
         await restored.activateRisk(index: expanded, token: token, group: "policy", keyID: freshKey, granted: false)
         let freshObserver = await restored.riskObserver
         precondition(freshObserver == nil)
+        // 旧版仅在范围 JSON 中保存版本；迁移后删除旧范围也不能丢失最大值。
+        let legacyScope = RiskScope(endpoint: "https://legacy.invalid", token: token, build: build, group: "policy",
+            keyID: ShellsmithAppAttest.identity, installation: RiskEvent.hex(Data(repeating: 3, count: 32)),
+            protocolVersion: 2, authorizationVersion: 12)
+        let legacyFile = directory.appendingPathComponent(legacyScope.binding + ".json")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(legacyScope).write(to: legacyFile)
+        let legacyVersion = try await actor.authorizationVersion(legacyScope.endpoint, legacyScope.keyID)
+        precondition(legacyVersion == 12)
+        try await actor.rememberAuthorizationVersion(legacyScope.endpoint, legacyScope.keyID, legacyVersion)
+        try FileManager.default.removeItem(at: legacyFile)
+        let migrated = try await ResourceAuthorization().authorizationVersion(legacyScope.endpoint, legacyScope.keyID)
+        precondition(migrated == 12)
         // 服务端未发布能力时仍为 v1；发布后才产生有签名绑定证据的 v2。
         precondition(!ShellsmithRuntime.revoked)
         RiskHarness.capabilityVersion = 7
@@ -217,16 +244,31 @@ Task {
         // 历史撤销收据版本 6 低于新授权版本 7，不能误封恢复后的进程。
         precondition(!ShellsmithRuntime.revoked)
         RiskHarness.stored = nil
-        RiskHarness.currentVersion = 9
+        RiskHarness.currentVersion = 8
         await upgraded.detectedRisk("runtimeManipulation", at: Int64(Date().timeIntervalSince1970))
+        RiskHarness.capabilityVersion = 9
+        _ = try await upgraded.obtain(index: expanded, token: newToken, group: "media")
         await upgraded.forceRiskRetry()
+        precondition(!ShellsmithRuntime.revoked, "旧组撤销 8 不得覆盖另一组的成功授权 9")
+        let foreign = try await upgraded.authorizationVersion("https://other.invalid", ShellsmithAppAttest.identity)
+        precondition(foreign == -1)
+        // 新 actor 没有旧范围内存，也必须从独立持久版本中拒绝回退。
+        RiskHarness.capabilityVersion = 8
+        let restart = ResourceAuthorization()
+        do { _ = try await restart.obtain(index: expanded, token: newToken, group: "media"); preconditionFailure("重启后接受了旧授权版本") } catch {}
+        RiskHarness.capabilityVersion = 9
+        RiskHarness.stored = nil
+        _ = try await restart.obtain(index: expanded, token: token, group: "policy")
+        RiskHarness.currentVersion = 10
+        await restart.detectedRisk("runtimeManipulation", at: Int64(Date().timeIntervalSince1970))
+        await restart.forceRiskRetry()
         precondition(ShellsmithRuntime.revoked)
-        let remaining = await upgraded.cached
+        let remaining = await restart.cached
         precondition(remaining.isEmpty)
-        do { _ = try await upgraded.obtain(index: index, token: token, group: "policy"); preconditionFailure("撤销后缓存仍可用") } catch {}
+        do { _ = try await restart.obtain(index: index, token: token, group: "policy"); preconditionFailure("撤销后缓存仍可用") } catch {}
         RiskHarness.currentStatus = "approved"
-        do { _ = try await upgraded.obtain(index: index, token: token, group: "policy"); preconditionFailure("旧进程被自动解锁") } catch {}
-        print("Swift v1/v2 向量、证据防篡改、协商、旧收据防误封、撤销缓存、取钥拒绝、OAEP 摘要校验、成功启用、原报告重试与共享计数串行通过")
+        do { _ = try await restart.obtain(index: index, token: token, group: "policy"); preconditionFailure("旧进程被自动解锁") } catch {}
+        print("Swift 跨组恢复 9/旧撤销 8、重启防回退、严格整数、有效撤销 10、v1/v2 向量、证据防篡改、协商、旧收据防误封、撤销缓存、取钥拒绝、OAEP 摘要校验、成功启用、原报告重试与共享计数串行通过")
     } catch { fatalError("回归失败：\(error)") }
 }
 while semaphore.wait(timeout: .now()) == .timedOut { RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01)) }

@@ -109,6 +109,7 @@ public class ByosDeviceContractTest extends Instrumentation {
     @Test public void 设备批准撤销与加密取钥拒绝路径() throws Exception {
         Arrays.fill(ikm, (byte) 42);
         Context context = testContext;
+        context.getSharedPreferences("shellsmith_risk_v1_auth", Context.MODE_PRIVATE).edit().clear().commit();
         context.getSharedPreferences("shellsmith_risk_v1", Context.MODE_PRIVATE).edit().clear().commit();
         assertTrue(ByosRiskEvents.enabled(context));
         java.util.concurrent.ExecutorService threads = java.util.concurrent.Executors.newFixedThreadPool(4);
@@ -127,6 +128,19 @@ public class ByosDeviceContractTest extends Instrumentation {
             }
         } finally { threads.shutdownNow(); }
         assertStartupReleased();
+        String installation = ByosRiskEvents.hex(ByosRiskEvents.hash(device.getPublic().getEncoded()));
+        String legacyEndpoint = "https://legacy.invalid";
+        android.content.SharedPreferences oldPrefs = context.getSharedPreferences("shellsmith_risk_v1", Context.MODE_PRIVATE);
+        oldPrefs.edit().putString("legacy", new JSONObject().put("binding", String.join("\n", legacyEndpoint, "legacy-token", "", "", installation))
+                .put("queue", new org.json.JSONArray()).put("authorization_version", 12).toString()).commit();
+        java.lang.reflect.Method maximum = ByosRiskEvents.class.getDeclaredMethod("authorizationVersion", Context.class, String.class, String.class);
+        maximum.setAccessible(true);
+        assertEquals(12L, maximum.invoke(null, context, legacyEndpoint, installation));
+        java.lang.reflect.Method remember = ByosRiskEvents.class.getDeclaredMethod("rememberAuthorizationVersion", Context.class, String.class, String.class, long.class);
+        remember.setAccessible(true); assertEquals(true, remember.invoke(null, context, legacyEndpoint, installation, 12L));
+        oldPrefs.edit().remove("legacy").commit();
+        assertEquals(12L, maximum.invoke(null, context, legacyEndpoint, installation));
+        assertEquals(-1L, maximum.invoke(null, context, ENDPOINT, installation));
         URL.setURLStreamHandlerFactory(protocol -> "https".equals(protocol) ? new URLStreamHandler() {
             @Override protected URLConnection openConnection(URL url) {
                 assertTrue(url.toString().startsWith(ENDPOINT + "/v1/"));
@@ -226,8 +240,28 @@ public class ByosDeviceContractTest extends Instrumentation {
         assertEquals("android.native_tracer", riskReport.getJSONObject("event").getJSONObject("evidence").getString("signal"));
         flushRiskWorker(true);
         assertFalse(RuntimeSecurity.remoteAccessRevoked()); // 历史版本 6 不得覆盖已成功取钥的版本 7。
-        riskReport = null; currentVersion = 9;
+        riskReport = null; currentVersion = 8; loseReceipt = true;
         RuntimeSecurity.observedSignals(4 | (1 << 11));
+        flushRiskWorker(false);
+        capabilityVersion = 9;
+        try (AutoCloseable startup = ByosProof.startupContext(context)) {
+            assertArrayEquals(ikm, ByosKeyClient.fetchOnWorker(context, ENDPOINT, "r_" + repeat('b', 64), CERT,
+                    repeat('a', 32), "media", null));
+        }
+        flushRiskWorker(true);
+        assertFalse(RuntimeSecurity.remoteAccessRevoked());
+        // 清除范围内存和旧队列文件，独立持久版本仍应拒绝回退授权。
+        ((java.util.concurrent.ExecutorService) executor.get(null)).shutdownNow(); executor.set(null, null);
+        ((java.util.Map<?, ?>) sessions.get(null)).clear(); RuntimeSecurity.subscribeRisk(null);
+        context.getSharedPreferences("shellsmith_risk_v1", Context.MODE_PRIVATE).edit().clear().commit();
+        capabilityVersion = 8;
+        try { ByosKeyClient.fetch(context, ENDPOINT, "test-token", CERT); fail("重启后接受旧授权 8"); }
+        catch (SecurityException expected) { assertEquals("K04", expected.getMessage()); }
+        assertRiskInactive();
+        capabilityVersion = 9;
+        assertArrayEquals(ikm, ByosKeyClient.fetch(context, ENDPOINT, "test-token", CERT));
+        riskReport = null; currentVersion = 10;
+        RuntimeSecurity.observedSignals(1 | (1 << 8));
         flushRiskWorker(true);
         assertTrue(RuntimeSecurity.remoteAccessRevoked());
         assertFalse(RuntimeSecurity.shouldReject(8, true));

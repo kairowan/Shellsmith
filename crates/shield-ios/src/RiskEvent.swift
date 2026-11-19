@@ -63,6 +63,26 @@ struct RiskEvent: Codable, Sendable {
     static func reportDigest(_ digest: Data, challenge: String) -> Data {
         hash(["shellsmith-risk-report-v1", hex(digest), challenge].joined(separator: "\n"))
     }
+    static func decodeResponse<Response: Decodable>(_ type: Response.Type, from data: Data) throws -> Response {
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ShellsmithResourceError.invalidResponse
+        }
+        func validateVersion(_ value: Any?) throws {
+            guard let number = value as? NSNumber,
+                  ["s", "i", "l", "q", "S", "I", "L", "Q"].contains(String(cString: number.objCType)),
+                  let version = Int(number.stringValue), version >= 0 else {
+                throw ShellsmithResourceError.invalidResponse
+            }
+        }
+        for field in ["authorization_version", "current_authorization_version"] {
+            if let value = object[field], !(value is NSNull) { try validateVersion(value) }
+        }
+        if let value = object["risk_events_v2"], !(value is NSNull) {
+            guard let capability = value as? [String: Any] else { throw ShellsmithResourceError.invalidResponse }
+            try validateVersion(capability["authorization_version"])
+        }
+        return try JSONDecoder().decode(type, from: data)
+    }
     static func hash(_ value: String) -> Data { Data(SHA256.hash(data: Data(value.utf8))) }
     static func hex(_ value: Data) -> String { value.map { String(format: "%02x", $0) }.joined() }
 }

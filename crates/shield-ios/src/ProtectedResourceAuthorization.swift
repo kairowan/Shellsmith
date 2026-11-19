@@ -185,18 +185,66 @@ private actor ResourceAuthorization {
             .appendingPathComponent("shellsmith-risk-v1", isDirectory: true)
     }
 
+    private static func authorizationFile(_ endpoint: String, _ keyID: String) -> URL {
+        riskDirectory.appendingPathComponent("authorization-" + RiskEvent.hex(RiskEvent.hash(endpoint + "\n" + keyID)) + ".version")
+    }
+
+    private func authorizationVersion(_ endpoint: String, _ keyID: String) throws -> Int {
+        var latest = riskScopes.values.filter { $0.endpoint == endpoint && $0.keyID == keyID }
+            .compactMap(\.authorizationVersion).max() ?? -1
+        let file = Self.authorizationFile(endpoint, keyID)
+        if FileManager.default.fileExists(atPath: file.path) {
+            let bytes = try Data(contentsOf: file)
+            guard bytes.count <= 19, let text = String(data: bytes, encoding: .utf8),
+                  text.utf8.allSatisfy({ (48...57).contains($0) }), let version = Int(text), version >= 0 else {
+                throw ShellsmithResourceError.invalidResponse
+            }
+            latest = max(latest, version)
+        }
+        // ponytail: 最多扫描 64 个旧范围以迁移已有版本；不改写任何事件正文或 assertion。
+        let files = (try? FileManager.default.contentsOfDirectory(at: Self.riskDirectory, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "json" {
+            if let bytes = try? Data(contentsOf: file), bytes.count <= 128 * 1024,
+               let saved = try? JSONDecoder().decode(RiskScope.self, from: bytes),
+               saved.endpoint == endpoint, saved.keyID == keyID {
+                latest = max(latest, saved.authorizationVersion ?? -1)
+            }
+        }
+        return latest
+    }
+
+    private func rememberAuthorizationVersion(_ endpoint: String, _ keyID: String, _ version: Int) throws {
+        guard version >= 0 else { return }
+        let latest = max(version, try authorizationVersion(endpoint, keyID))
+        for binding in Array(riskScopes.keys) where riskScopes[binding]?.endpoint == endpoint && riskScopes[binding]?.keyID == keyID {
+            riskScopes[binding]?.authorizationVersion = latest
+        }
+        let file = Self.authorizationFile(endpoint, keyID)
+        try FileManager.default.createDirectory(at: Self.riskDirectory, withIntermediateDirectories: true)
+        var directory = Self.riskDirectory
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try directory.setResourceValues(values)
+        try Data(String(latest).utf8).write(to: file, options: .atomic)
+    }
+
     private func activateRisk(index: ResourceIndex, token: String, group: String, keyID: String, granted: Bool,
                               protocolVersion: Int = 1, authorizationVersion: Int? = nil) {
         guard index.key_source == "byos", index.risk_protocol == 1,
               let identity = Data(base64Encoded: keyID), identity.count == 32 else { return }
         var scope = RiskScope(endpoint: index.server_url, token: token, build: index.build_id,
                               group: group, keyID: keyID, installation: RiskEvent.hex(identity))
+        let sharedVersion: Int
+        do {
+            sharedVersion = try self.authorizationVersion(index.server_url, keyID)
+            try rememberAuthorizationVersion(index.server_url, keyID, sharedVersion)
+            scope.authorizationVersion = sharedVersion >= 0 ? sharedVersion : nil
+        } catch { NSLog("R_STORAGE"); return }
         let allowed = Set(index.groups.map { pair in
             RiskScope(endpoint: index.server_url, token: pair.value, build: index.build_id, group: pair.key,
                       keyID: keyID, installation: scope.installation).binding + ".json"
         })
         if let files = try? FileManager.default.contentsOfDirectory(at: Self.riskDirectory, includingPropertiesForKeys: nil) {
-            for file in files where !allowed.contains(file.lastPathComponent) { try? FileManager.default.removeItem(at: file) }
+            for file in files where !allowed.contains(file.lastPathComponent) && file.pathExtension != "version" { try? FileManager.default.removeItem(at: file) }
         }
         let obsolete = Set(riskScopes.values.filter { $0.installation != scope.installation }.map(\.keyID))
         for oldKey in obsolete { invalidateRisk(oldKey) }
@@ -216,6 +264,7 @@ private actor ResourceAuthorization {
            let saved = try? JSONDecoder().decode(RiskScope.self, from: bytes),
            saved.binding == binding, saved.keyID == keyID, saved.queue.count <= 16 {
             scope = saved
+            scope.authorizationVersion = max(saved.authorizationVersion ?? -1, sharedVersion)
         } else if !granted { return }
         if granted {
             scope.protocolVersion = protocolVersion
@@ -240,6 +289,7 @@ private actor ResourceAuthorization {
 
     private func invalidateRisk(_ keyID: String) {
         for (binding, scope) in riskScopes where scope.keyID == keyID {
+            try? FileManager.default.removeItem(at: Self.authorizationFile(scope.endpoint, keyID))
             riskScopes[binding] = nil
             try? FileManager.default.removeItem(at: Self.riskDirectory.appendingPathComponent(binding + ".json"))
         }
@@ -347,7 +397,6 @@ private actor ResourceAuthorization {
                       ["record", "revoke"].contains(receipt.action), receipt.authorization_version >= 0 else {
                     throw ShellsmithResourceError.invalidResponse
                 }
-                var revoke = false
                 if item.event.protocol == 2 {
                     guard let currentVersion = receipt.current_authorization_version,
                           currentVersion >= receipt.authorization_version,
@@ -355,19 +404,18 @@ private actor ResourceAuthorization {
                         throw ShellsmithResourceError.invalidResponse
                     }
                     if let active = riskScopes[binding], active.keyID == scope.keyID,
-                       currentVersion >= (active.authorizationVersion ?? -1) {
-                        riskScopes[binding]?.authorizationVersion = currentVersion
-                        revoke = currentStatus == "revoked"
+                       currentVersion >= (try authorizationVersion(scope.endpoint, scope.keyID)) {
+                        if currentStatus == "revoked" {
+                            cached.removeAll()
+                            ShellsmithRuntime.revokeProtectedAccess()
+                            NSLog("R_REVOKED")
+                        }
+                        try rememberAuthorizationVersion(scope.endpoint, scope.keyID, currentVersion)
                     }
                 }
                 riskScopes[binding]?.queue.removeAll { $0.event.event_id == id }
                 riskScopes[binding]?.failures = 0
                 riskScopes[binding]?.next = now + 10
-                if revoke {
-                    cached.removeAll()
-                    ShellsmithRuntime.revokeProtectedAccess()
-                    NSLog("R_REVOKED")
-                }
             } catch {
                 if let invalid = error as? DCError, invalid.code == .invalidKey {
                     invalidateRisk(scope.keyID); NSLog("R_KEY_RESET"); continue
@@ -417,7 +465,7 @@ private actor ResourceAuthorization {
                 continuation.resume(returning: data)
             }.resume()
         }
-        return try JSONDecoder().decode(R.self, from: data)
+        return try RiskEvent.decodeResponse(R.self, from: data)
     }
 
     func obtain(index: ResourceIndex, token: String, group: String) async throws -> (ResourceLease, String) {
@@ -507,13 +555,12 @@ private actor ResourceAuthorization {
         let expires = started + Double(ttl)
         guard expires > ProtectedResourceClock.now else { throw ShellsmithResourceError.denied }
         guard ShellsmithRuntime.resourceSignal() != "authorization_revoked" else { throw ShellsmithResourceError.denied }
-        if let capability = response.risk_events_v2 {
+        if index.key_source == "byos", index.risk_protocol == 1, let capability = response.risk_events_v2 {
             guard capability.authorization_version >= 0 else { throw ShellsmithResourceError.invalidResponse }
-            let binding = RiskScope(endpoint: index.server_url, token: token, build: index.build_id, group: group,
-                                    keyID: keyID, installation: RiskEvent.hex(keyIDBytes)).binding
-            guard capability.authorization_version >= (riskScopes[binding]?.authorizationVersion ?? -1) else {
+            guard capability.authorization_version >= (try authorizationVersion(index.server_url, keyID)) else {
                 throw ShellsmithResourceError.invalidResponse
             }
+            try rememberAuthorizationVersion(index.server_url, keyID, capability.authorization_version)
         }
         activateRisk(index: index, token: token, group: group, keyID: keyID, granted: true,
                      protocolVersion: response.risk_events_v2 == nil ? 1 : 2,
@@ -564,7 +611,7 @@ private actor ResourceAuthorization {
                 continuation.resume(returning: data)
             }.resume()
         }
-        return try JSONDecoder().decode(T.self, from: data)
+        return try RiskEvent.decodeResponse(T.self, from: data)
     }
 }
 

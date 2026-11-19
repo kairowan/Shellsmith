@@ -6,7 +6,7 @@ import android.content.Context;
 final class ByosRiskEvents {
     static void initialize(Context context) {
         java.io.File[] files = new java.io.File(context.getApplicationInfo().dataDir, "shared_prefs")
-                .listFiles((directory, name) -> name.matches("shellsmith_risk_v1(?:_[0-9a-f]{16})?\\.xml"));
+                .listFiles((directory, name) -> name.matches("shellsmith_risk_v1(?:_[0-9a-f]{16})?(?:_auth)?\\.xml"));
         if (files != null) for (java.io.File file : files) context.getSharedPreferences(
                 file.getName().substring(0, file.getName().length() - 4), Context.MODE_PRIVATE).edit().clear().apply();
     }

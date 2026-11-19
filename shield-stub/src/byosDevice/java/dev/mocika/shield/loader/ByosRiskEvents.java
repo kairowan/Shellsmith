@@ -27,6 +27,10 @@ final class ByosRiskEvents {
     private static final SecureRandom random = new SecureRandom();
 
     private static SharedPreferences preferences(Context context) throws Exception {
+        return context.getSharedPreferences(preferenceName(context), Context.MODE_PRIVATE);
+    }
+
+    private static String preferenceName(Context context) throws Exception {
         String process;
         if (android.os.Build.VERSION.SDK_INT >= 28) process = android.app.Application.getProcessName();
         else try (java.io.InputStream input = new java.io.FileInputStream("/proc/self/cmdline")) {
@@ -39,7 +43,37 @@ final class ByosRiskEvents {
         // 原生 SharedPreferences 不跨进程合并；按稳定进程名隔离队列，安装身份仍使用同一 Keystore 密钥。
         String name = context.getPackageName().equals(process) ? PREFS
                 : PREFS + "_" + hex(hash(process.getBytes(StandardCharsets.UTF_8))).substring(0, 16);
-        return context.getSharedPreferences(name, Context.MODE_PRIVATE);
+        return name;
+    }
+
+    private static String authorizationId(String endpoint, String installation) throws Exception {
+        return hex(hash((endpoint + "\n" + installation).getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static synchronized long authorizationVersion(Context context, String endpoint, String installation) throws Exception {
+        long latest = context.getSharedPreferences(preferenceName(context) + "_auth", Context.MODE_PRIVATE)
+                .getLong(authorizationId(endpoint, installation), -1);
+        for (Session session : sessions.values()) if (session.endpoint.equals(endpoint) && session.installation.equals(installation))
+            latest = Math.max(latest, session.authorizationVersion);
+        // ponytail: 迁移扫描最多 64 个旧范围；队列仍各自保存，版本不再按 token/资源组隔离。
+        for (Object raw : preferences(context).getAll().values()) {
+            JSONObject saved = new JSONObject(raw.toString());
+            String binding = saved.optString("binding");
+            if (binding.startsWith(endpoint + "\n") && binding.endsWith("\n" + installation))
+                latest = Math.max(latest, saved.optLong("authorization_version", -1));
+        }
+        return latest;
+    }
+
+    private static synchronized boolean rememberAuthorizationVersion(Context context, String endpoint, String installation, long version) throws Exception {
+        if (version < 0) return true;
+        long latest = Math.max(version, authorizationVersion(context, endpoint, installation));
+        for (Session session : sessions.values()) if (session.endpoint.equals(endpoint) && session.installation.equals(installation))
+            session.authorizationVersion = latest;
+        boolean saved = context.getSharedPreferences(preferenceName(context) + "_auth", Context.MODE_PRIVATE)
+                .edit().putLong(authorizationId(endpoint, installation), latest).commit();
+        if (!saved) diagnostic("R_STORAGE");
+        return saved;
     }
 
     static boolean enabled(Context context) {
@@ -74,6 +108,7 @@ final class ByosRiskEvents {
                     key = ByosProof.deviceKey(context, endpoint, Ld.getSignatureSha256(context));
                 }
                 String installation = hex(hash(key.getPublic().getEncoded()));
+                if (!rememberAuthorizationVersion(context, endpoint, installation, authorizationVersion(context, endpoint, installation))) return;
                 java.util.Set<String> allowed = new java.util.HashSet<>();
                 for (int i = 0; i < scopes.length(); i++) {
                     JSONObject scope = scopes.getJSONObject(i);
@@ -95,7 +130,7 @@ final class ByosRiskEvents {
         worker = null;
         sessions.clear();
         java.io.File[] files = new java.io.File(context.getApplicationInfo().dataDir, "shared_prefs")
-                .listFiles((directory, name) -> name.matches("shellsmith_risk_v1(?:_[0-9a-f]{16})?\\.xml"));
+                .listFiles((directory, name) -> name.matches("shellsmith_risk_v1(?:_[0-9a-f]{16})?(?:_auth)?\\.xml"));
         if (files != null) for (java.io.File file : files) context.getSharedPreferences(
                 file.getName().substring(0, file.getName().length() - 4), Context.MODE_PRIVATE).edit().clear().apply();
     }
@@ -110,10 +145,10 @@ final class ByosRiskEvents {
         if (response.has("risk_events_v2") && !response.isNull("risk_events_v2") && capability == null) throw new SecurityException("K04");
         long version = capability == null ? -1 : version(capability, "authorization_version");
         if (RuntimeSecurity.remoteAccessRevoked()) throw new SecurityException("K17");
-        String binding = String.join("\n", e, t, b == null ? "" : b, g == null ? "" : g,
-                hex(hash(k.getPublic().getEncoded())));
-        Session existing = sessions.get(hex(hash(binding.getBytes(StandardCharsets.UTF_8))));
-        if (capability != null && existing != null && version < existing.authorizationVersion) throw new SecurityException("K04");
+        String installation = hex(hash(k.getPublic().getEncoded()));
+        if (capability != null && version < authorizationVersion(c, e, installation)) throw new SecurityException("K04");
+        if (!rememberAuthorizationVersion(c, e, installation, version)) throw new IllegalStateException("R_STORAGE");
+        String binding = String.join("\n", e, t, b == null ? "" : b, g == null ? "" : g, installation);
         activate(c, e, t, b, g, k, true);
         Session current = sessions.get(hex(hash(binding.getBytes(StandardCharsets.UTF_8))));
         if (current != null) {
@@ -230,6 +265,7 @@ final class ByosRiskEvents {
             queue = state.getJSONArray("queue");
             protocol = state.optInt("protocol", 1);
             authorizationVersion = state.optLong("authorization_version", -1);
+            authorizationVersion = Math.max(authorizationVersion, ByosRiskEvents.authorizationVersion(c, e, i));
             if (protocol != 1 && protocol != 2) throw new SecurityException("K04");
             if (queue.length() > 16) throw new SecurityException();
         }
@@ -304,30 +340,26 @@ final class ByosRiskEvents {
                         || !("record".equals(receipt.optString("action")) || "revoke".equals(receipt.optString("action")))
                         || !(receipt.opt("authorization_version") instanceof Integer || receipt.opt("authorization_version") instanceof Long)
                         || receipt.getLong("authorization_version") < 0) throw new SecurityException("K04");
-                long revokeVersion = -1;
+                boolean revoked = false;
+                boolean versionSaved = true;
                 if (event.getInt("protocol") == 2) {
                     long currentVersion = version(receipt, "current_authorization_version");
                     String status = receipt.getString("current_status");
                     if (currentVersion < version(receipt, "authorization_version")
                             || !("approved".equals(status) || "revoked".equals(status))) throw new SecurityException("K04");
                     synchronized (ByosRiskEvents.class) {
-                        if (sessions.get(id) == this && currentVersion >= authorizationVersion) {
-                            authorizationVersion = currentVersion;
-                            if ("revoked".equals(status)) revokeVersion = currentVersion;
+                        if (sessions.get(id) == this && currentVersion >= ByosRiskEvents.authorizationVersion(context, endpoint, installation)) {
+                            versionSaved = rememberAuthorizationVersion(context, endpoint, installation, currentVersion);
+                            if ("revoked".equals(status)) { RuntimeSecurity.revokeRemoteAccess(); revoked = true; }
                         }
-                    }
-                }
-                queue.remove(position); save(); failures = 0; next = now + 10; schedule(10);
-                boolean revoked = false;
-                synchronized (ByosRiskEvents.class) {
-                    if (sessions.get(id) == this && revokeVersion >= 0 && revokeVersion >= authorizationVersion) {
-                        RuntimeSecurity.revokeRemoteAccess(); revoked = true;
                     }
                 }
                 if (revoked) {
                     MocikaProtectedResources.revokeRemoteAccess();
                     diagnostic("R_REVOKED");
                 }
+                if (!versionSaved) throw new IllegalStateException("R_STORAGE");
+                queue.remove(position); save(); failures = 0; next = now + 10; schedule(10);
             } catch (Exception error) {
                 String code = ByosKeyClient.failure(error).getMessage();
                 try {
