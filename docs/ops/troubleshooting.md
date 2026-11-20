@@ -18,6 +18,12 @@ keytool -help
 
 如果加固或签名页提示缺少 `keytool`，通常说明当前 PATH 指向的是不完整运行时，或系统里安装了多个 Java 版本。
 
+## 中文证书 Alias 与 Java 编码
+
+核心与 GUI 共用 `keytool_command()`，显式指定 Java 默认字符集、标准输出和标准错误流为 UTF-8，并严格解码 Alias；无效 UTF-8 会失败，不猜测系统代码页或替换损坏字符。PKCS12 可能把 Alias 规范成小写，识别时应使用 keystore 实际返回值并忽略大小写比较。
+
+已有乱码 Alias 须从原 keystore 重新识别或导入，不重建密钥、不改写原证书。真实 JDK、GBK 模拟、JKS/PKCS12 和 APK 签名指纹回归命令见[证书管理回归](../process/test-checklist.md#证书管理)。macOS 的编码模拟不代表 Windows 原生验证通过。
+
 ## APK 签名检查
 
 输入 APK 必须已经签名。可使用仓库内置的 `apksigner.jar` 检查：

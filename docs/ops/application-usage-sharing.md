@@ -1,6 +1,6 @@
 # 应用使用情况分享运维
 
-> 2026-09-18：经维护者授权，远端增量迁移、Worker 部署及新入口启用已完成，线上自建样本验收通过。客户端目标为 `1.4.0-beta.6`，发布进度见[任务清单](../superpowers/plans/2026-09-18-beta6-release.md)。现有 Beta.5 不包含此能力。
+> 2026-09-18：经维护者授权，远端增量迁移、Worker 部署及新入口启用已完成，线上自建样本验收通过。客户端从 `1.4.0-beta.6` 起包含此能力，验证范围见[回归记录](../process/application-sharing-regression.md)。Beta.5 不包含此能力。
 
 设计与字段边界见[应用使用情况分享](../design/application-usage-sharing.md)。这不是匿名使用统计，也不是错误报告。
 

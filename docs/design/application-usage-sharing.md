@@ -1,6 +1,6 @@
 # 应用加固与签名使用情况分享
 
-> 2026-09-18：本地实现与代码评审已完成，维护者确认按 `1.4.0-beta.6` 发布并升级远端服务。执行状态见[发布任务](../superpowers/plans/2026-09-18-beta6-release.md)与[运维记录](../ops/application-usage-sharing.md)，不修改已发布的 Beta.5。
+> 此能力从 `1.4.0-beta.6` 引入，远端迁移与上线已完成。部署、查询和回滚步骤见[运维记录](../ops/application-usage-sharing.md)。
 
 ## 目标与准确性
 
@@ -130,6 +130,6 @@
 
 目标版本已确认为 `1.4.0-beta.6`，不因为这一项升级次版本，不移动已发布标签。线上观察不是设计或开发前置条件。整个阶段完成本地测试、完整 macOS .app 与代码审查后统一提交 PR；按已授权发布任务完成远端迁移、启用和三平台发布。桌面人工交互与跨平台原生运行的未验项必须如实保留，不以构建通过替代。
 
-实施任务见[应用分享实施计划](../superpowers/plans/2026-09-18-application-usage-sharing.md)。
+已验证范围与仍需执行的界面、平台回归见[应用分享回归记录](../process/application-sharing-regression.md)。
 
 上线顺序、查询口径与删除边界见[应用分享运维](../ops/application-usage-sharing.md)，开发测试不代替远端部署验收。

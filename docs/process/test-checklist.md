@@ -93,7 +93,7 @@ cargo test -p mocika-shield 中文证书真实 -- --ignored --nocapture
 
 按需为该命令设置 `PATH="指定JDK/bin:$PATH"` 选择 Java 8/17；再以进程级 `JAVA_TOOL_OPTIONS='-Dfile.encoding=GBK -Dsun.stdout.encoding=GBK -Dsun.stderr.encoding=GBK -Dstdout.encoding=GBK -Dstderr.encoding=GBK'` 重跑。覆盖 JKS/PKCS12、英文/中文/混合 Alias、中文含空格路径、创建、识别、导入、保存后重新打开数据库、签名与证书指纹一致性。非 UTF-8 模拟不能替代 Windows 原生验证。
 
-已有乱码 Alias 不自动修复或猜测，须使用原 keystore 重新识别/导入，不重建用户密钥。方案与执行证据见[中文 Alias 修复记录](../superpowers/plans/2026-09-16-keytool-chinese-alias.md)。
+已有乱码 Alias 不自动修复或猜测，须使用原 keystore 重新识别/导入，不重建用户密钥。编码约定与排查步骤见[中文证书 Alias 与 Java 编码](../ops/troubleshooting.md#中文证书-alias-与-java-编码)。
 
 - 导入已有 `jks` / `p12` 证书成功
 - 导入证书时错误密码会失败，并显示可理解的错误信息

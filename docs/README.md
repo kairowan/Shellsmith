@@ -33,10 +33,11 @@ Shellsmith 是 Android 与 iOS 双平台应用加固工具。Android 流程加�
 | 查看匿名使用统计方案 | [ops/telemetry.md](ops/telemetry.md) |
 | 查看匿名失败分类与确认发送报告方案 | [design/failure-diagnostics.md](design/failure-diagnostics.md) |
 | 部署失败诊断、按版本查询及回滚 | [ops/failure-diagnostics.md](ops/failure-diagnostics.md) |
-| 按应用记忆选择的加固与签名使用情况分享（Beta.6 起） | [design/application-usage-sharing.md](design/application-usage-sharing.md)、[实施计划](superpowers/plans/2026-09-18-application-usage-sharing.md)、[运维步骤](ops/application-usage-sharing.md) |
+| 按应用记忆选择的加固与签名使用情况分享 | [design/application-usage-sharing.md](design/application-usage-sharing.md)、[运维步骤](ops/application-usage-sharing.md) |
 | 理解加固实现 | [design/internals.md](design/internals.md)、[design/architecture.md](design/architecture.md) |
 | 规划关键方法虚拟化、覆盖核验与运行时保护升级 | [design/android-code-protection-upgrade.md](design/android-code-protection-upgrade.md) |
-| 接入和维护 iOS 加固 | [design/ios-hardening.md](design/ios-hardening.md)、[实施计划](superpowers/plans/2026-09-24-ios-hardening-integration.md) |
+| 接入和维护 iOS 加固 | [design/ios-hardening.md](design/ios-hardening.md) |
+| 接入 Android/iOS 业务资源授权 | [当前协议](design/protected-resource-protocol.md)、[实施计划与兼容门禁](design/android-ios-resource-protection-plan.md) |
 | 了解 Native 库打包、`extractNativeLibs` 与 16 KB 兼容设计 | [design/native-library-packaging.md](design/native-library-packaging.md) |
 | 实现或部署 BYOS 密钥服务端 | [design/byos-key-server.md](design/byos-key-server.md)、[design/byos-key-server-reference.md](design/byos-key-server-reference.md)、[design/byos-key-model.md](design/byos-key-model.md) |
 | 接入源码级 LLVM Native VMP | [../native-vmp/README.md](../native-vmp/README.md) |
@@ -53,8 +54,7 @@ Shellsmith 是 Android 与 iOS 双平台应用加固工具。Android 流程加�
 | 了解 Android 4.4 工控兼容方案 | [design/android-4.4-compatibility.md](design/android-4.4-compatibility.md) |
 | 查看 AAB 加固可行性结论与后续规划 | [design/aab-feasibility.md](design/aab-feasibility.md) |
 | 维护 GUI | [design/gui.md](design/gui.md) |
-| 排查中文证书 Alias 与 Java 输出编码 | [中文 Alias 修复计划与回归记录](superpowers/plans/2026-09-16-keytool-chinese-alias.md) |
-| 规划目录重构 | [design/refactor-plan.md](design/refactor-plan.md) |
+| 排查中文证书 Alias 与 Java 输出编码 | [本地排障](ops/troubleshooting.md#中文证书-alias-与-java-编码)、[证书回归](process/test-checklist.md#证书管理) |
 | 发布新版本 | [process/release.md](process/release.md) |
 | 管理分支与 PR | [process/release.md](process/release.md#main-分支保护规则) |
 | 发布前回归 | [process/test-checklist.md](process/test-checklist.md) |
@@ -83,4 +83,3 @@ Shellsmith 是 Android 与 iOS 双平台应用加固工具。Android 流程加�
 - [BYOS 风险证据与撤销回执](design/byos-risk-events-v2.md)：详细事件、v1 兼容、签名向量、服务端规则和界面改造。
 - [BYOS 密钥服务端参考实现](design/byos-key-server-reference.md)：Go/PostgreSQL 参考实现、KMS/HSM 后端、部署和运维手册。
 - [证据目录](evidence/README.md)：威胁模型、攻击树、实验矩阵、Chain A/B 报告和发布前证据门禁。
-- [1.10.0-rc 验收与稳定版门槛](process/1.10.0-rc-acceptance.md)：真机矩阵、BYOS、AAB 本地链和稳定版条件。
